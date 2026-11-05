@@ -10,6 +10,7 @@ import { buildLoginUrl, verifyCallback } from "../src/auth/steam-openid.js";
 import { resolveSteamId, xmlTag } from "../src/auth/steam-profile.js";
 import { SecretBox } from "../src/crypto.js";
 import { can } from "../src/auth/permissions.js";
+import { parseSystemctlShow, parseSystemdTimestamp } from "../src/host/system-host.js";
 
 const GAMEINFO = `"GameInfo"
 {
@@ -249,5 +250,22 @@ describe("Steam profile input", () => {
     expect(xmlTag(xml, "steamID")).toBe("Player <One>");
     expect(xmlTag(xml, "steamID64")).toBe("76561198000000002");
     expect(xmlTag(xml, "missing")).toBeNull();
+  });
+});
+
+describe("systemctl show parsing", () => {
+  it("reads a running service with systemd's default timestamp format", () => {
+    const st = parseSystemctlShow("ActiveState=active\nMainPID=2690\nActiveEnterTimestamp=Thu 2026-11-05 21:30:20 CET\n");
+    expect(st.state).toBe("active");
+    expect(st.pid).toBe(2690);
+    expect(st.since).toBe(new Date("2026-11-05T21:30:20").toISOString());
+  });
+
+  it("handles stopped services, unix timestamps and junk without throwing", () => {
+    expect(parseSystemctlShow("ActiveState=inactive\nMainPID=0\nActiveEnterTimestamp=n/a\n")).toEqual({ state: "inactive", pid: null, since: null });
+    expect(parseSystemdTimestamp("@1762374620")).toBe(new Date(1762374620000).toISOString());
+    expect(parseSystemdTimestamp("garbage")).toBeNull();
+    expect(parseSystemctlShow("ActiveState=active\nActiveEnterTimestamp=whenever").since).toBeNull();
+    expect(parseSystemctlShow("").state).toBe("unknown");
   });
 });

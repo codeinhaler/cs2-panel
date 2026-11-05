@@ -53,20 +53,7 @@ export class SystemHost implements Host {
         `cs2@${slug}.service`,
         "--property=ActiveState,MainPID,ActiveEnterTimestamp",
       ]);
-      const props = Object.fromEntries(
-        stdout
-          .trim()
-          .split("\n")
-          .map((l) => {
-            const i = l.indexOf("=");
-            return [l.slice(0, i), l.slice(i + 1)];
-          }),
-      ) as Record<string, string>;
-      const known: ServiceState[] = ["active", "activating", "deactivating", "inactive", "failed"];
-      const state = known.includes(props.ActiveState as ServiceState) ? (props.ActiveState as ServiceState) : "unknown";
-      const pid = Number(props.MainPID) || null;
-      const since = state === "active" && props.ActiveEnterTimestamp ? new Date(props.ActiveEnterTimestamp).toISOString() : null;
-      return { state, pid, since: since && since !== "Invalid Date" ? since : null };
+      return parseSystemctlShow(stdout);
     } catch {
       return { state: "unknown", pid: null, since: null };
     }
@@ -101,4 +88,34 @@ export class SystemHost implements Host {
   cpuCount(): number {
     return availableParallelism();
   }
+}
+
+const KNOWN_STATES: ServiceState[] = ["active", "activating", "deactivating", "inactive", "failed"];
+
+/** Parses `systemctl show --property=ActiveState,MainPID,ActiveEnterTimestamp`. Never throws. */
+export function parseSystemctlShow(stdout: string): ServiceStatus {
+  const props: Record<string, string> = {};
+  for (const line of stdout.split("\n")) {
+    const i = line.indexOf("=");
+    if (i > 0) props[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  }
+  const state = KNOWN_STATES.includes(props.ActiveState as ServiceState) ? (props.ActiveState as ServiceState) : "unknown";
+  const pid = Number(props.MainPID) || null;
+  const since = state === "active" ? parseSystemdTimestamp(props.ActiveEnterTimestamp) : null;
+  return { state, pid, since };
+}
+
+/**
+ * systemd prints timestamps like "Thu 2026-11-05 21:30:20 CET" (local time of
+ * this machine, which the panel shares) or "@1762374620" with --timestamp=unix.
+ * Returns ISO time, or null if it can't be read.
+ */
+export function parseSystemdTimestamp(value: string | undefined): string | null {
+  if (!value || value === "n/a") return null;
+  const unix = /^@(\d+)$/.exec(value);
+  if (unix) return new Date(Number(unix[1]) * 1000).toISOString();
+  const m = /(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})/.exec(value);
+  if (!m) return null;
+  const d = new Date(`${m[1]}T${m[2]}`); // no zone: interpreted as local time
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
