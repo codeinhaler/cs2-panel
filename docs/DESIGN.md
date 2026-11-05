@@ -179,9 +179,15 @@ RestartSec=10
 
 ### Ports
 
-The panel allocates ports automatically: the first free slot from 27015 upward, in steps of 10. The gap leaves room for auxiliary ports a CS2 server may open next to its game port. Before allocating, the panel checks that the port is not used by another server in the database or bound by any process on the host. An Owner can override the port when creating a server.
+Ports are **set manually** when a server is created. The panel validates the chosen port before saving:
 
-Example with the three planned servers:
+- It must be in the range 1024–65535.
+- It must not be used by another server in the database (including a ±5 margin, since a CS2 server may open auxiliary ports next to its game port).
+- It must not be bound by any process on the host.
+
+The form lists the ports already in use, so picking a free one is easy. A port can be changed later while the server is stopped. The conventional layout is 27015, 27025, 27035, …
+
+Suggested layout for the three planned servers:
 
 | Server | Game (UDP) | RCON (TCP, same port) |
 |---|---|---|
@@ -206,7 +212,7 @@ A "New server" wizard (Owner and Admin):
 3. **Map** — start map, or a map group for the preset.
 4. **Max players** — defaulted from the preset.
 5. **GSLT token** — Steam Game Server Login Token. Needed for the server to be listed publicly; one token per server, created at Steam's game server account management page. Can be left empty for a LAN/private server.
-6. **Port** — auto-allocated (Owner can override).
+6. **Port** — entered manually and validated (see Ports above).
 7. **Plugins** — Metamod, CSSharp and the Bridge plugin are preselected. Optional catalog plugins can be added.
 8. **Password** — optional `sv_password` for private servers.
 
@@ -229,7 +235,7 @@ Changing the **game mode preset** of an existing server only changes launch argu
 
 ### Cloning a server
 
-"Duplicate" creates a new server with a copy of another's configs and plugin set, a new slug, new port and new secrets. Handy for running two of the same kind.
+"Duplicate" creates a new server with a copy of another's configs and plugin set, a new slug and new secrets. A new port must be entered. Handy for running two of the same kind.
 
 ### Deleting a server
 
@@ -264,7 +270,7 @@ Community modes like retakes, surf or 1v1 arenas are built on a stock mode plus 
 
 Presets are stored in the database. The built-in ones are seeded at install and can't be deleted, but can be duplicated and edited.
 
-**Workshop maps:** a preset or server can use a Workshop map or collection by ID instead of a stock map. The panel passes the matching launch parameter (`+host_workshop_map` or `+host_workshop_collection`). Exact handling to be verified against the current CS2 build during implementation.
+**Workshop maps (Phase 4):** a preset or server can use a Workshop map or collection by ID instead of a stock map. The panel passes the matching launch parameter (`+host_workshop_map` or `+host_workshop_collection`). Exact handling to be verified against the current CS2 build during implementation.
 
 ---
 
@@ -394,7 +400,9 @@ Every connect and disconnect is recorded, enabling "seen on which servers, when,
 
 ## 11. Panel users and roles
 
-**Login:** Sign in through Steam (OpenID). Only SteamIDs listed in the panel's user table can log in. The first Owner is set during install.
+**Login:** Sign in through Steam (OpenID). Only SteamIDs listed in the panel's user table can log in. There is a single Owner, set during install.
+
+**Adding admins:** the Owner adds admins in the web interface by pasting a SteamID64 or a Steam profile URL and choosing a role. The panel resolves the profile name and avatar for display. The Owner can also change roles, disable accounts (which ends their sessions immediately) and remove admins. All of this is audit-logged.
 
 | Permission | Owner | Admin | Moderator |
 |---|:-:|:-:|:-:|
@@ -410,7 +418,7 @@ Every connect and disconnect is recorded, enabling "seen on which servers, when,
 | Create and edit game mode presets | ✓ | ✓ | |
 | Delete servers | ✓ | | |
 | Manage panel users and roles | ✓ | | |
-| Override ports, edit raw launch args | ✓ | | |
+| Edit raw launch args | ✓ | | |
 
 **Audit log:** every state-changing action records who, what, which server, when, plus before/after details where relevant (e.g. config diffs). It's viewable in the UI and append-only from the panel's point of view.
 
@@ -525,7 +533,7 @@ Downloads the latest (or a specified) panel release, swaps it in, runs database 
 **Phase 1 — Foundation (MVP)**
 - `install.sh`, OverlayFS layout, systemd units, `cs2ctl`.
 - Panel with Steam login, roles and audit log.
-- Create, edit, duplicate and delete servers, with built-in game mode presets and automatic port allocation.
+- Create, edit, duplicate and delete servers, with built-in game mode presets and manual port selection.
 - Server list with status, start/stop/restart.
 - Live console (journald) and RCON command input.
 - CS2 install and update via SteamCMD, with `gameinfo.gi` re-patching.
@@ -543,6 +551,7 @@ Downloads the latest (or a specified) panel release, swaps it in, runs database 
 
 **Phase 4 — Polish**
 - Custom presets, including "save this server as a preset".
+- Workshop maps and collections.
 - Update auto-detection and policies.
 - Global config layer.
 - Scheduled restarts, restart-when-empty.
@@ -560,9 +569,10 @@ Downloads the latest (or a specified) panel release, swaps it in, runs database 
 | 2026-11-05 | No chat logging. |
 | 2026-11-05 | Bans are by SteamID only; no IP bans, and player IPs are not stored. |
 | 2026-11-05 | Panel runs plain HTTP on the LAN. |
-| 2026-11-05 | Team of about 5 admins. |
+| 2026-11-05 | Team of about 5 admins. One Owner; the Owner adds admins in the web interface. |
+| 2026-11-05 | Server ports are set manually; the panel validates them. |
+| 2026-11-05 | Workshop maps are a later nice-to-have (Phase 4). |
 
 ## 18. Open questions
 
-1. **Owners:** who besides you should have the Owner role? (Can be decided at install time.)
-2. **Workshop maps:** will any server need Workshop maps or collections from day one, or can that wait until after Phase 1?
+None at the moment.
