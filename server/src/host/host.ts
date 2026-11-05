@@ -13,7 +13,7 @@ export interface ServiceStatus {
   pid: number | null;
 }
 
-export type Cs2ctlVerb = "start" | "stop" | "restart" | "enable" | "disable" | "mount" | "umount" | "archive";
+export type Cs2ctlVerb = "start" | "stop" | "restart" | "kill" | "enable" | "disable" | "mount" | "umount" | "archive";
 
 export interface LogStream {
   stop(): void;

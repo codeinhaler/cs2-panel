@@ -304,7 +304,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     return { ok: true };
   });
 
-  for (const action of ["start", "stop", "restart"] as const) {
+  for (const action of ["start", "stop", "restart", "kill"] as const) {
     app.post(`/api/servers/:id/${action}`, async (req) => {
       const user = requirePerm(req, "server.control");
       const { id } = idParam.parse(req.params);

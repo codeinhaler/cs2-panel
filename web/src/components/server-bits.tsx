@@ -41,29 +41,56 @@ export function Slots({ server }: { server: Server }) {
   );
 }
 
-export function ControlButtons({ server, onChange, compact = false }: { server: Server; onChange: (s: Server) => void; compact?: boolean }) {
+export function ControlButtons({
+  server,
+  onChange,
+  compact = false,
+  showForceStop = false,
+}: {
+  server: Server;
+  onChange: (s: Server) => void;
+  compact?: boolean;
+  showForceStop?: boolean;
+}) {
   const { can } = useApp();
   const { busy, run } = useAction();
   if (!can("server.control")) return null;
   const running = server.status.state === "active" || server.status.state === "activating";
-  const act = async (action: "start" | "stop" | "restart", _e?: React.MouseEvent) => {
-    const label = { start: "Started", stop: "Stopped", restart: "Restarted" }[action];
+  const act = async (action: "start" | "stop" | "restart" | "kill") => {
+    if (
+      action === "kill" &&
+      !window.confirm(
+        `Force stop ${server.name}? This kills the server process immediately, plus anything else still running from its folder. Players are dropped without warning.`,
+      )
+    ) {
+      return;
+    }
+    const label = { start: "Started", stop: "Stopped", restart: "Restarted", kill: "Force-stopped" }[action];
     const r = await run(() => api.control(server.id, action), `${label} ${server.name}.`);
     if (r) onChange(r.server);
   };
   const cls = compact ? "btn small" : "btn";
+  const force = showForceStop ? (
+    <button className={`${cls} ghost danger`} disabled={busy} onClick={() => act("kill")} title="Kill the server process immediately">
+      Force stop
+    </button>
+  ) : null;
   return running ? (
     <>
-      <button className={cls} disabled={busy} onClick={(e) => act("restart", e)}>
+      <button className={cls} disabled={busy} onClick={() => act("restart")}>
         Restart
       </button>
-      <button className={`${cls} danger`} disabled={busy} onClick={(e) => act("stop", e)}>
+      <button className={`${cls} danger`} disabled={busy} onClick={() => act("stop")}>
         Stop
       </button>
+      {force}
     </>
   ) : (
-    <button className={`${cls} primary`} disabled={busy} onClick={(e) => act("start", e)}>
-      Start
-    </button>
+    <>
+      <button className={`${cls} primary`} disabled={busy} onClick={() => act("start")}>
+        Start
+      </button>
+      {force}
+    </>
   );
 }

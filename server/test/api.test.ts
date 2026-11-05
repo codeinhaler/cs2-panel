@@ -235,6 +235,28 @@ describe("servers", () => {
     expect((await call(c, "PATCH", `/api/servers/${id}`, { port: 27025 })).body.server.port).toBe(27025);
   });
 
+  it("force stops a server, even during an update, and audits it", async () => {
+    const c = await login();
+    const pid = await presetId(c, "casual");
+    const id = (await call(c, "POST", "/api/servers", { name: "Ghost", presetId: pid, port: 27015 })).body.server.id;
+    await call(c, "POST", `/api/servers/${id}/start`, {});
+    app.services.servers["gate"].busy = "a CS2 update";
+    const res = await call(c, "POST", `/api/servers/${id}/kill`, {});
+    expect(res.status).toBe(200);
+    expect(res.body.server.status.state).toBe("inactive");
+    expect(host.calls).toContain("kill ghost");
+    expect((await call(c, "GET", `/api/audit?serverId=${id}`)).body.entries[0].action).toBe("server.kill");
+    app.services.servers["gate"].busy = null;
+  });
+
+  it("moderators can't force stop", async () => {
+    const c = await login();
+    await call(c, "POST", "/api/users", { steam: MOD, role: "moderator" });
+    const pid = await presetId(c, "casual");
+    const id = (await call(c, "POST", "/api/servers", { name: "S", presetId: pid, port: 27015 })).body.server.id;
+    expect((await call(await login(MOD), "POST", `/api/servers/${id}/kill`, {})).status).toBe(403);
+  });
+
   it("only the owner sets raw launch args", async () => {
     const c = await login();
     await call(c, "POST", "/api/users", { steam: ADMIN, role: "admin" });

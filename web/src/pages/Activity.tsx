@@ -33,6 +33,8 @@ function describe(e: AuditEntry): string {
       return "stopped the server";
     case "server.restart":
       return "restarted the server";
+    case "server.kill":
+      return "force-stopped the server";
     case "server.rcon":
       return `ran "${str("command")}"`;
     case "config.save":

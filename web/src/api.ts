@@ -172,7 +172,7 @@ export const api = {
   duplicateServer: (id: number, input: Record<string, unknown>) =>
     request<{ server: Server }>("POST", `/api/servers/${id}/duplicate`, input),
   deleteServer: (id: number, confirm: string) => request<{ ok: true }>("DELETE", `/api/servers/${id}`, { confirm }),
-  control: (id: number, action: "start" | "stop" | "restart") => request<{ server: Server }>("POST", `/api/servers/${id}/${action}`, {}),
+  control: (id: number, action: "start" | "stop" | "restart" | "kill") => request<{ server: Server }>("POST", `/api/servers/${id}/${action}`, {}),
   rcon: (id: number, command: string) => request<{ output: string }>("POST", `/api/servers/${id}/rcon`, { command }),
 
   configs: (id: number) => request<{ files: ConfigFileInfo[] }>("GET", `/api/servers/${id}/configs`),

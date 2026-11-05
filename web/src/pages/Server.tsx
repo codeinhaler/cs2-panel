@@ -38,7 +38,7 @@ export function ServerPage() {
           </p>
         </div>
         <div className="row-actions">
-          <ControlButtons server={s} onChange={setData} />
+          <ControlButtons server={s} onChange={setData} showForceStop />
         </div>
       </div>
 

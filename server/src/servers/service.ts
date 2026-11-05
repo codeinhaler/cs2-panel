@@ -55,7 +55,7 @@ export interface ServerView {
   live: A2sInfo | null;
 }
 
-export type ControlAction = "start" | "stop" | "restart";
+export type ControlAction = "start" | "stop" | "restart" | "kill";
 
 export class ServerService {
   constructor(
@@ -313,17 +313,23 @@ export class ServerService {
   }
 
   async control(id: number, action: ControlAction, actor: Actor): Promise<ServerView> {
-    this.gate.assertFree();
+    // A force stop must work even while something else is in progress.
+    if (action !== "kill") this.gate.assertFree();
     const s = this.require(id);
-    if (action !== "stop" && !(await this.files.baseInstalled())) {
+    const starting = action === "start" || action === "restart";
+    if (starting && !(await this.files.baseInstalled())) {
       throw badRequest("CS2 isn't installed yet. Install it from the Game update page first.");
     }
-    if (action !== "stop") {
+    if (starting) {
       // Make sure the launch files match the current settings before starting.
       await this.writeLaunchFiles(s);
       await this.files.regenerateGameinfo(s.slug);
     }
-    await this.host.cs2ctl(action, s.slug);
+    try {
+      await this.host.cs2ctl(action, s.slug);
+    } catch (e) {
+      throw badRequest((e as Error).message);
+    }
     this.audit.record(actor.id, `server.${action}`, id);
     return this.view(s);
   }

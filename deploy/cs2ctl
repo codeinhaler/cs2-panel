@@ -9,6 +9,7 @@
 #   cs2ctl start|stop|restart <slug>    Control the CS2 server service
 #   cs2ctl enable|disable <slug>        Toggle start on boot
 #   cs2ctl mount|umount <slug>          Mount/unmount the server's overlay
+#   cs2ctl kill <slug>                  Force stop: SIGKILL the service and any stray process of this server
 #   cs2ctl archive <slug>               Stop, unmount and archive a deleted server
 #   cs2ctl steam-update [validate]      Update the shared CS2 install (all overlays must be unmounted)
 
@@ -75,6 +76,22 @@ case "$verb" in
     exec systemctl stop "cs2-mount@$1.service"
     ;;
 
+  kill)
+    validate_slug "${1:-}"
+    slug="$1"
+    # Kill everything in the service's cgroup, then anything else still running
+    # from this server's directory (e.g. a process left outside systemd).
+    systemctl kill --signal=SIGKILL "cs2@$slug.service" 2>/dev/null || true
+    systemctl stop "cs2@$slug.service" 2>/dev/null || true
+    pkill -KILL -f -- "$INSTANCES_DIR/$slug/merged/" || true
+    sleep 1
+    systemctl reset-failed "cs2@$slug.service" 2>/dev/null || true
+    if pgrep -f -- "$INSTANCES_DIR/$slug/merged/" >/dev/null; then
+      die "processes for $slug are still running after SIGKILL"
+    fi
+    echo "force-stopped $slug"
+    ;;
+
   archive)
     validate_slug "${1:-}"
     slug="$1"
@@ -119,6 +136,6 @@ case "$verb" in
     ;;
 
   *)
-    die "unknown verb '${verb}'. Verbs: start stop restart enable disable mount umount archive steam-update"
+    die "unknown verb '${verb}'. Verbs: start stop restart kill enable disable mount umount archive steam-update"
     ;;
 esac

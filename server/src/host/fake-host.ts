@@ -31,6 +31,7 @@ export class FakeHost implements Host {
         this.emit(slug, `${verb === "start" ? "Starting" : "Restarting"} CS2 server ${slug} (simulated)`);
         break;
       case "stop":
+      case "kill":
         this.running.delete(slug);
         this.emit(slug, `Stopped CS2 server ${slug} (simulated)`);
         break;
