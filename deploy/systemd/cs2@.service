@@ -11,6 +11,9 @@ Type=simple
 User=cs2
 Group=cs2
 UMask=0002
+# CS2's libraries (libserver.so needs libv8.so etc.) are split over two
+# folders; the loader must be told about both.
+Environment=LD_LIBRARY_PATH=/srv/cs2/instances/%i/merged/game/bin/linuxsteamrt64:/srv/cs2/instances/%i/merged/game/csgo/bin/linuxsteamrt64
 EnvironmentFile=/etc/cs2-panel/instances/%i.env
 WorkingDirectory=/srv/cs2/instances/%i/merged/game/bin/linuxsteamrt64
 ExecStart=/usr/bin/taskset -c ${CS2_CPU} /srv/cs2/instances/%i/merged/game/bin/linuxsteamrt64/cs2 -dedicated $CS2_ARGS
