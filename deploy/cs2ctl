@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# cs2ctl — the only privileged entry point for cs2-panel.
+#
+# Installed as /usr/local/lib/cs2-panel/cs2ctl (root:root, 0755) and allowed
+# for the cs2panel user via /etc/sudoers.d/cs2-panel. It accepts a fixed set
+# of verbs and validated server slugs, and nothing else.
+#
+# Usage:
+#   cs2ctl start|stop|restart <slug>    Control the CS2 server service
+#   cs2ctl enable|disable <slug>        Toggle start on boot
+#   cs2ctl mount|umount <slug>          Mount/unmount the server's overlay
+#   cs2ctl archive <slug>               Stop, unmount and archive a deleted server
+#   cs2ctl steam-update [validate]      Update the shared CS2 install (all overlays must be unmounted)
+
+set -euo pipefail
+
+CS2_ROOT="/srv/cs2"
+BASE_DIR="$CS2_ROOT/base"
+INSTANCES_DIR="$CS2_ROOT/instances"
+DELETED_DIR="$CS2_ROOT/backups/deleted"
+STEAMCMD="$CS2_ROOT/steamcmd/steamcmd.sh"
+ENV_DIR="/etc/cs2-panel/instances"
+GAME_USER="cs2"
+CS2_APP_ID="730"
+
+die() {
+  echo "cs2ctl: $*" >&2
+  exit 2
+}
+
+[[ $EUID -eq 0 ]] || die "must run as root (via sudo)"
+
+validate_slug() {
+  local slug="${1:-}"
+  [[ "$slug" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]] || die "invalid server slug"
+  [[ -d "$INSTANCES_DIR/$slug" ]] || die "no such server directory: $slug"
+  [[ -f "$ENV_DIR/$slug.env" ]] || die "no launch file for server: $slug"
+}
+
+any_overlay_mounted() {
+  systemctl list-units 'cs2-mount@*.service' --state=active --no-legend --plain | grep -q .
+}
+
+refresh_steam_sdk() {
+  # CS2 loads steamclient.so from ~/.steam/sdk64 of the user running it.
+  local home sdk
+  home="$(getent passwd "$GAME_USER" | cut -d: -f6)"
+  sdk="$home/.steam/sdk64"
+  install -d -o "$GAME_USER" -g "$GAME_USER" "$sdk"
+  ln -sfn "$CS2_ROOT/steamcmd/linux64/steamclient.so" "$sdk/steamclient.so"
+}
+
+verb="${1:-}"
+shift || true
+
+case "$verb" in
+  start | stop | restart)
+    validate_slug "${1:-}"
+    exec systemctl "$verb" "cs2@$1.service"
+    ;;
+
+  enable | disable)
+    validate_slug "${1:-}"
+    exec systemctl "$verb" "cs2@$1.service"
+    ;;
+
+  mount)
+    validate_slug "${1:-}"
+    exec systemctl start "cs2-mount@$1.service"
+    ;;
+
+  umount)
+    validate_slug "${1:-}"
+    # Stopping the mount also stops cs2@<slug> (it Requires= the mount).
+    exec systemctl stop "cs2-mount@$1.service"
+    ;;
+
+  archive)
+    validate_slug "${1:-}"
+    slug="$1"
+    systemctl disable --now "cs2@$slug.service" 2>/dev/null || true
+    systemctl stop "cs2-mount@$slug.service" 2>/dev/null || true
+    if mountpoint -q "$INSTANCES_DIR/$slug/merged"; then
+      die "overlay for $slug is still mounted"
+    fi
+    install -d -o "$GAME_USER" -g "$GAME_USER" -m 2775 "$DELETED_DIR"
+    dest="$DELETED_DIR/$slug-$(date +%Y%m%d-%H%M%S)"
+    if [[ -d "$INSTANCES_DIR/$slug/upper" ]]; then
+      mv "$INSTANCES_DIR/$slug/upper" "$dest"
+      cp "$ENV_DIR/$slug.env" "$dest/.launch.env" 2>/dev/null || true
+    fi
+    # work/ contains root-owned overlay internals, which is why this needs root.
+    rm -rf --one-file-system "${INSTANCES_DIR:?}/$slug"
+    rm -f "$ENV_DIR/$slug.env"
+    echo "archived $slug to $dest"
+    ;;
+
+  steam-update)
+    validate_flag="${1:-}"
+    [[ -z "$validate_flag" || "$validate_flag" == "validate" ]] || die "unknown option: $validate_flag"
+    if any_overlay_mounted; then
+      die "refusing to update while server overlays are mounted; stop and unmount all servers first"
+    fi
+    [[ -x "$STEAMCMD" ]] || die "steamcmd not found at $STEAMCMD"
+    args=(+force_install_dir "$BASE_DIR" +login anonymous +app_update "$CS2_APP_ID")
+    [[ -n "$validate_flag" ]] && args+=(validate)
+    args+=(+quit)
+    # SteamCMD occasionally fails on the first attempt right after updating itself.
+    for attempt in 1 2 3; do
+      echo "== steamcmd attempt $attempt =="
+      if runuser -u "$GAME_USER" -- "$STEAMCMD" "${args[@]}"; then
+        refresh_steam_sdk
+        echo "== update finished =="
+        exit 0
+      fi
+      sleep 5
+    done
+    die "steamcmd failed after 3 attempts"
+    ;;
+
+  *)
+    die "unknown verb '${verb}'. Verbs: start stop restart enable disable mount umount archive steam-update"
+    ;;
+esac

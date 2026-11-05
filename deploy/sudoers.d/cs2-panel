@@ -1,0 +1,4 @@
+# cs2-panel may run its root helper and nothing else. The helper validates
+# every argument itself.
+Defaults:cs2panel !requiretty
+cs2panel ALL=(root) NOPASSWD: /usr/local/lib/cs2-panel/cs2ctl

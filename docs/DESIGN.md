@@ -454,31 +454,33 @@ Setting       key, value          (host-level: update policy, Steam poll interva
 
 | Part | Choice | Why |
 |---|---|---|
-| Backend | ASP.NET Core on .NET 10 | Same language as CSSharp plugins; good for process control on Linux |
-| Real-time | SignalR | Live console, player list and status updates |
-| Database | SQLite via EF Core | No DB server to run; enough for 3 servers and a small team |
+| Backend | Node.js + TypeScript, Fastify | One language for backend and frontend; easy process and file handling on Linux |
+| Real-time | WebSockets | Live console and update logs |
+| Database | SQLite via Node's built-in `node:sqlite` | No DB server and no native modules to compile |
 | Frontend | React + TypeScript + Vite | Large ecosystem, good Monaco integration |
-| Editor | Monaco | Same editor as VS Code |
-| Companion plugin | C# CSSharp plugin | Shares contracts with the backend |
-| Packaging | Self-contained linux-x64 build | No .NET runtime needed on the server |
+| Editor | Monaco | Same editor as VS Code; has a built-in diff view |
+| Companion plugin | C# CSSharp plugin (Phase 3) | Required by CounterStrikeSharp; talks JSON to the panel |
+| Packaging | Release tarball with a bundled Node.js binary | No runtime to install on the server |
+
+(Originally planned as ASP.NET Core. Switched to TypeScript on 2026-11-05 so every change can be compiled and tested in the development environment before it is pushed.)
 
 ### Repository layout
 
 ```
 cs2-panel/
   docs/DESIGN.md
-  src/
-    Cs2Panel.Server/       ASP.NET Core app (API, hubs, managers)
-    Cs2Panel.Contracts/    Shared DTOs for panel ↔ Bridge messages
-    Cs2Panel.Bridge/       CSSharp companion plugin
-    web/                   React frontend (built into the server's wwwroot)
+  server/                  Fastify backend (TypeScript)
+    src/
+    test/
+  web/                     React frontend (built into the release as static files)
+  bridge/                  CSSharp companion plugin (Phase 3)
   deploy/
     install.sh             First-time host setup
     update.sh              Panel self-update
-    systemd/               cs2@.service, cs2-mount@.service, cs2-panel.service
     cs2ctl                 Root helper
+    systemd/               cs2@.service, cs2-mount@.service, cs2-panel.service
     sudoers.d/cs2-panel
-  catalog/plugins.json
+  catalog/plugins.json     (Phase 2)
   .github/workflows/       CI and release builds
 ```
 
@@ -491,9 +493,9 @@ cs2-panel/
 GitHub Actions on every tag `v*`:
 
 1. Build the frontend.
-2. Publish the panel as a self-contained linux-x64 build with the frontend embedded.
-3. Build the Bridge plugin.
-4. Attach `cs2-panel-linux-x64.tar.gz` and `cs2panel-bridge.zip` to the GitHub release.
+2. Bundle the backend into a single JavaScript file.
+3. Add the official Node.js linux-x64 binary.
+4. Attach `cs2-panel-linux-x64.tar.gz` to the GitHub release. (From Phase 3, also `cs2panel-bridge.zip`.)
 
 ### Access from the server
 
@@ -572,6 +574,7 @@ Downloads the latest (or a specified) panel release, swaps it in, runs database 
 | 2026-11-05 | Team of about 5 admins. One Owner; the Owner adds admins in the web interface. |
 | 2026-11-05 | Server ports are set manually; the panel validates them. |
 | 2026-11-05 | Workshop maps are a later nice-to-have (Phase 4). |
+| 2026-11-05 | Backend switched from ASP.NET Core to TypeScript/Node.js so code can be built and tested before pushing. |
 
 ## 18. Open questions
 

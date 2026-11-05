@@ -1,0 +1,14 @@
+# OverlayFS mount for one CS2 server: the shared base install as the lower
+# layer, the server's own files as the upper layer. Managed by cs2-panel.
+[Unit]
+Description=CS2 overlay mount for %i
+ConditionPathIsDirectory=/srv/cs2/instances/%i/upper
+ConditionPathIsDirectory=/srv/cs2/instances/%i/work
+ConditionPathIsDirectory=/srv/cs2/instances/%i/merged
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/mount -t overlay overlay -o lowerdir=/srv/cs2/base,upperdir=/srv/cs2/instances/%i/upper,workdir=/srv/cs2/instances/%i/work,index=off,metacopy=off /srv/cs2/instances/%i/merged
+ExecStop=/usr/bin/umount /srv/cs2/instances/%i/merged
+

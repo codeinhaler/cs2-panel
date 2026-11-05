@@ -1,0 +1,20 @@
+[Unit]
+Description=cs2-panel web interface
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=cs2panel
+Group=cs2panel
+SupplementaryGroups=cs2 systemd-journal
+UMask=0002
+Environment=NODE_ENV=production
+Environment=CS2PANEL_CONFIG=/etc/cs2-panel/panel.json
+WorkingDirectory=/opt/cs2-panel
+ExecStart=/opt/cs2-panel/node/bin/node --disable-warning=ExperimentalWarning /opt/cs2-panel/server.mjs
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

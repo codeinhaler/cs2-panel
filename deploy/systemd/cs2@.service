@@ -1,0 +1,26 @@
+# One CS2 dedicated server. Launch settings come from the env file the panel
+# writes; do not edit that file by hand.
+[Unit]
+Description=CS2 server %i
+Wants=network-online.target
+After=network-online.target cs2-mount@%i.service
+Requires=cs2-mount@%i.service
+
+[Service]
+Type=simple
+User=cs2
+Group=cs2
+UMask=0002
+EnvironmentFile=/etc/cs2-panel/instances/%i.env
+WorkingDirectory=/srv/cs2/instances/%i/merged/game/bin/linuxsteamrt64
+ExecStart=/usr/bin/taskset -c ${CS2_CPU} /srv/cs2/instances/%i/merged/game/bin/linuxsteamrt64/cs2 -dedicated $CS2_ARGS
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+LimitNOFILE=100000
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
