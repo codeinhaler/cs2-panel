@@ -1,0 +1,55 @@
+name: Release
+
+# Push a tag like v0.1.0 to build a release the server can install:
+#   git tag v0.1.0 && git push origin v0.1.0
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      - name: Download Node.js runtime to bundle
+        run: |
+          base=https://nodejs.org/dist/latest-v24.x
+          file=$(curl -fsSL "$base/SHASUMS256.txt" | awk '/linux-x64.tar.xz$/ {print $2}')
+          curl -fsSLO "$base/$file"
+          curl -fsSL "$base/SHASUMS256.txt" | grep " $file\$" | sha256sum -c -
+          mkdir node-runtime
+          tar -xJf "$file" -C node-runtime --strip-components=1
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          out=stage/cs2-panel
+          mkdir -p "$out"
+          cp server/dist/server.mjs "$out/"
+          cp -r web/dist "$out/web"
+          mkdir -p "$out/node/bin"
+          cp node-runtime/bin/node "$out/node/bin/node"
+          cp node-runtime/LICENSE "$out/node/LICENSE"
+          mkdir -p "$out/deploy"
+          cp -r deploy/. "$out/deploy/"
+          chmod +x "$out/deploy/"*.sh "$out/deploy/cs2ctl"
+          echo "${GITHUB_REF_NAME}" > "$out/VERSION"
+          tar -czf cs2-panel-linux-x64.tar.gz -C stage cs2-panel
+          ls -lh cs2-panel-linux-x64.tar.gz
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" cs2-panel-linux-x64.tar.gz --title "$GITHUB_REF_NAME" --generate-notes

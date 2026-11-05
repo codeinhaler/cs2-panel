@@ -36,6 +36,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       cs2Root: path.join(root, "cs2"),
       instanceEnvDir: path.join(root, "env"),
       cs2ctl: "/bin/false",
+      webDir: env.CS2PANEL_WEB_DIR,
       dev: true,
     };
   } else {
