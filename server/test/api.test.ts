@@ -46,6 +46,7 @@ async function setup(opts: { baseInstalled?: boolean } = {}) {
     host,
     fetchFn,
     logLevel: "silent",
+    pluginCheckDelayMs: 0,
     rcon: async (o, cmd) => {
       rconLog.push(`${o.port}:${cmd}`);
       return `ok ${cmd}`;

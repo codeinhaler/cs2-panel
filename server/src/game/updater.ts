@@ -3,7 +3,7 @@ import { conflict } from "../errors.js";
 import type { Host } from "../host/host.js";
 import type { InstanceFiles } from "../servers/instance-files.js";
 import type { OperationGate } from "../servers/service.js";
-import type { ServerStore } from "../servers/store.js";
+import type { ServerRecord, ServerStore } from "../servers/store.js";
 import type { RconExec } from "./rcon.js";
 
 export type JobState = "idle" | "running" | "succeeded" | "failed";
@@ -25,6 +25,9 @@ const MAX_LINES = 5000;
  */
 export class GameUpdater {
   job: UpdateJob = { state: "idle", startedAt: null, finishedAt: null, startedBy: null, lines: [] };
+  /** Called with the servers that were started again; returns lines for the log (plugin health). */
+  afterStart: ((started: ServerRecord[]) => Promise<string[]>) | null = null;
+  pluginCheckDelayMs = 45_000;
 
   constructor(
     private readonly host: Host,
@@ -138,6 +141,16 @@ export class GameUpdater {
         }
       } catch (e) {
         this.log(`  ${s.name}: ERROR ${(e as Error).message}`);
+      }
+    }
+
+    if (this.afterStart && running.length) {
+      this.log(`Checking that plugins loaded (in ${Math.round(this.pluginCheckDelayMs / 1000)} seconds)…`);
+      await this.sleep(this.pluginCheckDelayMs);
+      try {
+        for (const l of await this.afterStart(running)) this.log(l);
+      } catch (e) {
+        this.log(`  plugin check failed: ${(e as Error).message}`);
       }
     }
 

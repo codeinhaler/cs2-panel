@@ -98,6 +98,21 @@ const MIGRATIONS: string[] = [
     value  TEXT NOT NULL
   );
   `,
+  /* 2: plugins installed per server */ `
+  CREATE TABLE plugin_installs (
+    id            INTEGER PRIMARY KEY,
+    server_id     INTEGER NOT NULL REFERENCES servers(id),
+    plugin_id     TEXT NOT NULL,
+    name          TEXT NOT NULL,
+    version       TEXT NOT NULL,
+    asset         TEXT NOT NULL,
+    files         TEXT NOT NULL DEFAULT '[]',
+    installed_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    installed_by  INTEGER REFERENCES users(id),
+    removed_at    TEXT
+  );
+  CREATE INDEX plugin_installs_server ON plugin_installs(server_id, plugin_id, id);
+  `,
 ];
 
 export function openDb(file: string): Db {

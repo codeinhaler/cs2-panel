@@ -8,6 +8,7 @@ export type Permission =
   | "server.control"
   | "config.edit"
   | "plugins.manage"
+  | "plugins.upload"
   | "game.update"
   | "server.manage"
   | "preset.manage"

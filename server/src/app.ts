@@ -23,6 +23,8 @@ import { PresetStore } from "./servers/presets.js";
 import { ServerStore } from "./servers/store.js";
 import { ConfigService } from "./servers/configs.js";
 import { OperationGate, ServerService, type Actor } from "./servers/service.js";
+import { PluginSources } from "./plugins/sources.js";
+import { PluginService } from "./plugins/service.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -37,6 +39,8 @@ export interface AppDeps {
   rcon?: RconExec;
   fetchFn?: typeof fetch;
   logLevel?: string;
+  /** Seconds-long waits are skipped in tests. */
+  pluginCheckDelayMs?: number;
 }
 
 export interface App {
@@ -49,6 +53,7 @@ export interface App {
     configs: ConfigService;
     updater: GameUpdater;
     presets: PresetStore;
+    plugins: PluginService;
   };
 }
 
@@ -70,6 +75,10 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const gate = new OperationGate();
   const servers = new ServerService(serverStore, presets, files, configs, host, audit, gate);
   const updater = new GameUpdater(host, files, serverStore, audit, gate, rcon);
+  const pluginSources = new PluginSources(path.join(config.dataDir, "plugin-cache"), fetchFn);
+  const plugins = new PluginService(db, pluginSources, servers, files, audit, gate, rcon, path.join(config.dataDir, "tmp"), config.mysql);
+  updater.afterStart = (started) => plugins.healthLines(started);
+  if (deps.pluginCheckDelayMs !== undefined) updater.pluginCheckDelayMs = deps.pluginCheckDelayMs;
 
   users.ensureOwner(config.ownerSteamId);
   presets.seed();
@@ -293,7 +302,9 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   app.post("/api/servers/:id/duplicate", async (req) => {
     const user = requirePerm(req, "server.manage");
     const { id } = idParam.parse(req.params);
-    return { server: await servers.duplicate(id, req.body, actorOf(user)) };
+    const server = await servers.duplicate(id, req.body, actorOf(user));
+    plugins.copyInstalls(id, server.id);
+    return { server };
   });
 
   app.delete("/api/servers/:id", async (req) => {
@@ -421,6 +432,63 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     }
   }
 
+  // ------------------------------------------------------------- plugins
+
+  app.get("/api/servers/:id/plugins", async (req) => {
+    requirePerm(req, "view");
+    const { id } = idParam.parse(req.params);
+    const { refresh } = z.object({ refresh: z.coerce.boolean().optional() }).parse(req.query);
+    return { plugins: await plugins.overview(id, refresh), mysqlConfigured: plugins.mysqlConfigured };
+  });
+
+  app.get("/api/plugins/:pluginId/versions", async (req) => {
+    requirePerm(req, "view");
+    const { pluginId } = z.object({ pluginId: z.string() }).parse(req.params);
+    try {
+      return { versions: (await plugins.versions(pluginId)).filter((v) => v.asset).map((v) => ({ version: v.version, publishedAt: v.publishedAt, prerelease: v.prerelease })) };
+    } catch (e) {
+      if (e instanceof HttpError) throw e;
+      throw badRequest((e as Error).message);
+    }
+  });
+
+  app.post("/api/servers/:id/plugins/:pluginId/install", async (req) => {
+    const user = requirePerm(req, "plugins.manage");
+    const { id, pluginId } = z.object({ id: z.coerce.number().int(), pluginId: z.string() }).parse(req.params);
+    const { version } = z.object({ version: z.string().optional() }).parse(req.body ?? {});
+    return plugins.install(id, pluginId, version, user.id);
+  });
+
+  app.post("/api/servers/:id/plugins/:pluginId/rollback", async (req) => {
+    const user = requirePerm(req, "plugins.manage");
+    const { id, pluginId } = z.object({ id: z.coerce.number().int(), pluginId: z.string() }).parse(req.params);
+    return plugins.rollback(id, pluginId, user.id);
+  });
+
+  app.delete("/api/servers/:id/plugins/:pluginId", async (req) => {
+    const user = requirePerm(req, "plugins.manage");
+    const { id, pluginId } = z.object({ id: z.coerce.number().int(), pluginId: z.string() }).parse(req.params);
+    return plugins.uninstall(id, pluginId, user.id);
+  });
+
+  app.addContentTypeParser(["application/zip", "application/gzip", "application/octet-stream"], { parseAs: "buffer", bodyLimit: 200 * 1024 * 1024 }, (_req, body, done) =>
+    done(null, body),
+  );
+  app.post("/api/servers/:id/plugins/upload", { bodyLimit: 200 * 1024 * 1024 }, async (req) => {
+    // Custom plugins run arbitrary code on the server, so only the Owner may upload them.
+    const user = requirePerm(req, "plugins.upload");
+    const { id } = idParam.parse(req.params);
+    const { name } = z.object({ name: z.string().min(1).max(200) }).parse(req.query);
+    if (!Buffer.isBuffer(req.body)) throw badRequest("Send the file itself as the request body.");
+    return plugins.installUpload(id, name, req.body, user.id);
+  });
+
+  app.get("/api/servers/:id/plugins/health", async (req) => {
+    requirePerm(req, "view");
+    const { id } = idParam.parse(req.params);
+    return plugins.health(id);
+  });
+
   // ------------------------------------------------------------- game update
 
   app.get("/api/game", async (req) => {
@@ -459,6 +527,6 @@ export async function buildApp(deps: AppDeps): Promise<App> {
 
   return {
     fastify: app,
-    services: { users, sessions, audit, servers, configs, updater, presets },
+    services: { users, sessions, audit, servers, configs, updater, presets, plugins },
   };
 }

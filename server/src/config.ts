@@ -13,6 +13,16 @@ const ConfigSchema = z.object({
   instanceEnvDir: z.string().default("/etc/cs2-panel/instances"),
   cs2ctl: z.string().default("/usr/local/lib/cs2-panel/cs2ctl"),
   webDir: z.string().optional(),
+  /** Local MariaDB for plugins that share data across servers (CS2-SimpleAdmin). Set by setup-mariadb.sh. */
+  mysql: z
+    .object({
+      host: z.string().default("127.0.0.1"),
+      port: z.number().int().default(3306),
+      user: z.string(),
+      password: z.string(),
+      database: z.string(),
+    })
+    .optional(),
   /** Development mode: fake host control, dev login, no real systemd. */
   dev: z.boolean().default(false),
 });
