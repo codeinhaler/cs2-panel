@@ -2,7 +2,7 @@
 
 Status: **draft for review** · Last updated: 2026-11-05
 
-A self-hosted web panel for running and administering three CS2 community servers on a single Debian 13 machine, used by a team of admins over the local network.
+A self-hosted web panel for creating, running and administering CS2 community servers on a single Debian 13 machine, used by a team of about five admins over the local network. The initial plan is three servers, but servers are created and removed from the panel rather than being fixed.
 
 ---
 
@@ -10,6 +10,7 @@ A self-hosted web panel for running and administering three CS2 community server
 
 **Goals**
 
+- Create and delete servers from the browser, including choosing their game mode.
 - Start, stop, restart and update the CS2 servers from a browser.
 - Edit server and plugin config files in the browser, with history and rollback.
 - Install, update and remove Metamod:Source, CounterStrikeSharp (CSSharp) and CSSharp plugins per server.
@@ -23,6 +24,10 @@ A self-hosted web panel for running and administering three CS2 community server
 - Public internet exposure of the panel. It is LAN-only.
 - Hosting for third parties, billing, or quotas.
 - Plugin frameworks other than Metamod + CSSharp.
+- SourceTV and demo recording.
+- Chat logging.
+- IP bans. Bans are by SteamID only.
+- HTTPS for the panel. It runs plain HTTP on the LAN.
 
 ---
 
@@ -34,15 +39,17 @@ A self-hosted web panel for running and administering three CS2 community server
 | CPU | 4 vCPU |
 | RAM | 16 GB |
 | Disk | 320 GB |
-| Servers | 3 CS2 instances |
-| Panel access | Local network only |
+| Servers | Created from the panel; 3 planned initially |
+| Admins | About 5 |
+| Panel access | Local network only, plain HTTP |
 | Player access | Game ports forwarded from the router |
 
 **Capacity notes**
 
-- A CS2 server's main loop is mostly bound to one core. Each instance is pinned to its own vCPU (0, 1, 2); the panel and OS get vCPU 3.
-- Expect roughly 2–3 GB RAM per instance, which leaves comfortable headroom.
-- The base CS2 install is about 60 GB. Using one shared base instead of three copies saves about 120 GB and turns three updates into one.
+- A CS2 server's main loop is mostly bound to one core. By default, servers are pinned round-robin to vCPU 0–2, and the panel and OS keep vCPU 3. With three servers, each gets its own core.
+- Expect roughly 2–3 GB RAM per instance.
+- The panel shows a capacity warning when more servers are running than there are dedicated cores (more than 3 on this box). It does not block it, since small or idle servers can share a core fine.
+- The base CS2 install is about 60 GB. Every server shares it, so a new server costs only its own configs and plugins (well under 1 GB), and one update covers all servers.
 
 ---
 
@@ -62,9 +69,9 @@ A self-hosted web panel for running and administering three CS2 community server
  │   ├─ RCON client      ──▶ TCP game port of each instance (localhost)     │
  │   └─ Bridge hub       ◀── WebSocket from the companion plugin            │
  │                                                                           │
- │  cs2@srv1.service ─┐                                                      │
- │  cs2@srv2.service ─┼─ CS2 dedicated server (user: cs2)                    │
- │  cs2@srv3.service ─┘    └─ Metamod → CSSharp → Cs2Panel.Bridge plugin     │
+ │  cs2@<slug>.service  (one per server created in the panel)                │
+ │    └─ CS2 dedicated server (user: cs2)                                    │
+ │         └─ Metamod → CSSharp → Cs2Panel.Bridge plugin                     │
  │                                                                           │
  └───────────────────────────────────────────────────────────────────────────┘
         ▲
@@ -90,11 +97,17 @@ Instance directories are owned by `cs2:cs2`, group-writable with the setgid bit,
 **Privileged operations** go through one small root-owned helper script, `/usr/local/lib/cs2-panel/cs2ctl`, allowed via a single sudoers line for `cs2panel`. It accepts only fixed verbs and validated instance names:
 
 ```
-cs2ctl start|stop|restart|status <srvN>
-cs2ctl mount|umount <srvN>
+cs2ctl start|stop|restart|status <slug>
+cs2ctl mount|umount <slug>
+cs2ctl enable|disable <slug>        (boot autostart)
 ```
 
-The panel never gets a general root shell, and it cannot pass arbitrary arguments through.
+Because servers are created dynamically, `cs2ctl` validates a slug by:
+
+1. Matching `^[a-z0-9][a-z0-9-]{0,31}$` (no slashes, dots or spaces).
+2. Requiring that `/srv/cs2/instances/<slug>/` and `/etc/cs2-panel/instances/<slug>.env` both exist.
+
+The panel never gets a general root shell, and it cannot pass arbitrary arguments through. Creating and deleting a server's files needs no root, since `cs2panel` can write in `/srv/cs2/instances/` and `/etc/cs2-panel/instances/` through group `cs2`.
 
 ---
 
@@ -105,16 +118,15 @@ The panel never gets a general root shell, and it cannot pass arbitrary argument
   steamcmd/                     SteamCMD (Valve tarball)
   base/                         Shared CS2 install (app 730). Read-only to instances.
   instances/
-    srv1/
+    <slug>/                     One directory per server, created by the panel
       upper/                    Per-instance files (OverlayFS upperdir)
         game/csgo/cfg/          server.cfg, gamemode configs
         game/csgo/addons/       metamod/, counterstrikesharp/
         game/csgo/gameinfo.gi   Patched copy (regenerated after every update)
       work/                     OverlayFS workdir
       merged/                   OverlayFS mountpoint — the server runs from here
-    srv2/ …
-    srv3/ …
   backups/                      Nightly DB + per-instance upper/ snapshots
+    deleted/                    Archived upper/ of deleted servers
 
 /opt/cs2-panel/                 Panel binaries (from GitHub release)
 /var/lib/cs2-panel/
@@ -132,7 +144,7 @@ Each instance sees the full CS2 install at `merged/`, but anything it writes or 
 
 1. **The base is only changed while every overlay is unmounted.** Changing a lower dir under a live overlay is undefined behaviour.
 2. **Files in `upper/` shadow the base.** If a base file gets copied up and Valve later updates it, the instance keeps the stale copy. To prevent that:
-   - Only allowlisted paths may live in `upper/`: `game/csgo/cfg/**`, `game/csgo/addons/**`, `game/csgo/gameinfo.gi`, logs, demos.
+   - Only allowlisted paths may live in `upper/`: `game/csgo/cfg/**`, `game/csgo/addons/**`, `game/csgo/gameinfo.gi`, logs.
    - After every update, the panel scans `upper/` for anything outside the allowlist that also exists in the base, and reports it (with an option to remove).
    - `gameinfo.gi` is **always deleted from `upper/` and regenerated** from the new base copy after an update, then re-patched for Metamod.
 
@@ -140,7 +152,7 @@ Each instance sees the full CS2 install at `merged/`, but anything it writes or 
 
 ## 6. Process model
 
-One systemd template unit runs all three instances:
+One systemd template unit runs every server:
 
 ```ini
 # /etc/systemd/system/cs2@.service  (sketch)
@@ -160,22 +172,99 @@ Restart=on-failure
 RestartSec=10
 ```
 
-- **Launch arguments** (port, map, game type/mode, max players, GSLT token, RCON password, `-usercon`) are generated by the panel into `/etc/cs2-panel/instances/srvN.env`. They are not hand-edited.
+- **Launch arguments** (port, map, game type/mode, max players, GSLT token, RCON password, `-usercon`) are generated by the panel into `/etc/cs2-panel/instances/<slug>.env`. They are not hand-edited.
 - **Mounts** are handled by a companion unit `cs2-mount@.service` so the overlay is always up before the server starts and down after it stops.
-- **Logs:** stdout goes to journald. The panel streams `journalctl -u cs2@srvN -f` to the browser console view.
+- **Logs:** stdout goes to journald. The panel streams `journalctl -u cs2@<slug> -f` to the browser console view.
 - **Commands** go over RCON from the panel on localhost.
 
 ### Ports
 
-Spaced by 10 to avoid collisions with auxiliary ports:
+The panel allocates ports automatically: the first free slot from 27015 upward, in steps of 10. The gap leaves room for auxiliary ports a CS2 server may open next to its game port. Before allocating, the panel checks that the port is not used by another server in the database or bound by any process on the host. An Owner can override the port when creating a server.
 
-| Instance | Game (UDP) | RCON (TCP, same port) | SourceTV (optional) |
+Example with the three planned servers:
+
+| Server | Game (UDP) | RCON (TCP, same port) |
+|---|---|---|
+| 1st | 27015 | 27015 |
+| 2nd | 27025 | 27025 |
+| 3rd | 27035 | 27035 |
+
+**Router: forward UDP only.** Players need UDP. RCON is TCP on the game port, so not forwarding TCP keeps RCON off the internet. Each server also gets a long random RCON password generated by the panel.
+
+When a new server is created, the panel shows the exact UDP port to forward on the router, since that step can't be automated.
+
+---
+
+## 6a. Server lifecycle and game modes
+
+### Creating a server
+
+A "New server" wizard (Owner and Admin):
+
+1. **Name** — display name and hostname; the slug (e.g. `retakes-1`) is derived from it and can be edited.
+2. **Game mode preset** — see below.
+3. **Map** — start map, or a map group for the preset.
+4. **Max players** — defaulted from the preset.
+5. **GSLT token** — Steam Game Server Login Token. Needed for the server to be listed publicly; one token per server, created at Steam's game server account management page. Can be left empty for a LAN/private server.
+6. **Port** — auto-allocated (Owner can override).
+7. **Plugins** — Metamod, CSSharp and the Bridge plugin are preselected. Optional catalog plugins can be added.
+8. **Password** — optional `sv_password` for private servers.
+
+What the panel then does:
+
+1. Create `/srv/cs2/instances/<slug>/{upper,work,merged}` with the right ownership.
+2. Write the preset's config files into `upper/game/csgo/cfg/`.
+3. Generate secrets (RCON password, Bridge token) and the `<slug>.env` launch file.
+4. Mount the overlay via `cs2ctl`, generate and patch `gameinfo.gi`, install the selected plugins.
+5. Enable autostart and start the server if requested.
+6. Record it in the audit log.
+
+If any step fails, the panel rolls back what it created so no half-made server is left behind.
+
+### Editing a server
+
+Name, map, game mode, max players, password and GSLT token can be changed later. Changes that affect launch arguments rewrite `<slug>.env` and require a restart; the UI says so.
+
+Changing the **game mode preset** of an existing server only changes launch arguments by default. Overwriting its config files with the new preset's files is a separate, explicit option, since admins may have customized them. The config history (section 8) keeps the old versions either way.
+
+### Cloning a server
+
+"Duplicate" creates a new server with a copy of another's configs and plugin set, a new slug, new port and new secrets. Handy for running two of the same kind.
+
+### Deleting a server
+
+Owner only, with a confirm dialog that requires typing the slug.
+
+1. Stop and disable the service, unmount the overlay.
+2. Move `upper/` to `/srv/cs2/backups/deleted/<slug>-<date>/` (kept 30 days), remove `work/` and `merged/`.
+3. Remove `<slug>.env`.
+4. Mark the server as deleted in the database. Config history, sessions and audit entries are kept.
+5. Remind the admin to remove the router port forward.
+
+### Game mode presets
+
+A preset is a named bundle of:
+
+- `game_type` and `game_mode` launch values,
+- a default map or map group and max players,
+- a set of config files (e.g. `gamemode_competitive_server.cfg`, `server.cfg` additions),
+- optionally a list of required catalog plugins.
+
+Built-in presets for the stock modes:
+
+| Preset | game_type | game_mode | Typical max players |
 |---|---|---|---|
-| srv1 | 27015 | 27015 | 27020 |
-| srv2 | 27025 | 27025 | 27030 |
-| srv3 | 27035 | 27035 | 27040 |
+| Casual | 0 | 0 | 20 |
+| Competitive | 0 | 1 | 10 |
+| Wingman | 0 | 2 | 4 |
+| Arms Race | 1 | 0 | 10 |
+| Deathmatch | 1 | 2 | 16 |
 
-**Router: forward UDP only.** Players need UDP. RCON is TCP on the game port, so not forwarding TCP keeps RCON off the internet. Each instance also gets a long random RCON password generated by the panel.
+Community modes like retakes, surf or 1v1 arenas are built on a stock mode plus plugins and configs. These become **custom presets**: Owners and Admins can create one by hand or by "save this server as a preset", which captures its launch values, config files and plugin list.
+
+Presets are stored in the database. The built-in ones are seeded at install and can't be deleted, but can be duplicated and edited.
+
+**Workshop maps:** a preset or server can use a Workshop map or collection by ID instead of a stock map. The panel passes the matching launch parameter (`+host_workshop_map` or `+host_workshop_collection`). Exact handling to be verified against the current CS2 build during implementation.
 
 ---
 
@@ -188,7 +277,7 @@ Triggered manually or automatically when Valve releases a new build.
 **Flow:**
 
 1. Announce in-game on each server (via RCON `say`), with a configurable grace period. Optionally wait until servers are empty.
-2. Stop `cs2@srv1..3`.
+2. Stop all running `cs2@<slug>` services.
 3. Unmount all overlays.
 4. Run `steamcmd +force_install_dir /srv/cs2/base +login anonymous +app_update 730 validate +quit`.
 5. For each instance: delete `upper/.../gameinfo.gi`, copy the new base version, re-apply the Metamod patch (insert `Game csgo/addons/metamod` into `SearchPaths`).
@@ -218,8 +307,8 @@ All paths are resolved and checked to stay inside that allowlist, preventing pat
 
 - Monaco editor in the browser, with syntax highlighting for `.cfg`, `.json` and `.toml`.
 - **Every save is a revision** stored in the database: content, hash, author, timestamp and an optional comment. The UI shows diffs between revisions and can roll back with one click.
-- **Shared configs:** a "global" config layer (e.g. common bans list, chat filters, admin settings) applied to all three servers, with per-server files for overrides.
-- **Templates:** named presets (e.g. "Competitive 5v5", "Retakes", "Deathmatch") that write a set of files onto a server.
+- **Shared configs:** a "global" config layer (e.g. common bans list, chat filters, admin settings) applied to all servers, with per-server files for overrides.
+- **Presets:** game mode presets (section 6a) carry config files too, so applying a preset to a server is the template mechanism.
 - Apply options: "save only", "save + `exec` via RCON", or "save + restart".
 
 ---
@@ -273,11 +362,10 @@ A CSSharp plugin we write and ship with the panel. It opens a WebSocket from eac
 | Event | Payload |
 |---|---|
 | `hello` | instance id, plugin version, map |
-| `player_connect` | SteamID64, name, IP |
+| `player_connect` | SteamID64, name |
 | `player_disconnect` | SteamID64, reason |
 | `snapshot` (every ~10 s) | full player list: SteamID64, name, team, ping, score, connected-since |
 | `map_change` | map name |
-| `chat` (optional) | SteamID64, message, team-only flag |
 
 **Panel → server commands**
 
@@ -290,10 +378,10 @@ A CSSharp plugin we write and ship with the panel. It opens a WebSocket from eac
 
 ### Bans
 
-Bans are **owned by the panel database** and apply to all three servers.
+Bans are **owned by the panel database** and apply to every server.
 
 - On `player_connect`, the plugin checks the ban. It keeps a **local cache of active bans**, refreshed from the panel, so bans are still enforced if the panel is restarting.
-- Ban fields: SteamID64, optional IP, reason, created by, created at, expires at (null = permanent), revoked by/at.
+- Ban fields: SteamID64, reason, created by, created at, expires at (null = permanent), revoked by/at.
 - Unbanning sets the revocation fields rather than deleting, so history is kept.
 - Banning by SteamID works for players who are offline, e.g. from the player history page.
 - **Fallback:** if the Bridge plugin isn't loaded, kick still works via RCON (`kickid`). Ban enforcement depends on the plugin, and the UI shows a clear warning when it isn't connected.
@@ -318,26 +406,31 @@ Every connect and disconnect is recorded, enabling "seen on which servers, when,
 | Install / update plugins from catalog | ✓ | ✓ | |
 | Run CS2 updates, change update policy | ✓ | ✓ | |
 | Upload custom plugins | ✓ | | |
+| Create, edit and duplicate servers | ✓ | ✓ | |
+| Create and edit game mode presets | ✓ | ✓ | |
+| Delete servers | ✓ | | |
 | Manage panel users and roles | ✓ | | |
-| Change ports, GSLT tokens, launch args | ✓ | | |
+| Override ports, edit raw launch args | ✓ | | |
 
 **Audit log:** every state-changing action records who, what, which server, when, plus before/after details where relevant (e.g. config diffs). It's viewable in the UI and append-only from the panel's point of view.
 
-**Sessions:** HTTP-only cookies, idle timeout, logout everywhere. Since the panel runs on the LAN, plain HTTP is acceptable, but HTTPS with a self-signed certificate is available as an option for encrypting login sessions.
+**Sessions:** HTTP-only cookies, idle timeout, logout everywhere. The panel runs plain HTTP on the LAN. That means session cookies travel unencrypted on the local network, which is an accepted trade-off for a trusted LAN. HTTPS can be added later with a reverse proxy without changing the panel.
 
 ---
 
 ## 12. Data model (first cut)
 
 ```
-Server        id, slug (srv1), name, port, tv_port, cpu, map, game_type, game_mode,
-              max_players, gslt_token*, rcon_password*, bridge_token*, extra_args,
-              update_policy
+Server        id, slug, name, preset_id, port, cpu, map, workshop_id?, game_type,
+              game_mode, max_players, sv_password*, gslt_token*, rcon_password*,
+              bridge_token*, extra_args, autostart, created_at, deleted_at?
+Preset        id, name, builtin, game_type, game_mode, default_map, max_players,
+              config_files_json, required_plugins_json
 User          id, steam_id64, display_name, role, created_at, disabled
-Ban           id, steam_id64, ip?, reason, created_by, created_at, expires_at?,
+Ban           id, steam_id64, reason, created_by, created_at, expires_at?,
               revoked_by?, revoked_at?
 Player        steam_id64, last_name, first_seen, last_seen
-PlayerSession id, steam_id64, server_id, name, ip, connected_at, disconnected_at
+PlayerSession id, steam_id64, server_id, name, connected_at, disconnected_at
 ConfigFile    id, server_id (null = global), path
 ConfigRev     id, config_file_id, content, sha256, author_id, created_at, comment
 PluginInstall id, server_id, plugin_id, version, installed_at, installed_by
@@ -421,7 +514,7 @@ Downloads the latest (or a specified) panel release, swaps it in, runs database 
 
 ## 15. Backups
 
-- Nightly: SQLite online backup of `panel.db`, plus a tarball of each instance's `upper/` (excluding demos and logs).
+- Nightly: SQLite online backup of `panel.db`, plus a tarball of each instance's `upper/` (excluding logs).
 - Keep the last 14 days in `/srv/cs2/backups/`.
 - Restore is manual and documented.
 
@@ -432,35 +525,44 @@ Downloads the latest (or a specified) panel release, swaps it in, runs database 
 **Phase 1 — Foundation (MVP)**
 - `install.sh`, OverlayFS layout, systemd units, `cs2ctl`.
 - Panel with Steam login, roles and audit log.
+- Create, edit, duplicate and delete servers, with built-in game mode presets and automatic port allocation.
 - Server list with status, start/stop/restart.
 - Live console (journald) and RCON command input.
 - CS2 install and update via SteamCMD, with `gameinfo.gi` re-patching.
 - Config editor with revisions and rollback.
 
 **Phase 2 — Plugins**
-- Metamod and CSSharp install per server.
+- Metamod and CSSharp install per server (also offered in the create-server wizard).
 - Plugin catalog, pinned versions, update and rollback.
 - Post-update verification.
 
 **Phase 3 — Players**
 - `Cs2Panel.Bridge` plugin.
-- Live player list, kick, central bans, unban.
+- Live player list, kick, central SteamID bans, unban.
 - Player history.
 
 **Phase 4 — Polish**
+- Custom presets, including "save this server as a preset".
 - Update auto-detection and policies.
-- Config templates and global config layer.
+- Global config layer.
 - Scheduled restarts, restart-when-empty.
 - Resource graphs, backups UI.
 - Optional Discord webhooks.
 
 ---
 
-## 17. Open questions
+## 17. Decisions log
 
-1. **Game modes:** what will each of the three servers run (competitive, retakes, deathmatch, surf, …)? This shapes the default templates.
-2. **SourceTV / demos:** record demos on any server?
-3. **Chat logging:** store in-game chat in the panel? Useful for moderation, but it's personal data, so it would need a retention period.
-4. **IP bans:** SteamID bans only, or also IP bans?
-5. **Panel HTTPS:** plain HTTP on the LAN, or a self-signed certificate?
-6. **Number of admins:** roughly how many people, and who besides you should be Owner?
+| Date | Decision |
+|---|---|
+| 2026-11-05 | Servers are created and deleted from the panel, not fixed at three. Game modes are chosen per server via presets. |
+| 2026-11-05 | No SourceTV or demo recording. |
+| 2026-11-05 | No chat logging. |
+| 2026-11-05 | Bans are by SteamID only; no IP bans, and player IPs are not stored. |
+| 2026-11-05 | Panel runs plain HTTP on the LAN. |
+| 2026-11-05 | Team of about 5 admins. |
+
+## 18. Open questions
+
+1. **Owners:** who besides you should have the Owner role? (Can be decided at install time.)
+2. **Workshop maps:** will any server need Workshop maps or collections from day one, or can that wait until after Phase 1?
