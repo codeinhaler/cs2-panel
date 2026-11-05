@@ -25,6 +25,8 @@ export interface Host {
   /** Updates the shared CS2 install. Each output line is passed to onLine. */
   steamUpdate(validate: boolean, onLine: (line: string) => void): Promise<void>;
   serviceStatus(slug: string): Promise<ServiceStatus>;
+  /** True if the server's overlay is mounted on its merged/ dir. */
+  isMounted(slug: string): Promise<boolean>;
   /** True if anything on the host is listening on this UDP or TCP port. */
   isPortInUse(port: number): Promise<boolean>;
   /** Follows the server's journal. Starts with the last `backlog` lines. */

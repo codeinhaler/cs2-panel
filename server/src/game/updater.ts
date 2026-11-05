@@ -118,6 +118,8 @@ export class GameUpdater {
       try {
         const gi = await this.files.regenerateGameinfo(s.slug);
         this.log(`  ${s.name}: gameinfo.gi ${gi === "patched" ? "regenerated with Metamod" : "uses the stock file"}`);
+        const deduped = await this.files.dedupeStockConfigs(s.slug);
+        if (deduped.length) this.log(`  ${s.name}: removed ${deduped.length} config copies identical to stock`);
         const stale = await this.files.hygieneScan(s.slug);
         for (const f of stale) this.log(`  ${s.name}: WARNING ${f} overrides a CS2 file and may be out of date`);
       } catch (e) {

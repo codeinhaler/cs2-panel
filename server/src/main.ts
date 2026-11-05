@@ -16,7 +16,7 @@ if (config.dev) {
   if (process.env.CS2PANEL_DEV_FAKE_BASE === "1") installFakeBase(config.cs2Root);
   host = new FakeHost(config.cs2Root, config.instanceEnvDir);
 } else {
-  host = new SystemHost(config.cs2ctl);
+  host = new SystemHost(config.cs2ctl, config.cs2Root);
 }
 
 const { fastify } = await buildApp({ config, db, host });

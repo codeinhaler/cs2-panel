@@ -65,7 +65,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const audit = new AuditLog(db);
   const presets = new PresetStore(db);
   const serverStore = new ServerStore(db, box);
-  const files = new InstanceFiles(config.cs2Root, config.instanceEnvDir);
+  const files = new InstanceFiles(config.cs2Root, config.instanceEnvDir, (slug) => host.isMounted(slug));
   const configs = new ConfigService(db, files);
   const gate = new OperationGate();
   const servers = new ServerService(serverStore, presets, files, configs, host, audit, gate);

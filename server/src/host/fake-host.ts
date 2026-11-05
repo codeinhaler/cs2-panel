@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, existsSync, rmSync, renameSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, rmSync, renameSync, symlinkSync, lstatSync } from "node:fs";
 import path from "node:path";
 import type { Cs2ctlVerb, Host, LogStream, ServiceStatus } from "./host.js";
 
@@ -25,7 +25,7 @@ export class FakeHost implements Host {
     switch (verb) {
       case "start":
       case "restart":
-        this.mounted.add(slug);
+        this.mount(slug);
         this.running.add(slug);
         this.since.set(slug, new Date().toISOString());
         this.emit(slug, `${verb === "start" ? "Starting" : "Restarting"} CS2 server ${slug} (simulated)`);
@@ -36,11 +36,11 @@ export class FakeHost implements Host {
         this.emit(slug, `Stopped CS2 server ${slug} (simulated)`);
         break;
       case "mount":
-        this.mounted.add(slug);
+        this.mount(slug);
         break;
       case "umount":
         this.running.delete(slug);
-        this.mounted.delete(slug);
+        this.unmount(slug);
         break;
       case "enable":
         this.enabled.add(slug);
@@ -51,7 +51,7 @@ export class FakeHost implements Host {
       case "archive": {
         // Same effect as the real cs2ctl: keep upper/ in backups, remove the rest.
         this.running.delete(slug);
-        this.mounted.delete(slug);
+        this.unmount(slug);
         this.enabled.delete(slug);
         const inst = path.join(this.cs2Root, "instances", slug);
         const deleted = path.join(this.cs2Root, "backups", "deleted");
@@ -80,6 +80,35 @@ export class FakeHost implements Host {
       await new Promise((r) => setTimeout(r, 50));
     }
     installFakeBase(this.cs2Root);
+  }
+
+  async isMounted(slug: string): Promise<boolean> {
+    return this.mounted.has(slug);
+  }
+
+  /**
+   * Simulated overlay: merged/ becomes a symlink to upper/, so writes through
+   * merged/ land in upper/ like they would on a real overlay.
+   */
+  private mount(slug: string): void {
+    if (this.mounted.has(slug)) return;
+    const merged = path.join(this.cs2Root, "instances", slug, "merged");
+    if (!existsSync(path.join(this.cs2Root, "instances", slug, "upper"))) return;
+    rmSync(merged, { recursive: true, force: true });
+    symlinkSync("upper", merged);
+    this.mounted.add(slug);
+  }
+
+  private unmount(slug: string): void {
+    if (!this.mounted.has(slug)) return;
+    const merged = path.join(this.cs2Root, "instances", slug, "merged");
+    try {
+      if (lstatSync(merged).isSymbolicLink()) rmSync(merged);
+      mkdirSync(merged, { recursive: true });
+    } catch {
+      /* instance already gone */
+    }
+    this.mounted.delete(slug);
   }
 
   async serviceStatus(slug: string): Promise<ServiceStatus> {

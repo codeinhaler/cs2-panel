@@ -25,11 +25,20 @@ export interface GeneratedCfgSettings {
   rconPassword: string;
 }
 
-/** Filesystem layout for servers. */
+/**
+ * Filesystem layout for servers.
+ *
+ * OverlayFS rule: while a server's overlay is mounted, its upper dir must not
+ * be changed directly. New and changed files are written through merged/
+ * (`liveDir`); anything that deletes or replaces a file the base also has
+ * (gameinfo.gi, reverting a stock config, removing plugins) happens only
+ * while the overlay is unmounted (`assertUnmounted`).
+ */
 export class InstanceFiles {
   constructor(
     readonly cs2Root: string,
     readonly envDir: string,
+    readonly isMounted: (slug: string) => Promise<boolean> = async () => false,
   ) {}
 
   get baseDir(): string {
@@ -40,6 +49,16 @@ export class InstanceFiles {
   }
   upperDir(slug: string): string {
     return path.join(this.instanceDir(slug), "upper");
+  }
+  mergedDir(slug: string): string {
+    return path.join(this.instanceDir(slug), "merged");
+  }
+  /** Where to write new or changed files right now: merged/ if mounted, else upper/. */
+  async liveDir(slug: string): Promise<string> {
+    return (await this.isMounted(slug)) ? this.mergedDir(slug) : this.upperDir(slug);
+  }
+  async assertUnmounted(slug: string): Promise<void> {
+    if (await this.isMounted(slug)) throw new Error(`internal: ${slug}'s overlay must be unmounted for this change`);
   }
   cfgDir(slug: string): string {
     return path.join(this.upperDir(slug), "game", "csgo", "cfg");
@@ -130,7 +149,9 @@ export class InstanceFiles {
       `hostname ${q(s.hostname)}\n` +
       `sv_password ${q(s.password ?? "")}\n` +
       `rcon_password ${q(s.rconPassword)}\n`;
-    await writeAtomic(path.join(this.cfgDir(slug), GENERATED_CFG), content, 0o660);
+    const dir = path.join(await this.liveDir(slug), "game", "csgo", "cfg");
+    await fs.mkdir(dir, { recursive: true, mode: 0o2775 });
+    await writeAtomic(path.join(dir, GENERATED_CFG), content, 0o660);
   }
 
   /**
@@ -139,6 +160,7 @@ export class InstanceFiles {
    * the base file. Returns what it did.
    */
   async regenerateGameinfo(slug: string): Promise<"patched" | "base" | "no-base"> {
+    await this.assertUnmounted(slug);
     const upperCopy = path.join(this.upperDir(slug), GAMEINFO_REL);
     await fs.rm(upperCopy, { force: true });
     const metamodDir = path.join(this.upperDir(slug), "game", "csgo", "addons", "metamod");
@@ -154,6 +176,42 @@ export class InstanceFiles {
     await fs.mkdir(path.dirname(upperCopy), { recursive: true });
     await writeAtomic(upperCopy, patched, 0o664);
     return "patched";
+  }
+
+  /**
+   * Removes config files from the server's own layer that are identical to the
+   * stock file, so they don't hide future CS2 updates. Needs the overlay unmounted.
+   */
+  async dedupeStockConfigs(slug: string): Promise<string[]> {
+    await this.assertUnmounted(slug);
+    const removed: string[] = [];
+    const walk = async (rel: string): Promise<void> => {
+      let entries;
+      try {
+        entries = await fs.readdir(path.join(this.upperDir(slug), rel), { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        const childRel = `${rel}/${e.name}`;
+        if (e.isDirectory()) {
+          await walk(childRel);
+        } else if (e.isFile()) {
+          const base = path.join(this.baseDir, childRel);
+          try {
+            const [a, b] = await Promise.all([fs.readFile(path.join(this.upperDir(slug), childRel)), fs.readFile(base)]);
+            if (a.equals(b)) {
+              await fs.rm(path.join(this.upperDir(slug), childRel));
+              removed.push(childRel);
+            }
+          } catch {
+            /* no stock file: keep it */
+          }
+        }
+      }
+    };
+    await walk("game/csgo/cfg");
+    return removed;
   }
 
   /**

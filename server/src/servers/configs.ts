@@ -58,6 +58,10 @@ export class ConfigService {
   private csgoUpper(slug: string): string {
     return path.join(this.files.upperDir(slug), "game", "csgo");
   }
+  /** game/csgo as the running server sees it: through merged/ when mounted. */
+  private async csgoLive(slug: string): Promise<string> {
+    return path.join(await this.files.liveDir(slug), "game", "csgo");
+  }
   private csgoBase(): string {
     return path.join(this.files.baseDir, "game", "csgo");
   }
@@ -92,7 +96,9 @@ export class ConfigService {
         } else if (e.isFile() && EDITABLE_EXTENSIONS.has(path.posix.extname(e.name).toLowerCase())) {
           const size = (await fs.stat(path.join(root, childRel))).size;
           const prev = found.get(childRel);
-          const source: ConfigSource = fromUpper ? (prev ? "modified" : "custom") : "stock";
+          let source: ConfigSource = fromUpper ? (prev ? "modified" : "custom") : "stock";
+          // A copy identical to stock (e.g. reverted while running) still counts as stock.
+          if (source === "modified" && (await sameContent(path.join(root, childRel), path.join(this.csgoBase(), childRel)))) source = "stock";
           found.set(childRel, { path: childRel, source, size, readOnly: childRel === `cfg/${GENERATED_CFG}` });
         }
       }
@@ -109,7 +115,9 @@ export class ConfigService {
     const upper = path.join(this.csgoUpper(server.slug), p);
     const base = path.join(this.csgoBase(), p);
     if (await exists(upper)) {
-      return { content: await fs.readFile(upper, "utf8"), source: (await exists(base)) ? "modified" : "custom" };
+      const content = await fs.readFile(upper, "utf8");
+      if (!(await exists(base))) return { content, source: "custom" };
+      return { content, source: content === (await fs.readFile(base, "utf8")) ? "stock" : "modified" };
     }
     if (await exists(base)) return { content: await fs.readFile(base, "utf8"), source: "stock" };
     return null;
@@ -195,7 +203,9 @@ export class ConfigService {
 
     const fileId = this.fileId(server.id, p);
     await this.ensureBaseline(server, p, fileId);
-    const target = path.join(this.csgoUpper(server.slug), p);
+    const live = await this.csgoLive(server.slug);
+    await this.assertNoSymlinks(live, p);
+    const target = path.join(live, p);
     await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o2775 });
     await writeAtomic(target, content, 0o664);
     this.addRevision(fileId, content, authorId, comment.slice(0, 200));
@@ -211,8 +221,17 @@ export class ConfigService {
     if (!(await exists(target))) throw notFound("This server has no copy of that file.");
     const fileId = this.fileId(server.id, p);
     await this.ensureBaseline(server, p, fileId);
-    await fs.rm(target);
-    const stock = await exists(path.join(this.csgoBase(), p));
+    const basePath = path.join(this.csgoBase(), p);
+    const stock = await exists(basePath);
+    if (stock && (await this.files.isMounted(server.slug))) {
+      // Deleting through a mounted overlay would hide the stock file too, so write
+      // the stock content instead. The identical copy is cleaned up on the next start.
+      const live = await this.csgoLive(server.slug);
+      await writeAtomic(path.join(live, p), await fs.readFile(basePath, "utf8"), 0o664);
+    } else {
+      // A custom file can be deleted through merged/; a stock copy only while unmounted.
+      await fs.rm(path.join(await this.csgoLive(server.slug), p));
+    }
     this.addRevision(fileId, null, authorId, comment || (stock ? "Reverted to stock" : "Deleted"));
     return { result: stock ? "stock" : "deleted" };
   }
@@ -235,5 +254,14 @@ export class ConfigService {
     }
     await this.save(server, rev.path, rev.content, authorId, comment);
     return { path: rev.path };
+  }
+}
+
+async function sameContent(a: string, b: string): Promise<boolean> {
+  try {
+    const [x, y] = await Promise.all([fs.readFile(a), fs.readFile(b)]);
+    return x.equals(y);
+  } catch {
+    return false;
   }
 }

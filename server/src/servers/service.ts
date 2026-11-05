@@ -1,6 +1,6 @@
 import type { AuditLog } from "../audit.js";
 import { randomPassword, randomToken } from "../crypto.js";
-import { badRequest, conflict, forbidden, notFound } from "../errors.js";
+import { HttpError, badRequest, conflict, forbidden, notFound } from "../errors.js";
 import type { Host, ServiceStatus } from "../host/host.js";
 import { queryInfo, type A2sInfo } from "../game/a2s.js";
 import type { ConfigService } from "./configs.js";
@@ -316,22 +316,55 @@ export class ServerService {
     // A force stop must work even while something else is in progress.
     if (action !== "kill") this.gate.assertFree();
     const s = this.require(id);
-    const starting = action === "start" || action === "restart";
-    if (starting && !(await this.files.baseInstalled())) {
-      throw badRequest("CS2 isn't installed yet. Install it from the Game update page first.");
-    }
-    if (starting) {
-      // Make sure the launch files match the current settings before starting.
-      await this.writeLaunchFiles(s);
-      await this.files.regenerateGameinfo(s.slug);
-    }
     try {
-      await this.host.cs2ctl(action, s.slug);
+      if (action === "start" || action === "restart") {
+        if (!(await this.files.baseInstalled())) {
+          throw badRequest("CS2 isn't installed yet. Install it from the Game update page first.");
+        }
+        // Stop and unmount, refresh the server's files while the overlay is
+        // down, then start (starting mounts it again).
+        await this.withUnmounted(s, { restart: false }, async () => {
+          await this.prepareForStart(s);
+        });
+        await this.host.cs2ctl("start", s.slug);
+      } else {
+        await this.host.cs2ctl(action, s.slug);
+      }
     } catch (e) {
+      if (e instanceof HttpError) throw e;
       throw badRequest((e as Error).message);
     }
     this.audit.record(actor.id, `server.${action}`, id);
     return this.view(s);
+  }
+
+  /** Files that must be current before CS2 starts. Needs the overlay unmounted. */
+  private async prepareForStart(s: ServerRecord): Promise<void> {
+    await this.writeLaunchFiles(s);
+    await this.files.regenerateGameinfo(s.slug);
+    await this.files.dedupeStockConfigs(s.slug);
+  }
+
+  /**
+   * Runs fn with the server stopped and its overlay unmounted, so fn may change
+   * the server's own layer directly. With restart: true, a server that was
+   * running is started again afterwards (and left stopped otherwise).
+   */
+  async withUnmounted<T>(s: ServerRecord, opts: { restart: boolean }, fn: () => Promise<T>): Promise<{ result: T; restarted: boolean }> {
+    const status = await this.host.serviceStatus(s.slug);
+    const running = status.state === "active" || status.state === "activating";
+    if (running) await this.host.cs2ctl("stop", s.slug);
+    await this.host.cs2ctl("umount", s.slug);
+    let result: T;
+    try {
+      result = await fn();
+    } finally {
+      if (running && opts.restart) {
+        await this.prepareForStart(s);
+        await this.host.cs2ctl("start", s.slug);
+      }
+    }
+    return { result, restarted: running && opts.restart };
   }
 
   private async writeLaunchFiles(s: ServerRecord): Promise<void> {

@@ -376,6 +376,30 @@ describe("config editor", () => {
     expect((await call(c, "PUT", `/api/servers/${id}/configs/file`, { path: "cfg/link/evil.cfg", content: "x" })).body.error).toMatch(/Symbolic/);
   });
 
+  it("never deletes through a mounted overlay; reverting a stock file while running is finished on the next start", async () => {
+    const c = await login();
+    const pid = await presetId(c, "competitive");
+    const id = (await call(c, "POST", "/api/servers", { name: "S", presetId: pid, port: 27015 })).body.server.id;
+    await call(c, "POST", `/api/servers/${id}/start`, {});
+    expect(host.mounted.has("s")).toBe(true);
+    const f = "cfg/gamemode_competitive.cfg";
+    const upperCopy = path.join(dir, "cs2/instances/s/upper/game/csgo", f);
+    await call(c, "PUT", `/api/servers/${id}/configs/file`, { path: f, content: "mp_maxrounds 30\n" });
+    expect(readFileSync(upperCopy, "utf8")).toBe("mp_maxrounds 30\n");
+
+    // Revert while running: the copy now holds the stock text, and the UI calls it stock.
+    expect((await call(c, "DELETE", `/api/servers/${id}/configs/file?path=${f}`)).body.result).toBe("stock");
+    expect(existsSync(upperCopy)).toBe(true);
+    expect((await call(c, "GET", `/api/servers/${id}/configs/file?path=${f}`)).body.source).toBe("stock");
+
+    // Restart: unmount, drop the identical copy, start again.
+    await call(c, "POST", `/api/servers/${id}/restart`, {});
+    expect(existsSync(upperCopy)).toBe(false);
+    expect(host.running.has("s")).toBe(true);
+    const order = host.calls.slice(host.calls.lastIndexOf("stop s"));
+    expect(order).toEqual(["stop s", "umount s", "start s"]);
+  });
+
   it("can exec a saved cfg on a running server", async () => {
     const c = await login();
     const pid = await presetId(c, "casual");

@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { availableParallelism } from "node:os";
 import { createServer } from "node:net";
@@ -10,7 +11,16 @@ const execFileP = promisify(execFile);
 
 /** The real host: systemd, sudo + cs2ctl, journald. */
 export class SystemHost implements Host {
-  constructor(private readonly cs2ctlPath: string) {}
+  constructor(
+    private readonly cs2ctlPath: string,
+    private readonly cs2Root: string,
+  ) {}
+
+  async isMounted(slug: string): Promise<boolean> {
+    const target = `${this.cs2Root}/instances/${slug}/merged`;
+    const info = await readFile("/proc/self/mountinfo", "utf8");
+    return mountPoints(info).includes(target);
+  }
 
   async cs2ctl(verb: Cs2ctlVerb, slug: string): Promise<string> {
     try {
@@ -118,4 +128,13 @@ export function parseSystemdTimestamp(value: string | undefined): string | null 
   if (!m) return null;
   const d = new Date(`${m[1]}T${m[2]}`); // no zone: interpreted as local time
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+/** Mount points listed in /proc/self/mountinfo (5th field, with \040-style escapes decoded). */
+export function mountPoints(mountinfo: string): string[] {
+  return mountinfo
+    .split("\n")
+    .map((l) => l.split(" ")[4])
+    .filter((m): m is string => !!m)
+    .map((m) => m.replace(/\\([0-7]{3})/g, (_, o: string) => String.fromCharCode(parseInt(o, 8))));
 }
