@@ -17,40 +17,54 @@ require_root() {
   [[ $EUID -eq 0 ]] || die "Run this script as root (e.g. with sudo)."
 }
 
-# Reads the GitHub token used to download releases from the private repo.
-# Prompts for it and stores it (root-only) if it isn't saved yet.
-github_token() {
-  if [[ ! -s "$TOKEN_FILE" ]]; then
-    echo >&2
-    echo "The repository is private, so a GitHub token is needed to download releases." >&2
-    echo "Create a fine-grained token at https://github.com/settings/personal-access-tokens" >&2
-    echo "  - Repository access: only $GITHUB_REPO" >&2
-    echo "  - Permissions: Contents = Read-only" >&2
-    local token
-    read -r -s -p "Paste the token: " token </dev/tty
-    echo >&2
-    [[ -n "$token" ]] || die "No token given."
-    install -d -m 0750 /etc/cs2-panel
-    (umask 077 && printf '%s\n' "$token" >"$TOKEN_FILE")
+# Prompts for a GitHub token and stores it (root-only). Only needed if the
+# repository is private; public releases download without one.
+prompt_github_token() {
+  echo >&2
+  echo "GitHub didn't allow an anonymous download, so the repository is probably private." >&2
+  echo "Create a fine-grained token at https://github.com/settings/personal-access-tokens" >&2
+  echo "  - Repository access: only $GITHUB_REPO" >&2
+  echo "  - Permissions: Contents = Read-only" >&2
+  local token
+  read -r -s -p "Paste the token: " token </dev/tty
+  echo >&2
+  [[ -n "$token" ]] || die "No token given."
+  install -d -m 0750 /etc/cs2-panel
+  (umask 077 && printf '%s\n' "$token" >"$TOKEN_FILE")
+}
+
+# Prints curl arguments for GitHub auth: a token header if one is saved, otherwise nothing.
+github_auth_args() {
+  if [[ -s "$TOKEN_FILE" ]]; then
+    printf '%s\n' -H "Authorization: Bearer $(tr -d '[:space:]' <"$TOKEN_FILE")"
   fi
-  tr -d '[:space:]' <"$TOKEN_FILE"
 }
 
 # download_release <tag|latest> <output file>
 download_release() {
-  local tag="$1" out="$2" token api release asset_url
-  token="$(github_token)"
+  local tag="$1" out="$2" api release asset_url
+  local -a auth
   if [[ "$tag" == "latest" ]]; then
     api="https://api.github.com/repos/$GITHUB_REPO/releases/latest"
   else
     api="https://api.github.com/repos/$GITHUB_REPO/releases/tags/$tag"
   fi
-  release="$(curl -fsSL -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" "$api")" ||
-    die "Could not read release '$tag' from GitHub. Check the token and that a release exists."
+  mapfile -t auth < <(github_auth_args)
+  if ! release="$(curl -fsSL "${auth[@]}" -H "Accept: application/vnd.github+json" "$api")"; then
+    # Anonymous access failed: maybe the repo is private. Ask for a token once and retry.
+    if [[ ${#auth[@]} -eq 0 ]]; then
+      prompt_github_token
+      mapfile -t auth < <(github_auth_args)
+      release="$(curl -fsSL "${auth[@]}" -H "Accept: application/vnd.github+json" "$api")" ||
+        die "Could not read release '$tag' from GitHub. Check the token and that a release exists."
+    else
+      die "Could not read release '$tag' from GitHub. Check $TOKEN_FILE and that a release exists."
+    fi
+  fi
   asset_url="$(jq -r --arg n "$ASSET_NAME" '.assets[] | select(.name == $n) | .url' <<<"$release")"
   [[ -n "$asset_url" && "$asset_url" != "null" ]] || die "Release '$tag' has no $ASSET_NAME asset."
   log "Downloading $(jq -r .tag_name <<<"$release")"
-  curl -fL --progress-bar -H "Authorization: Bearer $token" -H "Accept: application/octet-stream" \
+  curl -fL --progress-bar "${auth[@]}" -H "Accept: application/octet-stream" \
     -o "$out" "$asset_url" || die "Download failed."
 }
 
