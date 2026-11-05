@@ -44,6 +44,9 @@ case "${1:-}" in
     ;;
 esac
 
+# Tools newer panel versions rely on (unzip for plugin archives).
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq unzip >/dev/null 2>&1 || warn "Could not install unzip; plugin installs may fail."
+
 log "Backing up the database"
 DB=/var/lib/cs2-panel/panel.db
 [[ -f "$DB" ]] && runuser -u cs2panel -- cp "$DB" "$DB.pre-update"

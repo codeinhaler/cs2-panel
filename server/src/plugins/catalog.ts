@@ -49,7 +49,7 @@ export const CATALOG: CatalogEntry[] = [
   {
     id: "anybaselib",
     name: "AnyBaseLib",
-    description: "Shared database library. Needed by PlayerSettings.",
+    description: "Shared database library used by other plugins.",
     homepage: "https://github.com/NickFox007/AnyBaseLibCS2",
     source: { type: "github", repo: "NickFox007/AnyBaseLibCS2", prefer: [/linux/i] },
     requires: ["counterstrikesharp"],
@@ -58,7 +58,7 @@ export const CATALOG: CatalogEntry[] = [
   {
     id: "playersettings",
     name: "PlayerSettings",
-    description: "Stores per-player settings. Needed by MenuManager.",
+    description: "Stores per-player settings.",
     homepage: "https://github.com/NickFox007/PlayerSettingsCS2",
     source: { type: "github", repo: "NickFox007/PlayerSettingsCS2", prefer: [/linux/i] },
     requires: ["anybaselib"],
@@ -67,7 +67,7 @@ export const CATALOG: CatalogEntry[] = [
   {
     id: "menumanager",
     name: "MenuManager",
-    description: "In-game menus. Needed by CS2-SimpleAdmin.",
+    description: "In-game menus for plugins.",
     homepage: "https://github.com/NickFox007/MenuManagerCS2",
     source: { type: "github", repo: "NickFox007/MenuManagerCS2", prefer: [/linux/i] },
     requires: ["playersettings"],

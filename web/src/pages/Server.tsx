@@ -5,6 +5,7 @@ import { useApp, usePolling } from "../app-context";
 import { ControlButtons, Slots, StateLabel } from "../components/server-bits";
 import { ConsoleTab } from "./server/Console";
 import { SettingsTab } from "./server/Settings";
+import { PluginsTab } from "./server/Plugins";
 import { ActivityList } from "./Activity";
 
 // The config editor pulls in Monaco, so load it only when that tab opens.
@@ -52,6 +53,9 @@ export function ServerPage() {
         <NavLink to={`/servers/${id}/configs`} className="tab">
           Config files
         </NavLink>
+        <NavLink to={`/servers/${id}/plugins`} className="tab">
+          Plugins
+        </NavLink>
         <NavLink to={`/servers/${id}/settings`} className="tab">
           Settings
         </NavLink>
@@ -68,6 +72,7 @@ export function ServerPage() {
             </Suspense>
           }
         />
+        <Route path="plugins" element={<PluginsTab server={s} />} />
         <Route path="settings" element={<SettingsTab server={s} onSaved={() => void refresh()} />} />
       </Routes>
     </>

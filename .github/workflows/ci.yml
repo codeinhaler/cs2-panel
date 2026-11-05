@@ -19,4 +19,4 @@ jobs:
       - run: npm test
       - run: npm run build
       - name: Lint shell scripts
-        run: shellcheck -x deploy/install.sh deploy/update.sh deploy/cs2ctl deploy/lib.sh
+        run: shellcheck -x deploy/install.sh deploy/update.sh deploy/setup-mariadb.sh deploy/cs2ctl deploy/lib.sh

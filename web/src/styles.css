@@ -957,3 +957,84 @@ dialog h2 {
   overflow: hidden;
   clip: rect(0 0 0 0);
 }
+
+/* ---------------------------------------------------------------- plugins */
+
+.plugin-list {
+  display: grid;
+}
+.plugin {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 210px auto;
+  gap: 8px 20px;
+  align-items: center;
+  padding: 12px 0;
+  border-top: 1px solid var(--line-soft);
+}
+.plugin:first-child {
+  border-top: 0;
+}
+.plugin[data-installed="true"] {
+  box-shadow: inset 3px 0 0 var(--run);
+  padding-left: 12px;
+}
+.plugin-name {
+  font-family: var(--f-label);
+  font-weight: 600;
+  font-size: 1.05rem;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.plugin-name a {
+  color: inherit;
+  text-decoration: none;
+}
+.plugin-name a:hover {
+  text-decoration: underline;
+}
+.plugin-version b {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.plugin-update {
+  color: var(--busy);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+.plugin-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+@media (max-width: 760px) {
+  .plugin {
+    grid-template-columns: 1fr;
+  }
+  .plugin-actions {
+    justify-content: flex-start;
+  }
+}
+.health {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+  display: grid;
+  gap: 6px;
+}
+.health li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.health li::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--fail);
+}
+.health li[data-ok="true"]::before {
+  background: var(--run);
+}

@@ -101,6 +101,29 @@ export interface ConfigFile {
   revisions: Revision[];
 }
 
+export interface PluginStatus {
+  id: string;
+  name: string;
+  description: string;
+  homepage: string | null;
+  requires: string[];
+  custom: boolean;
+  installed: { version: string; installedAt: string; installedBy: string | null } | null;
+  dependents: string[];
+  previousVersion: string | null;
+  latest: string | null;
+  latestError: string | null;
+}
+
+export interface PluginHealth {
+  reachable: boolean;
+  error: string | null;
+  metamodLoaded: boolean;
+  cssharpLoaded: boolean;
+  metamodOutput: string;
+  cssharpOutput: string;
+}
+
 export interface AuditEntry {
   id: number;
   userId: number | null;
@@ -186,6 +209,33 @@ export const api = {
     request<{ path: string; content: string | null }>("GET", `/api/servers/${id}/configs/revisions/${revId}`),
   rollback: (id: number, revisionId: number) =>
     request<{ path: string; file: ConfigFile | null }>("POST", `/api/servers/${id}/configs/rollback`, { revisionId }),
+
+  plugins: (id: number, refresh = false) =>
+    request<{ plugins: PluginStatus[]; mysqlConfigured: boolean }>("GET", `/api/servers/${id}/plugins${refresh ? "?refresh=true" : ""}`),
+  pluginVersions: (pluginId: string) =>
+    request<{ versions: { version: string; publishedAt: string | null; prerelease: boolean }[] }>("GET", `/api/plugins/${encodeURIComponent(pluginId)}/versions`),
+  installPlugin: (id: number, pluginId: string, version?: string) =>
+    request<{ installed: { id: string; version: string }[]; restarted: boolean }>(
+      "POST",
+      `/api/servers/${id}/plugins/${encodeURIComponent(pluginId)}/install`,
+      version ? { version } : {},
+    ),
+  rollbackPlugin: (id: number, pluginId: string) =>
+    request<{ version: string; restarted: boolean }>("POST", `/api/servers/${id}/plugins/${encodeURIComponent(pluginId)}/rollback`, {}),
+  removePlugin: (id: number, pluginId: string) =>
+    request<{ restarted: boolean }>("DELETE", `/api/servers/${id}/plugins/${encodeURIComponent(pluginId)}`),
+  uploadPlugin: async (id: number, file: File) => {
+    const res = await fetch(`/api/servers/${id}/plugins/upload?${q({ name: file.name })}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/zip" },
+      body: file,
+      credentials: "same-origin",
+    });
+    const data = (await res.json().catch(() => ({}))) as { error?: string; name?: string; restarted?: boolean };
+    if (!res.ok) throw new ApiError(res.status, data.error ?? `Upload failed (${res.status}).`);
+    return data as { name: string; restarted: boolean };
+  },
+  pluginHealth: (id: number) => request<PluginHealth>("GET", `/api/servers/${id}/plugins/health`),
 
   game: (since = 0) => request<GameState>("GET", `/api/game?${q({ since })}`),
   startUpdate: (validate: boolean, warnSeconds: number) => request<{ ok: true }>("POST", "/api/game/update", { validate, warnSeconds }),

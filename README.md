@@ -14,7 +14,15 @@ The design is in [docs/DESIGN.md](docs/DESIGN.md).
 - Install and update CS2 through SteamCMD. Every server shares one install; Metamod's `gameinfo.gi` entry is re-applied after each update.
 - Activity log of everything done through the panel.
 
-Plugins (Metamod, CounterStrikeSharp) come in Phase 2; player kick/ban in Phase 3.
+## What's in Phase 2
+
+- A **Plugins** tab per server: Metamod:Source, CounterStrikeSharp and CS2-SimpleAdmin (with MenuManager, PlayerSettings and AnyBaseLib, which it needs). Installing a plugin installs what it needs first.
+- Pinned versions, one-click update, pick any version, roll back to the previous one. Plugin config files are kept on updates.
+- The Owner can upload a plugin archive that isn't in the catalog.
+- A health check that asks the running server whether Metamod and CounterStrikeSharp loaded. It also runs automatically after each CS2 update.
+- The New server form can install the plugins right away.
+
+Player management in the panel (live player list, bans through CS2-SimpleAdmin's database) is Phase 3.
 
 ## Installing on the server
 
@@ -42,7 +50,13 @@ The installer asks for the token, your SteamID64 (you become the Owner) and the 
 
 **4. Open the panel** at `http://<server-ip>:8080` and sign in with Steam.
 
-**5. Router:** for each server you create, forward its **UDP** game port (for example 27015) to the Debian machine. Don't forward TCP; RCON uses TCP on the same port and should stay on your network.
+**5. Shared database for CS2-SimpleAdmin** (once, if you use it). This installs MariaDB, listening on 127.0.0.1 only, so bans and admins are shared across all servers:
+
+```sh
+sudo /opt/cs2-panel/deploy/setup-mariadb.sh
+```
+
+**6. Router:** for each server you create, forward its **UDP** game port (for example 27015) to the Debian machine. Don't forward TCP; RCON uses TCP on the same port and should stay on your network.
 
 ## Updating the panel
 

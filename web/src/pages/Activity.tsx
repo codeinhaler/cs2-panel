@@ -45,6 +45,18 @@ function describe(e: AuditEntry): string {
       return `deleted ${str("path")}`;
     case "config.rollback":
       return `restored an earlier version of ${str("path")}`;
+    case "plugin.install": {
+      const extra = Array.isArray(d.alsoInstalled) && d.alsoInstalled.length ? `, plus ${(d.alsoInstalled as string[]).join(", ")}` : "";
+      return `installed ${str("plugin")} ${str("version")}${extra}`;
+    }
+    case "plugin.update":
+      return `updated ${str("plugin")} to ${str("version")}`;
+    case "plugin.rollback":
+      return `rolled ${str("plugin")} back from ${str("from")} to ${str("to")}`;
+    case "plugin.remove":
+      return `removed ${str("plugin")} ${str("version")}`;
+    case "plugin.upload":
+      return `uploaded and installed ${str("plugin")} (${str("file")})`;
     case "game.update.start":
       return d.validate ? "started a CS2 update with file verification" : "started a CS2 update";
     case "game.update.finish":

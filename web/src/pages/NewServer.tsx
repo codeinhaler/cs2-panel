@@ -15,7 +15,7 @@ const slugify = (name: string) =>
     .replace(/-+$/, "") || "server";
 
 export function NewServerPage() {
-  const { can } = useApp();
+  const { can, toast } = useApp();
   const navigate = useNavigate();
   const { busy, run } = useAction();
   const [presets, setPresets] = useState<Preset[]>([]);
@@ -34,6 +34,7 @@ export function NewServerPage() {
   const [autostart, setAutostart] = useState(true);
   const [startNow, setStartNow] = useState(true);
   const [extraArgs, setExtraArgs] = useState("");
+  const [plugins, setPlugins] = useState<"none" | "counterstrikesharp" | "cs2-simpleadmin">("none");
 
   useEffect(() => {
     void api.presets().then((r) => {
@@ -73,7 +74,19 @@ export function NewServerPage() {
         }),
       `Created ${name}.`,
     );
-    if (r) navigate(`/servers/${r.server.id}`);
+    if (!r) return;
+    if (plugins !== "none" && can("plugins.manage")) {
+      toast(`Created ${name}. Installing plugins…`, "info");
+      try {
+        await api.installPlugin(r.server.id, plugins);
+        toast(`Created ${name} with plugins installed.`);
+      } catch (e) {
+        toast(`Created ${name}, but installing plugins failed: ${(e as Error).message}`, "error");
+      }
+      navigate(`/servers/${r.server.id}/plugins`);
+      return;
+    }
+    navigate(`/servers/${r.server.id}`);
   };
 
   return (
@@ -166,6 +179,17 @@ export function NewServerPage() {
               <span>Join password</span>
               <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Leave empty for a public server" autoComplete="off" />
             </label>
+            {can("plugins.manage") && (
+              <label className="field wide">
+                <span>Plugins</span>
+                <select value={plugins} onChange={(e) => setPlugins(e.target.value as typeof plugins)}>
+                  <option value="none">None (add them later on the Plugins tab)</option>
+                  <option value="counterstrikesharp">Metamod and CounterStrikeSharp</option>
+                  <option value="cs2-simpleadmin">Metamod, CounterStrikeSharp and CS2-SimpleAdmin</option>
+                </select>
+                <small>Downloaded and installed right after the server is created; this can take a minute.</small>
+              </label>
+            )}
             {can("server.rawargs") && (
               <label className="field wide">
                 <span>Extra launch arguments</span>

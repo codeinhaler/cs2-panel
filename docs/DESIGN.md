@@ -541,14 +541,15 @@ Downloads the latest (or a specified) panel release, swaps it in, runs database 
 - CS2 install and update via SteamCMD, with `gameinfo.gi` re-patching.
 - Config editor with revisions and rollback.
 
-**Phase 2 — Plugins**
+**Phase 2 — Plugins** (done)
 - Metamod and CSSharp install per server (also offered in the create-server wizard).
-- Plugin catalog, pinned versions, update and rollback.
-- Post-update verification.
+- Plugin catalog with CS2-SimpleAdmin and its dependencies, pinned versions, update, pick a version, rollback, Owner uploads.
+- Post-update verification over RCON.
 
 **Phase 3 — Players**
-- `Cs2Panel.Bridge` plugin.
-- Live player list, kick, central SteamID bans, unban.
+- Live player list, kick.
+- Bans, unbans and admins through CS2-SimpleAdmin's shared database.
+- Decide whether a separate `Cs2Panel.Bridge` plugin is still needed once SimpleAdmin covers bans.
 - Player history.
 
 **Phase 4 — Polish**
@@ -575,6 +576,9 @@ Downloads the latest (or a specified) panel release, swaps it in, runs database 
 | 2026-11-05 | Server ports are set manually; the panel validates them. |
 | 2026-11-05 | Workshop maps are a later nice-to-have (Phase 4). |
 | 2026-11-05 | Backend switched from ASP.NET Core to TypeScript/Node.js so code can be built and tested before pushing. |
+| 2026-11-05 | CS2-SimpleAdmin is the ban system (Phase 3 reads and writes its bans). It and its dependencies are in the plugin catalog. |
+| 2026-11-05 | A local MariaDB (127.0.0.1 only, set up by `setup-mariadb.sh`) holds SimpleAdmin's data so bans apply on every server; the panel writes SimpleAdmin's database settings on install. |
+| 2026-11-05 | While a server's overlay is mounted, the panel writes through merged/ and never deletes there; changes that remove or replace files happen with the overlay unmounted. |
 
 ## 18. Open questions
 

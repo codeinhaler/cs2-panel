@@ -44,7 +44,7 @@ DATA_DIR="/var/lib/cs2-panel"
 log "Installing packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq curl ca-certificates tar jq util-linux sudo lib32gcc-s1 lib32stdc++6 >/dev/null
+apt-get install -y -qq curl ca-certificates tar unzip jq util-linux sudo lib32gcc-s1 lib32stdc++6 >/dev/null
 
 # ---------------------------------------------------------------- users
 log "Creating users"
@@ -133,3 +133,4 @@ IP="$(hostname -I | awk '{print $1}')"
 echo
 log "Done. Open http://$IP:$PORT and sign in with Steam."
 echo "   Updates later: sudo $PANEL_DIR/deploy/update.sh"
+echo "   For CS2-SimpleAdmin (shared bans across servers): sudo $PANEL_DIR/deploy/setup-mariadb.sh"
