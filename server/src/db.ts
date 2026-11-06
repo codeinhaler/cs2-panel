@@ -116,6 +116,21 @@ const MIGRATIONS: string[] = [
   /* 3: per-user display preferences */ `
   ALTER TABLE users ADD COLUMN prefs TEXT NOT NULL DEFAULT '{}';
   `,
+  /* 4: who was on which server, when */ `
+  CREATE TABLE player_sessions (
+    id               INTEGER PRIMARY KEY,
+    server_id        INTEGER NOT NULL REFERENCES servers(id),
+    user_id          INTEGER NOT NULL,
+    name             TEXT NOT NULL,
+    steam_id         TEXT,
+    connected_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    last_seen_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    disconnected_at  TEXT
+  );
+  CREATE INDEX player_sessions_open ON player_sessions(server_id, disconnected_at);
+  CREATE INDEX player_sessions_seen ON player_sessions(last_seen_at DESC);
+  CREATE INDEX player_sessions_steam ON player_sessions(steam_id);
+  `,
 ];
 
 export function openDb(file: string): Db {

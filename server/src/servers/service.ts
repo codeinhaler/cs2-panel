@@ -78,6 +78,11 @@ export class ServerService {
     return this.view(this.require(id));
   }
 
+  /** All servers with secrets, for background jobs. */
+  listRecords(): ServerRecord[] {
+    return this.store.list();
+  }
+
   require(id: number): ServerRecord {
     const s = this.store.byId(id);
     if (!s) throw notFound("Server not found.");

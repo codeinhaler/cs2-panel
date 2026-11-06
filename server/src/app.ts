@@ -26,6 +26,7 @@ import { OperationGate, ServerService, type Actor } from "./servers/service.js";
 import { PluginSources } from "./plugins/sources.js";
 import { PluginService } from "./plugins/service.js";
 import { CATALOG } from "./plugins/catalog.js";
+import { PlayerService } from "./players/service.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -55,6 +56,7 @@ export interface App {
     updater: GameUpdater;
     presets: PresetStore;
     plugins: PluginService;
+    players: PlayerService;
   };
 }
 
@@ -79,6 +81,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const pluginSources = new PluginSources(path.join(config.dataDir, "plugin-cache"), fetchFn);
   const plugins = new PluginService(db, pluginSources, servers, files, audit, gate, rcon, path.join(config.dataDir, "tmp"), config.mysql);
   updater.afterStart = (started) => plugins.healthLines(started);
+  const players = new PlayerService(db, servers, plugins, files, host, rcon, audit);
   if (deps.pluginCheckDelayMs !== undefined) updater.pluginCheckDelayMs = deps.pluginCheckDelayMs;
 
   users.ensureOwner(config.ownerSteamId);
@@ -511,6 +514,98 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     return plugins.health(id);
   });
 
+  // ------------------------------------------------------------- players
+
+  const steamIdFrom = async (input: string): Promise<string> => {
+    try {
+      return await resolveSteamId(input, fetchFn);
+    } catch (e) {
+      throw badRequest((e as Error).message);
+    }
+  };
+
+  app.get("/api/servers/:id/players", async (req) => {
+    requirePerm(req, "view");
+    const { id } = idParam.parse(req.params);
+    return players.live(id);
+  });
+
+  app.post("/api/servers/:id/players/:userId/kick", async (req) => {
+    const user = requirePerm(req, "players.moderate");
+    const { id, userId } = z.object({ id: z.coerce.number().int(), userId: z.coerce.number().int().min(0) }).parse(req.params);
+    const { reason } = z.object({ reason: z.string().max(200).default("") }).parse(req.body ?? {});
+    await players.kick(id, userId, reason, user.id);
+    return { ok: true };
+  });
+
+  app.get("/api/players/recent", async (req) => {
+    requirePerm(req, "view");
+    const { serverId } = z.object({ serverId: z.coerce.number().int().optional() }).parse(req.query);
+    return { players: players.recent(serverId) };
+  });
+
+  app.get("/api/servers/:id/moderation", async (req) => {
+    requirePerm(req, "view");
+    const { id } = idParam.parse(req.params);
+    return players.moderationInfo(id);
+  });
+
+  app.get("/api/servers/:id/bans", async (req) => {
+    requirePerm(req, "view");
+    const { id } = idParam.parse(req.params);
+    const { all } = z.object({ all: z.coerce.boolean().default(false) }).parse(req.query);
+    return { bans: await players.bans(id, all) };
+  });
+
+  app.post("/api/servers/:id/bans", async (req) => {
+    const user = requirePerm(req, "players.moderate");
+    const { id } = idParam.parse(req.params);
+    const body = z
+      .object({ userId: z.number().int().optional(), steam: z.string().optional(), minutes: z.number().int(), reason: z.string().max(200) })
+      .parse(req.body);
+    if (body.userId === undefined && !body.steam) throw badRequest("Pick a player or enter a SteamID.");
+    const target = body.userId !== undefined ? { userId: body.userId } : { steamId: await steamIdFrom(body.steam!) };
+    await players.ban(id, target, body.minutes, body.reason, user.id);
+    return { ok: true };
+  });
+
+  app.post("/api/servers/:id/bans/unban", async (req) => {
+    const user = requirePerm(req, "players.moderate");
+    const { id } = idParam.parse(req.params);
+    const body = z.object({ steamId: z.string(), reason: z.string().max(200).default("") }).parse(req.body);
+    await players.unban(id, body.steamId, body.reason, user.id);
+    return { ok: true };
+  });
+
+  app.get("/api/servers/:id/gameadmins", async (req) => {
+    requirePerm(req, "view");
+    const { id } = idParam.parse(req.params);
+    return { admins: await players.admins(id) };
+  });
+
+  app.post("/api/servers/:id/gameadmins", async (req) => {
+    const user = requirePerm(req, "gameadmins.manage");
+    const { id } = idParam.parse(req.params);
+    const body = z
+      .object({
+        steam: z.string().min(1),
+        name: z.string().min(1).max(64),
+        flags: z.string().min(1).max(200),
+        immunity: z.number().int().default(0),
+        minutes: z.number().int().min(0).default(0),
+      })
+      .parse(req.body);
+    await players.addAdmin(id, { ...body, steamId: await steamIdFrom(body.steam) }, user.id);
+    return { ok: true };
+  });
+
+  app.delete("/api/servers/:id/gameadmins/:steamId", async (req) => {
+    const user = requirePerm(req, "gameadmins.manage");
+    const { id, steamId } = z.object({ id: z.coerce.number().int(), steamId: z.string() }).parse(req.params);
+    await players.removeAdmin(id, steamId, user.id);
+    return { ok: true };
+  });
+
   // ------------------------------------------------------------- game update
 
   app.get("/api/game", async (req) => {
@@ -549,6 +644,6 @@ export async function buildApp(deps: AppDeps): Promise<App> {
 
   return {
     fastify: app,
-    services: { users, sessions, audit, servers, configs, updater, presets, plugins },
+    services: { users, sessions, audit, servers, configs, updater, presets, plugins, players },
   };
 }

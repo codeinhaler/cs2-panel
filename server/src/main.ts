@@ -19,9 +19,11 @@ if (config.dev) {
   host = new SystemHost(config.cs2ctl, config.cs2Root);
 }
 
-const { fastify } = await buildApp({ config, db, host });
+const { fastify, services } = await buildApp({ config, db, host });
+services.players.startPolling();
 
 const shutdown = async () => {
+  services.players.stopPolling();
   await fastify.close();
   db.close();
   process.exit(0);

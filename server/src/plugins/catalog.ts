@@ -14,6 +14,9 @@ export type PluginSource =
     }
   | { type: "metamod" };
 
+import type { ModerationIntegration } from "./moderation.js";
+import { simpleAdminModeration } from "./integrations/simpleadmin.js";
+
 /** Connection settings for the panel's shared MariaDB (set up by setup-mariadb.sh). */
 export interface DatabaseSettings {
   host: string;
@@ -51,6 +54,8 @@ export interface CatalogEntry {
    */
   looseDir?: string;
   database?: DatabaseIntegration;
+  /** Bans and in-game admins the panel can manage through this plugin. */
+  moderation?: ModerationIntegration;
   /** Libraries other plugins need; hidden from "pick plugins" lists. */
   library?: boolean;
 }
@@ -110,6 +115,7 @@ export const CATALOG: CatalogEntry[] = [
     source: { type: "github", repo: "daffyyyy/CS2-SimpleAdmin", only: /^CS2-SimpleAdmin-.*\.zip$/i },
     requires: ["menumanager", "playersettings", "anybaselib", "counterstrikesharp"],
     looseDir: "plugins/CS2-SimpleAdmin",
+    moderation: simpleAdminModeration,
     database: {
       configFile: "addons/counterstrikesharp/configs/plugins/CS2-SimpleAdmin/CS2-SimpleAdmin.json",
       benefit: "bans, mutes and admins apply on every server",

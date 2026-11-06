@@ -14,6 +14,7 @@ export const PERMISSIONS = [
   "server.delete",
   "server.rawargs",
   "users.manage",
+  "gameadmins.manage",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
