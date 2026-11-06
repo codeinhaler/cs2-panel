@@ -65,6 +65,16 @@ export class FakeHost implements Host {
     return "";
   }
 
+  /** What Steam reports as the newest public build (tests change it to simulate a CS2 update). */
+  latestBuildId = "20001234";
+  steamCheckError: string | null = null;
+
+  async steamAppInfo(): Promise<string> {
+    this.calls.push("steam-check");
+    if (this.steamCheckError) throw new Error(this.steamCheckError);
+    return fakeAppInfo(this.latestBuildId);
+  }
+
   async steamUpdate(_validate: boolean, onLine: (line: string) => void): Promise<void> {
     this.calls.push("steam-update");
     if (this.mounted.size > 0) throw new Error("refusing to update while server overlays are mounted");
@@ -79,7 +89,7 @@ export class FakeHost implements Host {
       onLine(l);
       await new Promise((r) => setTimeout(r, 50));
     }
-    installFakeBase(this.cs2Root);
+    installFakeBase(this.cs2Root, this.latestBuildId);
   }
 
   async isMounted(slug: string): Promise<boolean> {
@@ -138,12 +148,17 @@ export class FakeHost implements Host {
 }
 
 /** Writes the few base files the panel reads: steam.inf and gameinfo.gi. */
-export function installFakeBase(cs2Root: string): void {
+export function installFakeBase(cs2Root: string, buildId = "20001234"): void {
   const csgo = path.join(cs2Root, "base", "game", "csgo");
   mkdirSync(path.join(csgo, "cfg"), { recursive: true });
   mkdirSync(path.join(cs2Root, "base", "game", "bin", "linuxsteamrt64"), { recursive: true });
   writeFileSync(path.join(csgo, "steam.inf"), "ClientVersion=2000123\nServerVersion=2000123\nPatchVersion=1.40.9.1\nProductName=cs2\nappID=730\n");
   writeFileSync(path.join(csgo, "gameinfo.gi"), FAKE_GAMEINFO);
+  mkdirSync(path.join(cs2Root, "base", "steamapps"), { recursive: true });
+  writeFileSync(
+    path.join(cs2Root, "base", "steamapps", "appmanifest_730.acf"),
+    `"AppState"\n{\n\t"appid"\t\t"730"\n\t"name"\t\t"Counter-Strike 2"\n\t"buildid"\t\t"${buildId}"\n\t"LastUpdated"\t\t"1762400000"\n}\n`,
+  );
   if (!existsSync(path.join(csgo, "cfg", "gamemode_competitive.cfg"))) {
     writeFileSync(path.join(csgo, "cfg", "gamemode_competitive.cfg"), "// stock competitive settings (simulated)\nmp_maxrounds 24\n");
   }
@@ -168,3 +183,31 @@ const FAKE_GAMEINFO = `"GameInfo"
 	}
 }
 `;
+
+function fakeAppInfo(buildId: string): string {
+  return `Connecting anonymously to Steam Public...OK
+AppID : 730, change number : 31337/0, last change : Thu Nov  5 18:00:00 2026
+"730"
+{
+	"common"
+	{
+		"name"		"Counter-Strike 2"
+	}
+	"depots"
+	{
+		"branches"
+		{
+			"public"
+			{
+				"buildid"		"${buildId}"
+				"timeupdated"		"1762450000"
+			}
+			"beta"
+			{
+				"buildid"		"99999999"
+			}
+		}
+	}
+}
+`;
+}

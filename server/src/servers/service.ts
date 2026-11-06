@@ -317,7 +317,7 @@ export class ServerService {
     this.audit.record(actor.id, "server.delete", id, { slug: s.slug, name: s.name, port: s.port, archive: out.trim() });
   }
 
-  async control(id: number, action: ControlAction, actor: Actor): Promise<ServerView> {
+  async control(id: number, action: ControlAction, actor: Pick<Actor, "id"> | { id: null }, details: Record<string, unknown> = {}): Promise<ServerView> {
     // A force stop must work even while something else is in progress.
     if (action !== "kill") this.gate.assertFree();
     const s = this.require(id);
@@ -339,7 +339,7 @@ export class ServerService {
       if (e instanceof HttpError) throw e;
       throw badRequest((e as Error).message);
     }
-    this.audit.record(actor.id, `server.${action}`, id);
+    this.audit.record(actor.id, `server.${action}`, id, details);
     return this.view(s);
   }
 

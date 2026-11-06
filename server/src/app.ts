@@ -29,6 +29,11 @@ import { CATALOG, pluginPages } from "./plugins/catalog.js";
 import { PlayerService } from "./players/service.js";
 import { BanService, BRIDGE_ID } from "./players/bans.js";
 import { MapMenuService } from "./plugins/map-menu.js";
+import { Settings } from "./settings.js";
+import { Automation } from "./automation/index.js";
+import { humanCounter } from "./automation/humans.js";
+import { UpdateWatcher, type UpdatePolicy } from "./automation/updates.js";
+import { RestartScheduler } from "./automation/restarts.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -45,6 +50,8 @@ export interface AppDeps {
   logLevel?: string;
   /** Seconds-long waits are skipped in tests. */
   pluginCheckDelayMs?: number;
+  /** Replaces the waits before scheduled restarts (tests). */
+  automationSleep?: (ms: number) => Promise<void>;
 }
 
 export interface App {
@@ -60,6 +67,7 @@ export interface App {
     plugins: PluginService;
     players: PlayerService;
     bans: BanService;
+    automation: Automation;
   };
 }
 
@@ -85,6 +93,12 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const plugins = new PluginService(db, pluginSources, servers, files, audit, gate, rcon, path.join(config.dataDir, "tmp"), config.mysql);
   updater.afterStart = (started) => plugins.healthLines(started);
   const players = new PlayerService(db, servers, plugins, files, host, rcon, audit);
+  const settings = new Settings(db);
+  const humans = humanCounter(players);
+  const automation = new Automation(
+    new UpdateWatcher(settings, files, host, updater, gate, serverStore, humans, audit),
+    new RestartScheduler(db, settings, servers, host, gate, updater, humans, rcon, audit, deps.automationSleep),
+  );
   const mapMenus = new MapMenuService(configs, plugins, files.baseDir);
   const bans = new BanService(db, servers, plugins, files, host, rcon, audit);
   // Every server with the bridge gets the current ban list before it starts and right after the bridge is installed.
@@ -277,6 +291,10 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       usedPorts: servers.usedPorts(),
       cs2: { installed: await files.baseInstalled(), ...(await files.baseVersion()) },
       busy: gate.busy,
+      update: await (async () => {
+        const a = await automation.updates.status();
+        return { available: a.updateAvailable, latestBuild: a.latestBuild, policy: a.settings.policy, deadline: a.deadline };
+      })(),
     };
   });
 
@@ -697,7 +715,46 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       job: { ...updater.job, lines: undefined },
       lines,
       next,
+      auto: await automation.updates.status(),
     };
+  });
+
+  app.put("/api/game/auto", async (req) => {
+    const user = requirePerm(req, "game.update");
+    const body = z
+      .object({
+        policy: z.enum(["off", "notify", "when-empty", "now"]) as z.ZodType<UpdatePolicy>,
+        checkMinutes: z.number().int(),
+        maxWaitMinutes: z.number().int(),
+        warnSeconds: z.number().int(),
+      })
+      .parse(req.body);
+    automation.updates.setConfig(body, user.id);
+    return { auto: await automation.updates.status() };
+  });
+
+  app.post("/api/game/check", async (req) => {
+    requirePerm(req, "game.update");
+    await automation.updates.check();
+    return { auto: await automation.updates.status() };
+  });
+
+  app.get("/api/servers/:id/schedule", async (req) => {
+    requirePerm(req, "view");
+    const { id } = idParam.parse(req.params);
+    servers.require(id);
+    return automation.restarts.view(id);
+  });
+
+  app.put("/api/servers/:id/schedule", async (req) => {
+    const user = requirePerm(req, "server.manage");
+    const { id } = idParam.parse(req.params);
+    servers.require(id);
+    const body = z
+      .object({ restartAt: z.string().max(5).nullable(), ifPlayers: z.enum(["wait", "restart"]), maxWaitMinutes: z.number().int() })
+      .parse(req.body);
+    automation.restarts.set(id, body, user.id);
+    return automation.restarts.view(id);
   });
 
   app.post("/api/game/update", async (req) => {
@@ -705,7 +762,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     const body = z
       .object({ validate: z.boolean().default(false), warnSeconds: z.number().int().min(0).max(600).default(60) })
       .parse(req.body ?? {});
-    updater.start(body, user.id);
+    void updater.start(body, user.id);
     return { ok: true };
   });
 
@@ -724,6 +781,6 @@ export async function buildApp(deps: AppDeps): Promise<App> {
 
   return {
     fastify: app,
-    services: { users, sessions, audit, servers, configs, updater, presets, plugins, players, bans },
+    services: { users, sessions, audit, servers, configs, updater, presets, plugins, players, bans, automation },
   };
 }

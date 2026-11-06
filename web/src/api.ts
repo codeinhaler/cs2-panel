@@ -79,6 +79,7 @@ export interface HostInfo {
   usedPorts: { serverId: number; name: string; port: number }[];
   cs2: { installed: boolean; patchVersion: string | null; buildId: string | null };
   busy: string | null;
+  update: { available: boolean; latestBuild: string | null; policy: UpdatePolicy; deadline: string | null };
 }
 
 export interface ConfigFileInfo {
@@ -239,11 +240,48 @@ export interface AuditEntry {
   createdAt: string;
 }
 
+export type UpdatePolicy = "off" | "notify" | "when-empty" | "now";
+
+export interface UpdateSettings {
+  policy: UpdatePolicy;
+  checkMinutes: number;
+  maxWaitMinutes: number;
+  warnSeconds: number;
+}
+
+export interface AutoUpdateStatus {
+  settings: UpdateSettings;
+  installedBuild: string | null;
+  latestBuild: string | null;
+  latestUpdatedAt: string | null;
+  checkedAt: string | null;
+  error: string | null;
+  pendingSince: string | null;
+  updateAvailable: boolean;
+  checking: boolean;
+  deadline: string | null;
+}
+
 export interface GameState {
   cs2: { installed: boolean; patchVersion: string | null; buildId: string | null };
-  job: { state: "idle" | "running" | "succeeded" | "failed"; startedAt: string | null; finishedAt: string | null };
+  job: { state: "idle" | "running" | "succeeded" | "failed"; startedAt: string | null; finishedAt: string | null; trigger: string | null };
   lines: string[];
   next: number;
+  auto: AutoUpdateStatus;
+}
+
+export interface RestartSchedule {
+  restartAt: string | null;
+  ifPlayers: "wait" | "restart";
+  maxWaitMinutes: number;
+}
+
+export interface ScheduleView {
+  schedule: RestartSchedule;
+  nextAt: string | null;
+  waitingSince: string | null;
+  deadline: string | null;
+  timezone: string;
 }
 
 export class ApiError extends Error {
@@ -366,6 +404,10 @@ export const api = {
 
   game: (since = 0) => request<GameState>("GET", `/api/game?${q({ since })}`),
   startUpdate: (validate: boolean, warnSeconds: number) => request<{ ok: true }>("POST", "/api/game/update", { validate, warnSeconds }),
+  saveAutoUpdate: (settings: UpdateSettings) => request<{ auto: AutoUpdateStatus }>("PUT", "/api/game/auto", settings),
+  checkForUpdate: () => request<{ auto: AutoUpdateStatus }>("POST", "/api/game/check", {}),
+  schedule: (id: number) => request<ScheduleView>("GET", `/api/servers/${id}/schedule`),
+  saveSchedule: (id: number, schedule: RestartSchedule) => request<ScheduleView>("PUT", `/api/servers/${id}/schedule`, schedule),
 };
 
 export const GAME_MODE_NAMES: Record<string, string> = {

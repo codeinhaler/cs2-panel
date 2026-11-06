@@ -21,9 +21,11 @@ if (config.dev) {
 
 const { fastify, services } = await buildApp({ config, db, host });
 services.players.startPolling();
+services.automation.start();
 
 const shutdown = async () => {
   services.players.stopPolling();
+  services.automation.stop();
   await fastify.close();
   db.close();
   process.exit(0);

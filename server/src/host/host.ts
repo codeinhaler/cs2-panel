@@ -24,6 +24,8 @@ export interface Host {
   cs2ctl(verb: Cs2ctlVerb, slug: string): Promise<string>;
   /** Updates the shared CS2 install. Each output line is passed to onLine. */
   steamUpdate(validate: boolean, onLine: (line: string) => void): Promise<void>;
+  /** SteamCMD's current app info for CS2 (raw VDF text), to compare build IDs. */
+  steamAppInfo(): Promise<string>;
   serviceStatus(slug: string): Promise<ServiceStatus>;
   /** True if the server's overlay is mounted on its merged/ dir. */
   isMounted(slug: string): Promise<boolean>;

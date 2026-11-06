@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, fullTime, timeAgo, type GameState } from "../api";
 import { useAction, useApp } from "../app-context";
+import { AutoUpdatePanel } from "./AutoUpdate";
 
 export function GameUpdatePage() {
   const { can } = useApp();
@@ -61,14 +62,16 @@ export function GameUpdatePage() {
           <h1>Game update</h1>
           <p>
             {installed
-              ? `CS2 ${state.cs2.patchVersion ?? "unknown version"} is installed${state.cs2.buildId ? ` (build ${state.cs2.buildId})` : ""}.`
+              ? `CS2 ${state.cs2.patchVersion ?? "unknown version"} is installed${state.auto.installedBuild ? ` (Steam build ${state.auto.installedBuild})` : ""}.`
               : "CS2 isn't installed on this machine yet."}
           </p>
         </div>
       </div>
 
+      {installed && <AutoUpdatePanel auto={state.auto} onChange={(auto) => setState((s) => (s ? { ...s, auto } : s))} />}
+
       <div className="panel">
-        <h2 style={{ marginBottom: 6 }}>{installed ? "Update CS2" : "Install CS2"}</h2>
+        <h2 style={{ marginBottom: 6 }}>{installed ? "Update CS2 now" : "Install CS2"}</h2>
         <p className="hint" style={{ marginTop: 0, maxWidth: "70ch" }}>
           {installed
             ? "Every server shares one CS2 install. Updating stops all servers, updates the install with SteamCMD, refreshes each server's Metamod setup, and starts the servers that were running."
@@ -111,7 +114,10 @@ export function GameUpdatePage() {
       {(lines.length > 0 || state.job.state !== "idle") && (
         <div className="panel">
           <div className="panel-head">
-            <h2>{running ? "Update in progress" : "Last update"}</h2>
+            <div>
+              <h2>{running ? "Update in progress" : "Last update"}</h2>
+              {state.job.trigger && <p className="hint" style={{ margin: "4px 0 0" }}>Started automatically: {state.job.trigger}.</p>}
+            </div>
             {state.job.state === "succeeded" && <span className="state-pill" data-state="active">Finished <span title={fullTime(state.job.finishedAt)}>{timeAgo(state.job.finishedAt)}</span></span>}
             {state.job.state === "failed" && <span className="state-pill" data-state="failed">Failed <span title={fullTime(state.job.finishedAt)}>{timeAgo(state.job.finishedAt)}</span></span>}
             {running && <span className="state-pill" data-state="activating">Running</span>}

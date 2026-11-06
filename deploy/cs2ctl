@@ -12,6 +12,7 @@
 #   cs2ctl kill <slug>                  Force stop: SIGKILL the service and any stray process of this server
 #   cs2ctl archive <slug>               Stop, unmount and archive a deleted server
 #   cs2ctl steam-update [validate]      Update the shared CS2 install (all overlays must be unmounted)
+#   cs2ctl steam-check                  Print Steam's current app info for CS2 (to spot new builds)
 
 set -euo pipefail
 
@@ -137,7 +138,17 @@ case "$verb" in
     die "steamcmd failed after 3 attempts"
     ;;
 
+  steam-check)
+    [[ -x "$STEAMCMD" ]] || die "steamcmd not found at $STEAMCMD"
+    # SteamCMD answers app_info_print from its cache, which can be hours old.
+    # Removing the cache forces fresh data (the same trick LinuxGSM uses).
+    game_home="$(getent passwd "$GAME_USER" | cut -d: -f6)"
+    rm -f "$CS2_ROOT/steamcmd/appcache/appinfo.vdf" "$game_home/Steam/appcache/appinfo.vdf" \
+      "$game_home/.steam/steam/appcache/appinfo.vdf" "$game_home/.local/share/Steam/appcache/appinfo.vdf"
+    timeout 150 runuser -u "$GAME_USER" -- "$STEAMCMD" +login anonymous +app_info_update 1 +app_info_print "$CS2_APP_ID" +quit
+    ;;
+
   *)
-    die "unknown verb '${verb}'. Verbs: start stop restart kill enable disable mount umount archive steam-update"
+    die "unknown verb '${verb}'. Verbs: start stop restart kill enable disable mount umount archive steam-update steam-check"
     ;;
 esac

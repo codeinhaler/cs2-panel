@@ -1,0 +1,36 @@
+import type { RestartScheduler } from "./restarts.js";
+import type { UpdateWatcher } from "./updates.js";
+
+/** Runs the automatic jobs once a minute, even when nobody has the panel open. */
+export class Automation {
+  private timer: NodeJS.Timeout | null = null;
+  private running = false;
+
+  constructor(
+    readonly updates: UpdateWatcher,
+    readonly restarts: RestartScheduler,
+  ) {}
+
+  async tick(now = new Date()): Promise<void> {
+    if (this.running) return;
+    this.running = true;
+    try {
+      // Updates first: an update restarts every server anyway.
+      await this.updates.tick(now).catch(() => undefined);
+      await this.restarts.tick(now).catch(() => undefined);
+    } finally {
+      this.running = false;
+    }
+  }
+
+  start(intervalMs = 60_000): void {
+    if (this.timer) return;
+    this.timer = setInterval(() => void this.tick(), intervalMs);
+    this.timer.unref();
+  }
+
+  stop(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
+}

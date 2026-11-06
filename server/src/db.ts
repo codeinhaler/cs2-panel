@@ -147,6 +147,9 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX bans_steam ON bans(steam_id);
   `,
+  /* 6: per-server automation (scheduled restarts) */ `
+  ALTER TABLE servers ADD COLUMN schedule TEXT NOT NULL DEFAULT '{}';
+  `,
 ];
 
 export function openDb(file: string): Db {

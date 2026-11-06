@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api, type HostInfo, type Preset, type Server } from "../../api";
 import { useAction, useApp } from "../../app-context";
 import { PortField } from "../../components/PortField";
+import { SchedulePanel } from "./Schedule";
 
 export function SettingsTab({ server: s, onSaved }: { server: Server; onSaved: () => void }) {
   const { can, toast } = useApp();
@@ -157,6 +158,7 @@ export function SettingsTab({ server: s, onSaved }: { server: Server; onSaved: (
         </div>
       </form>
 
+      <SchedulePanel server={s} />
       <DuplicatePanel server={s} host={host} />
       {can("server.delete") && <DeletePanel server={s} />}
     </>

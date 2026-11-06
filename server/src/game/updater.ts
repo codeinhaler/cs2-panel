@@ -13,6 +13,8 @@ export interface UpdateJob {
   startedAt: string | null;
   finishedAt: string | null;
   startedBy: number | null;
+  /** Why it ran when nobody clicked: "automatic", or null for a manual update. */
+  trigger: string | null;
   lines: string[];
 }
 
@@ -24,7 +26,7 @@ const MAX_LINES = 5000;
  * stale files, and start the servers that were running.
  */
 export class GameUpdater {
-  job: UpdateJob = { state: "idle", startedAt: null, finishedAt: null, startedBy: null, lines: [] };
+  job: UpdateJob = { state: "idle", startedAt: null, finishedAt: null, startedBy: null, trigger: null, lines: [] };
   /** Called with the servers that were started again; returns lines for the log (plugin health). */
   afterStart: ((started: ServerRecord[]) => Promise<string[]>) | null = null;
   pluginCheckDelayMs = 45_000;
@@ -45,13 +47,14 @@ export class GameUpdater {
   }
 
   /** Starts the update in the background. Throws if something else is running. */
-  start(opts: { validate: boolean; warnSeconds: number }, userId: number): void {
+  start(opts: { validate: boolean; warnSeconds: number }, userId: number | null, trigger: string | null = null): Promise<void> {
     this.gate.assertFree();
     if (this.job.state === "running") throw conflict("An update is already running.");
     this.gate.busy = "a CS2 update";
-    this.job = { state: "running", startedAt: new Date().toISOString(), finishedAt: null, startedBy: userId, lines: [] };
-    this.audit.record(userId, "game.update.start", null, opts);
-    void this.run(opts)
+    this.job = { state: "running", startedAt: new Date().toISOString(), finishedAt: null, startedBy: userId, trigger, lines: [] };
+    this.audit.record(userId, "game.update.start", null, { ...opts, ...(trigger ? { trigger } : {}) });
+    if (trigger) this.log(`Started automatically: ${trigger}.`);
+    return this.run(opts)
       .then(() => {
         this.job.state = "succeeded";
         this.audit.record(userId, "game.update.finish", null, { result: "succeeded" });

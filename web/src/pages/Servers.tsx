@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { api, modeName, uptime, type Server } from "../api";
+import { api, fullTime, modeName, uptime, type Server } from "../api";
 import { useApp, usePolling } from "../app-context";
 import { ControlButtons, Slots, StateLabel } from "../components/server-bits";
 
@@ -35,6 +35,18 @@ export function ServersPage() {
       </div>
 
       {error && <div className="notice error">{error}</div>}
+
+      {host?.update.available && !host.busy && (
+        <div className="notice info" style={{ marginBottom: 16 }}>
+          A CS2 update is out.{" "}
+          {host.update.policy === "when-empty"
+            ? `It installs once the servers are empty${host.update.deadline ? `, at the latest ${fullTime(host.update.deadline)}` : ""}. `
+            : host.update.policy === "now"
+              ? "It's being installed. "
+              : "Players can't join until the servers are updated. "}
+          <Link to="/game">Game update</Link>
+        </div>
+      )}
 
       {host && !host.cs2.installed && (
         <div className="notice warn" style={{ marginBottom: 16 }}>

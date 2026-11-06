@@ -1,5 +1,6 @@
 import { promises as fs, constants as fsc } from "node:fs";
 import path from "node:path";
+import { manifestBuild } from "../game/steam-vdf.js";
 import { hasMetamodPath, parseSteamInf, patchGameinfo } from "../game/gameinfo.js";
 
 /** Paths, relative to an instance's upper dir, that may legitimately live there. */
@@ -77,6 +78,15 @@ export class InstanceFiles {
       return { patchVersion: inf.PatchVersion ?? null, buildId: inf.ServerVersion ?? inf.ClientVersion ?? null };
     } catch {
       return { patchVersion: null, buildId: null };
+    }
+  }
+
+  /** The Steam build ID of the shared install, from its app manifest. */
+  async baseBuildId(): Promise<string | null> {
+    try {
+      return manifestBuild(await fs.readFile(path.join(this.baseDir, "steamapps", "appmanifest_730.acf"), "utf8"));
+    } catch {
+      return null;
     }
   }
 

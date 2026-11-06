@@ -32,6 +32,16 @@ export class SystemHost implements Host {
     }
   }
 
+  async steamAppInfo(): Promise<string> {
+    try {
+      const { stdout } = await execFileP("sudo", ["-n", this.cs2ctlPath, "steam-check"], { timeout: 180_000, maxBuffer: 16 * 1024 * 1024 });
+      return stdout;
+    } catch (err) {
+      const e = err as { stderr?: string; message: string };
+      throw new Error((e.stderr || e.message).trim().split("\n").slice(-3).join(" "));
+    }
+  }
+
   steamUpdate(validate: boolean, onLine: (line: string) => void): Promise<void> {
     return new Promise((resolve, reject) => {
       const args = ["-n", this.cs2ctlPath, "steam-update", ...(validate ? ["validate"] : [])];
