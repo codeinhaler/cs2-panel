@@ -31,6 +31,13 @@ The design is in [docs/DESIGN.md](docs/DESIGN.md).
 - **Plugin tabs**: some plugins bring their own tab on the server page while installed. CS2-SimpleAdmin gets a *SimpleAdmin* tab with its own bans, its in-game admins (Owner only), and the maps in its in-game change-map menu (regular and Workshop maps; pick from the maps in your CS2 install). Without SimpleAdmin, the tab simply isn't there.
 - Every kick, ban, unban and admin change is in the Activity log with who did it.
 
+## What's in Phase 4 (so far)
+
+- **Automatic CS2 updates** (Game update page). The panel asks Steam (through SteamCMD) for the newest CS2 build every few minutes and compares it with what's installed. Choose what happens when there's a new one: update when the servers are empty (with a longest wait), update right away (with a warning to players), only tell me, or don't check at all. A failed update isn't retried for 30 minutes.
+- **Scheduled restarts** (server Settings tab). Restart a server every day at a set time. If players are on, either wait for them to leave (up to a limit, then warn and restart) or warn them and restart.
+- **Workshop maps and collections**. A server can start on a Steam Workshop map or collection instead of an installed map; paste the ID or the Workshop link. A collection's maps become the server's map rotation, optionally starting on a chosen map. Works best with a GSLT token.
+- Automatic actions show up in Activity as "System", with the reason.
+
 ## Installing on the server
 
 You need Debian 13 (x86_64), root access, and about 70 GB free disk space.

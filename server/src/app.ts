@@ -298,6 +298,12 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     };
   });
 
+  /** Maps in the CS2 install, for map pickers. */
+  app.get("/api/maps", async (req) => {
+    requirePerm(req, "view");
+    return { maps: await mapMenus.installedMaps() };
+  });
+
   app.get("/api/presets", async (req) => {
     requirePerm(req, "view");
     return { presets: presets.list() };

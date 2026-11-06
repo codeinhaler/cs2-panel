@@ -245,6 +245,30 @@ describe("servers", () => {
     expect((await call(c, "PATCH", `/api/servers/${id}`, { port: 27025 })).body.server.port).toBe(27025);
   });
 
+  it("runs Workshop maps and collections", async () => {
+    const c = await login();
+    const pid = await presetId(c, "casual");
+    const created = await call(c, "POST", "/api/servers", { name: "W", presetId: pid, port: 27015, map: "workshop:3070288532" });
+    expect(created.status, JSON.stringify(created.body)).toBe(200);
+    const id = created.body.server.id;
+    let env = readFileSync(path.join(dir, "env", "w.env"), "utf8");
+    expect(env).toContain("+host_workshop_map 3070288532");
+    expect(env).not.toContain("+map ");
+
+    await call(c, "PATCH", `/api/servers/${id}`, { map: "collection:125499818/3070288532" });
+    env = readFileSync(path.join(dir, "env", "w.env"), "utf8");
+    expect(env).toContain("+host_workshop_collection 125499818 +host_workshop_start_map 3070288532");
+
+    await call(c, "PATCH", `/api/servers/${id}`, { map: "collection:125499818" });
+    expect(readFileSync(path.join(dir, "env", "w.env"), "utf8")).not.toContain("start_map");
+
+    for (const bad of ["workshop:abc", "collection:12/x", "de_dust2; quit", "http://evil"]) {
+      expect((await call(c, "PATCH", `/api/servers/${id}`, { map: bad })).status, bad).toBe(400);
+    }
+    await call(c, "PATCH", `/api/servers/${id}`, { map: "de_nuke" });
+    expect(readFileSync(path.join(dir, "env", "w.env"), "utf8")).toContain("+map de_nuke");
+  });
+
   it("force stops a server, even during an update, and audits it", async () => {
     const c = await login();
     const pid = await presetId(c, "casual");

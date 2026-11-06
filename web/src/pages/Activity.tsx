@@ -32,7 +32,11 @@ function describe(e: AuditEntry): string {
     case "server.stop":
       return "stopped the server";
     case "server.restart":
-      return "restarted the server";
+      return d.trigger ? `restarted the server (${str("trigger")})` : "restarted the server";
+    case "server.restart.failed":
+      return `couldn't restart the server (${str("trigger")}): ${str("error")}`;
+    case "server.schedule":
+      return d.restartAt ? `set a daily restart at ${str("restartAt")}${d.ifPlayers === "wait" ? `, waiting up to ${str("maxWaitMinutes")} min for players to leave` : ""}` : "turned off the daily restart";
     case "server.kill":
       return "force-stopped the server";
     case "server.rcon":
@@ -70,7 +74,14 @@ function describe(e: AuditEntry): string {
     case "plugin.upload":
       return `uploaded and installed ${str("plugin")} (${str("file")})`;
     case "game.update.start":
+      if (d.trigger) return `started a CS2 update automatically (${str("trigger")})`;
       return d.validate ? "started a CS2 update with file verification" : "started a CS2 update";
+    case "game.update.available":
+      return `found a CS2 update: build ${str("latest")} (installed: ${str("installed")})`;
+    case "game.update.settings": {
+      const p: Record<string, string> = { off: "off", notify: "only notify", "when-empty": "update when empty", now: "update right away" };
+      return `set automatic CS2 updates to "${p[str("policy")] ?? str("policy")}"`;
+    }
     case "game.update.finish":
       return d.result === "succeeded" ? "CS2 update finished" : `CS2 update failed: ${str("error")}`;
     default:

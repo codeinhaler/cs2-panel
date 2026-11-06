@@ -1,6 +1,7 @@
 import { promises as fs, constants as fsc } from "node:fs";
 import path from "node:path";
 import { manifestBuild } from "../game/steam-vdf.js";
+import { mapLaunchArgs, parseMapSpec } from "./map-spec.js";
 import { hasMetamodPath, parseSteamInf, patchGameinfo } from "../game/gameinfo.js";
 
 /** Paths, relative to an instance's upper dir, that may legitimately live there. */
@@ -144,8 +145,7 @@ export class InstanceFiles {
       "+exec",
       GENERATED_CFG,
       ...(s.gsltToken ? ["+sv_setsteamaccount", s.gsltToken] : []),
-      "+map",
-      s.map,
+      ...mapLaunchArgs(parseMapSpec(s.map) ?? { kind: "stock", map: "de_dust2" }),
       ...(s.extraArgs.trim() ? s.extraArgs.trim().split(/\s+/) : []),
     ];
     const content =

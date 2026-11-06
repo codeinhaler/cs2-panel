@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { api, fullTime, modeName, uptime, type Server } from "../api";
 import { useApp, usePolling } from "../app-context";
+import { mapLabel } from "../components/MapPicker";
 import { ControlButtons, Slots, StateLabel } from "../components/server-bits";
 
 export function ServersPage() {
@@ -93,7 +94,7 @@ export function ServersPage() {
               <div className="unit-meta">
                 <StateLabel state={s.status.state} />
                 <span>{modeName(s)}</span>
-                <span>{s.live?.map ?? s.map}</span>
+                <span>{s.live?.map ?? mapLabel(s.map)}</span>
                 {s.status.state === "active" && <span>up {uptime(s.status.since)}</span>}
               </div>
             </div>

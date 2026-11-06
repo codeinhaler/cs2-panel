@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type CatalogPlugin, type HostInfo, type Preset } from "../api";
 import { useAction, useApp } from "../app-context";
+import { MapPicker } from "../components/MapPicker";
 import { PortField } from "../components/PortField";
 
 const slugify = (name: string) =>
@@ -142,10 +143,7 @@ export function NewServerPage() {
               </select>
               {preset && <small>{preset.description}</small>}
             </label>
-            <label className="field">
-              <span>Start map</span>
-              <input value={map} onChange={(e) => setMap(e.target.value)} placeholder={preset?.defaultMap ?? "de_dust2"} />
-            </label>
+            <MapPicker value={map} onChange={setMap} placeholder={preset?.defaultMap ?? "de_dust2"} />
             <label className="field">
               <span>Max players</span>
               <input

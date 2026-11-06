@@ -8,6 +8,7 @@ import { SettingsTab } from "./server/Settings";
 import { PluginsTab } from "./server/Plugins";
 import { PlayersTab } from "./server/Players";
 import { ModerationTab } from "./server/Moderation";
+import { mapLabel } from "../components/MapPicker";
 import { ActivityList } from "./Activity";
 
 // The config editor pulls in Monaco, so load it only when that tab opens.
@@ -109,7 +110,7 @@ function Overview({ server: s }: { server: Server }) {
           </div>
           <div>
             <dt>Map</dt>
-            <dd>{s.live?.map ?? s.map}</dd>
+            <dd>{s.live?.map ?? mapLabel(s.map)}</dd>
           </div>
           <div>
             <dt>Join password</dt>

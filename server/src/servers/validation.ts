@@ -1,3 +1,4 @@
+import { parseMapSpec } from "./map-spec.js";
 import { z } from "zod";
 
 export const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
@@ -42,7 +43,8 @@ export function portProblem(port: number, otherPorts: { port: number; name: stri
 const mapName = z
   .string()
   .trim()
-  .regex(/^[A-Za-z0-9_\-/]{1,64}$/, "Map names can only contain letters, numbers, _, - and /.");
+  .max(80)
+  .refine((v) => parseMapSpec(v) !== null, "Enter a map name like de_dust2, or a Workshop map or collection ID.");
 const displayName = z
   .string()
   .trim()

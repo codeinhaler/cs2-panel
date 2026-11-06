@@ -270,7 +270,11 @@ Community modes like retakes, surf or 1v1 arenas are built on a stock mode plus 
 
 Presets are stored in the database. The built-in ones are seeded at install and can't be deleted, but can be duplicated and edited.
 
-**Workshop maps (Phase 4):** a preset or server can use a Workshop map or collection by ID instead of a stock map. The panel passes the matching launch parameter (`+host_workshop_map` or `+host_workshop_collection`). Exact handling to be verified against the current CS2 build during implementation.
+**Workshop maps:** a server's map field holds either a map name (`de_dust2`), `workshop:<id>` or `collection:<id>[/<start map id>]`. The launch arguments become `+map <name>`, `+host_workshop_map <id>`, or `+host_workshop_collection <id> [+host_workshop_start_map <id>]`. Presets can use the same values.
+
+**Automatic updates:** `cs2ctl steam-check` runs SteamCMD `app_info_print 730` after removing SteamCMD's app info cache (otherwise it can answer with hours-old data). The panel compares the public branch's build ID with `steamapps/appmanifest_730.acf` in the shared install. The policy is global because all servers share one install: off, notify, when-empty (until no humans are on any running server, or a longest wait), or now. Updates run through the normal update job (§7). Settings and the last check live in the `settings` table.
+
+**Scheduled restarts:** per server (`servers.schedule`, JSON): a daily time in the host's local time, and what to do with players on (wait up to N minutes, or warn and restart). Each day's slot runs once; if the panel was down well past a slot, it is skipped rather than caught up. A one-minute timer drives both features.
 
 ---
 
@@ -549,11 +553,11 @@ Downloads the latest (or a specified) panel release, swaps it in, runs database 
 - Player history.
 
 **Phase 4 — Polish**
+- Workshop maps and collections. (done)
+- Update auto-detection and policies. (done)
+- Scheduled restarts, restart-when-empty. (done)
 - Custom presets, including "save this server as a preset".
-- Workshop maps and collections.
-- Update auto-detection and policies.
 - Global config layer.
-- Scheduled restarts, restart-when-empty.
 - Resource graphs, backups UI.
 - Optional Discord webhooks.
 

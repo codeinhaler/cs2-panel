@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api, type HostInfo, type Preset, type Server } from "../../api";
 import { useAction, useApp } from "../../app-context";
 import { PortField } from "../../components/PortField";
+import { MapPicker } from "../../components/MapPicker";
 import { SchedulePanel } from "./Schedule";
 
 export function SettingsTab({ server: s, onSaved }: { server: Server; onSaved: () => void }) {
@@ -92,10 +93,7 @@ export function SettingsTab({ server: s, onSaved }: { server: Server; onSaved: (
                 </span>
               </label>
             )}
-            <label className="field">
-              <span>Start map</span>
-              <input value={map} onChange={(e) => setMap(e.target.value)} required />
-            </label>
+            <MapPicker value={map} onChange={setMap} />
             <label className="field">
               <span>Max players</span>
               <input inputMode="numeric" value={maxPlayers} onChange={(e) => setMaxPlayers(e.target.value)} required />
