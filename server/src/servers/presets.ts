@@ -21,7 +21,9 @@ const serverCfg = (title: string, extra: string) => `// server.cfg — created b
 
 sv_cheats 0
 sv_lan 0
-sv_hibernate_when_empty 1
+// Hibernating while empty pauses the game loop, which also pauses
+// CounterStrikeSharp plugins (e.g. admin commands never get registered).
+sv_hibernate_when_empty 0
 sv_allow_votes 1
 ${extra}`;
 

@@ -111,6 +111,23 @@ export class PluginService {
     return rows.find((r) => r.version !== currentVersion && r.removed_at !== null);
   }
 
+  /** Server settings that stop installed plugins from working properly. */
+  async warnings(serverId: number): Promise<string[]> {
+    const s = this.servers.require(serverId);
+    const out: string[] = [];
+    if (this.installedIds(serverId).includes("counterstrikesharp")) {
+      const cfg = await fs.readFile(path.join(this.files.cfgDir(s.slug), "server.cfg"), "utf8").catch(() => "");
+      const lines = cfg.split(/\r?\n/).map((l) => l.replace(/\/\/.*$/, "").trim());
+      const last = lines.filter((l) => /^sv_hibernate_when_empty\s/.test(l)).at(-1);
+      if (last && !/\s"?0"?$/.test(last)) {
+        out.push(
+          "This server hibernates when empty (sv_hibernate_when_empty 1 in cfg/server.cfg). That pauses CounterStrikeSharp plugins, so their commands may not exist until someone joins. Set it to 0 in Config files.",
+        );
+      }
+    }
+    return out;
+  }
+
   async overview(serverId: number, refresh = false): Promise<PluginStatus[]> {
     this.servers.require(serverId);
     const current = this.current(serverId);

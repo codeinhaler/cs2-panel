@@ -238,6 +238,15 @@ describe("plugin management", () => {
     expect(audit.details.alsoInstalled).toHaveLength(5);
   });
 
+  it("warns when a server with CounterStrikeSharp hibernates while empty", async () => {
+    const c = await login();
+    const s = await newServer(c);
+    await call(c, "POST", `/api/servers/${s.id}/plugins/counterstrikesharp/install`, {});
+    expect((await call(c, "GET", `/api/servers/${s.id}/plugins`)).body.warnings).toEqual([]);
+    await call(c, "PUT", `/api/servers/${s.id}/configs/file`, { path: "cfg/server.cfg", content: "sv_hibernate_when_empty 0\nsv_hibernate_when_empty 1 // later wins\n" });
+    expect((await call(c, "GET", `/api/servers/${s.id}/plugins`)).body.warnings[0]).toMatch(/hibernates/);
+  });
+
   it("restarts a running server around the install, with the overlay unmounted while files change", async () => {
     const c = await login();
     const s = await newServer(c);

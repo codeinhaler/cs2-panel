@@ -225,7 +225,7 @@ export const api = {
     request<{ path: string; file: ConfigFile | null }>("POST", `/api/servers/${id}/configs/rollback`, { revisionId }),
 
   plugins: (id: number, refresh = false) =>
-    request<{ plugins: PluginStatus[]; databaseConfigured: boolean }>("GET", `/api/servers/${id}/plugins${refresh ? "?refresh=true" : ""}`),
+    request<{ plugins: PluginStatus[]; databaseConfigured: boolean; warnings: string[] }>("GET", `/api/servers/${id}/plugins${refresh ? "?refresh=true" : ""}`),
   catalog: () => request<{ plugins: CatalogPlugin[] }>("GET", "/api/plugins/catalog"),
   pluginVersions: (pluginId: string) =>
     request<{ versions: { version: string; publishedAt: string | null; prerelease: boolean }[] }>("GET", `/api/plugins/${encodeURIComponent(pluginId)}/versions`),

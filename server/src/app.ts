@@ -453,7 +453,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     requirePerm(req, "view");
     const { id } = idParam.parse(req.params);
     const { refresh } = z.object({ refresh: z.coerce.boolean().optional() }).parse(req.query);
-    return { plugins: await plugins.overview(id, refresh), databaseConfigured: plugins.databaseConfigured };
+    return { plugins: await plugins.overview(id, refresh), databaseConfigured: plugins.databaseConfigured, warnings: await plugins.warnings(id) };
   });
 
   app.get("/api/plugins/catalog", async (req) => {

@@ -8,6 +8,7 @@ export function PluginsTab({ server }: { server: Server }) {
   const { busy, run } = useAction();
   const [plugins, setPlugins] = useState<PluginStatus[] | null>(null);
   const [dbReady, setDbReady] = useState(true);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [working, setWorking] = useState<string | null>(null);
   const [health, setHealth] = useState<PluginHealth | null>(null);
   const [checking, setChecking] = useState(false);
@@ -19,6 +20,7 @@ export function PluginsTab({ server }: { server: Server }) {
       const r = await api.plugins(server.id, refresh);
       setPlugins(r.plugins);
       setDbReady(r.databaseConfigured);
+      setWarnings(r.warnings);
     },
     [server.id],
   );
@@ -108,6 +110,11 @@ export function PluginsTab({ server }: { server: Server }) {
 
   return (
     <>
+      {warnings.map((w) => (
+        <div key={w} className="notice warn" style={{ marginBottom: 16 }}>
+          {w}
+        </div>
+      ))}
       <div className="panel">
         <div className="panel-head">
           <div>
