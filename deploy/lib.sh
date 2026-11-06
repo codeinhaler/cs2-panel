@@ -97,3 +97,17 @@ install_host_files() {
   rm -f "$tmp"
   systemctl daemon-reload
 }
+
+# System libraries CS2 plugins need at runtime. CounterStrikeSharp's bundled
+# .NET runtime crashes at startup without ICU. The package name carries the
+# ICU version (libicu76 on Debian 13), so pick whatever this release ships.
+install_runtime_deps() {
+  local icu
+  icu="$(apt-cache search --names-only '^libicu[0-9]+$' | awk '{print $1}' | sort -V | tail -1)"
+  if [[ -z "$icu" ]]; then
+    warn "Couldn't find an ICU package; CounterStrikeSharp may not start. Install libicu by hand."
+    return 0
+  fi
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq unzip "$icu" >/dev/null ||
+    warn "Installing unzip/$icu failed; plugin installs or CounterStrikeSharp may not work."
+}

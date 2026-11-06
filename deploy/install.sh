@@ -45,6 +45,7 @@ log "Installing packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq curl ca-certificates tar unzip jq util-linux sudo lib32gcc-s1 lib32stdc++6 >/dev/null
+install_runtime_deps
 
 # ---------------------------------------------------------------- users
 log "Creating users"

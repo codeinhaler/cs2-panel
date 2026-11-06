@@ -57,6 +57,8 @@ shift || true
 case "$verb" in
   start | stop | restart)
     validate_slug "${1:-}"
+    # Clear an earlier crash so systemd's restart limit doesn't block a manual start.
+    [[ "$verb" != stop ]] && systemctl reset-failed "cs2@$1.service" 2>/dev/null
     exec systemctl "$verb" "cs2@$1.service"
     ;;
 

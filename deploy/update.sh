@@ -44,8 +44,9 @@ case "${1:-}" in
     ;;
 esac
 
-# Tools newer panel versions rely on (unzip for plugin archives).
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq unzip >/dev/null 2>&1 || warn "Could not install unzip; plugin installs may fail."
+# Libraries newer panel versions rely on (unzip for plugin archives, ICU for CounterStrikeSharp).
+apt-get update -qq || true
+install_runtime_deps
 
 log "Backing up the database"
 DB=/var/lib/cs2-panel/panel.db

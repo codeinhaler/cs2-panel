@@ -5,6 +5,10 @@ Description=CS2 server %i
 Wants=network-online.target
 After=network-online.target cs2-mount@%i.service
 Requires=cs2-mount@%i.service
+# A server that crashes 5 times within 2 minutes is left stopped (the panel
+# shows it as Crashed) instead of restarting forever.
+StartLimitIntervalSec=120
+StartLimitBurst=5
 
 [Service]
 Type=simple
