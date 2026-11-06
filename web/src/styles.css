@@ -1055,3 +1055,15 @@ input[type="radio"] {
   width: auto;
   accent-color: var(--accent);
 }
+
+.plugin-db-note {
+  margin-top: 6px;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  border-left: 2px solid var(--busy);
+  padding-left: 8px;
+}
+.plugin-picks {
+  display: grid;
+  gap: 8px;
+}

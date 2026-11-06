@@ -16,13 +16,13 @@ The design is in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## What's in Phase 2
 
-- A **Plugins** tab per server: Metamod:Source, CounterStrikeSharp and CS2-SimpleAdmin (with MenuManager, PlayerSettings and AnyBaseLib, which it needs). Installing a plugin installs what it needs first.
+- A **Plugins** tab per server with a catalog: Metamod:Source, CounterStrikeSharp and CS2-SimpleAdmin (plus the libraries it needs). Every plugin is optional; installing one installs what it needs first.
 - Pinned versions, one-click update, pick any version, roll back to the previous one. Plugin config files are kept on updates.
 - The Owner can upload a plugin archive that isn't in the catalog.
 - A health check that asks the running server whether Metamod and CounterStrikeSharp loaded. It also runs automatically after each CS2 update.
 - The New server form can install the plugins right away.
 
-Player management in the panel (live player list, bans through CS2-SimpleAdmin's database) is Phase 3.
+Player management in the panel (live player list, kick, and bans when a ban plugin is installed) is Phase 3.
 
 ## Installing on the server
 
@@ -50,7 +50,7 @@ The installer asks for the token, your SteamID64 (you become the Owner) and the 
 
 **4. Open the panel** at `http://<server-ip>:8080` and sign in with Steam.
 
-**5. Shared database for CS2-SimpleAdmin** (once, if you use it). This installs MariaDB, listening on 127.0.0.1 only, so bans and admins are shared across all servers:
+**5. Optional: shared database for plugins.** Some plugins can keep their data in a database shared by all servers; CS2-SimpleAdmin, for example, then applies a ban on every server. This installs MariaDB, listening on 127.0.0.1 only:
 
 ```sh
 sudo /opt/cs2-panel/deploy/setup-mariadb.sh

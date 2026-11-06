@@ -7,7 +7,7 @@ export function PluginsTab({ server }: { server: Server }) {
   const { can, toast } = useApp();
   const { busy, run } = useAction();
   const [plugins, setPlugins] = useState<PluginStatus[] | null>(null);
-  const [mysql, setMysql] = useState(true);
+  const [dbReady, setDbReady] = useState(true);
   const [working, setWorking] = useState<string | null>(null);
   const [health, setHealth] = useState<PluginHealth | null>(null);
   const [checking, setChecking] = useState(false);
@@ -18,7 +18,7 @@ export function PluginsTab({ server }: { server: Server }) {
     async (refresh = false) => {
       const r = await api.plugins(server.id, refresh);
       setPlugins(r.plugins);
-      setMysql(r.mysqlConfigured);
+      setDbReady(r.databaseConfigured);
     },
     [server.id],
   );
@@ -106,18 +106,8 @@ export function PluginsTab({ server }: { server: Server }) {
     }
   };
 
-  const saInstalled = !!byId.get("cs2-simpleadmin")?.installed;
-
   return (
     <>
-      {!mysql && (
-        <div className="notice warn" style={{ marginBottom: 16 }}>
-          {saInstalled ? "CS2-SimpleAdmin is using its own file on this server, so bans don't carry over to your other servers." : "Before installing CS2-SimpleAdmin, set up the shared database so bans apply on every server."}{" "}
-          Run <code>sudo /opt/cs2-panel/deploy/setup-mariadb.sh</code> on the machine once
-          {saInstalled ? ", then reinstall CS2-SimpleAdmin here." : "."}
-        </div>
-      )}
-
       <div className="panel">
         <div className="panel-head">
           <div>
@@ -173,6 +163,13 @@ export function PluginsTab({ server }: { server: Server }) {
                   </div>
                   <div className="hint">{p.description}</div>
                   {p.dependents.length > 0 && <div className="hint">Needed by {p.dependents.join(", ")}</div>}
+                  {p.databaseBenefit && !dbReady && (
+                    <div className="plugin-db-note">
+                      {p.installed ? "Keeps its data on this server only." : "Works on its own."} With the shared database,{" "}
+                      {p.databaseBenefit}: run <code>sudo /opt/cs2-panel/deploy/setup-mariadb.sh</code> once
+                      {p.installed ? ", then reinstall it here" : " before installing"}.
+                    </div>
+                  )}
                 </div>
                 <div className="plugin-version">
                   {p.installed ? (

@@ -226,7 +226,9 @@ describe("plugin management", () => {
     expect(saConfig.MultiServerMode).toBe(true);
 
     const list = (await call(c, "GET", `/api/servers/${s.id}/plugins`)).body;
-    expect(list.mysqlConfigured).toBe(true);
+    expect(list.databaseConfigured).toBe(true);
+    expect(list.plugins.find((p: { id: string }) => p.id === "cs2-simpleadmin").databaseBenefit).toMatch(/every server/);
+    expect(list.plugins.find((p: { id: string }) => p.id === "metamod").databaseBenefit).toBeNull();
     const css = list.plugins.find((p: { id: string }) => p.id === "counterstrikesharp");
     expect(css.installed.version).toBe("v370");
     expect(css.dependents.sort()).toEqual(["AnyBaseLib", "CS2-SimpleAdmin"]);

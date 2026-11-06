@@ -14,6 +14,29 @@ export type PluginSource =
     }
   | { type: "metamod" };
 
+/** Connection settings for the panel's shared MariaDB (set up by setup-mariadb.sh). */
+export interface DatabaseSettings {
+  host: string;
+  port: number;
+  user: string;
+  password: string;
+  database: string;
+}
+
+/**
+ * A plugin that stores data in a database. When the shared database is set up,
+ * the panel writes its connection settings into the plugin's config on every
+ * install, so all servers share the same data.
+ */
+export interface DatabaseIntegration {
+  /** The plugin's config file, relative to game/csgo. */
+  configFile: string;
+  /** What sharing gives you, shown next to the plugin. */
+  benefit: string;
+  /** Returns the config with the database settings filled in. Keep the rest untouched. */
+  apply(config: Record<string, unknown>, db: DatabaseSettings): Record<string, unknown>;
+}
+
 export interface CatalogEntry {
   id: string;
   name: string;
@@ -27,6 +50,9 @@ export interface CatalogEntry {
    * relative to addons/counterstrikesharp/ (e.g. "plugins/X" or "shared/X").
    */
   looseDir?: string;
+  database?: DatabaseIntegration;
+  /** Libraries other plugins need; hidden from "pick plugins" lists. */
+  library?: boolean;
 }
 
 export const CATALOG: CatalogEntry[] = [
@@ -54,6 +80,7 @@ export const CATALOG: CatalogEntry[] = [
     source: { type: "github", repo: "NickFox007/AnyBaseLibCS2", prefer: [/linux/i] },
     requires: ["counterstrikesharp"],
     looseDir: "shared/AnyBaseLib",
+    library: true,
   },
   {
     id: "playersettings",
@@ -63,6 +90,7 @@ export const CATALOG: CatalogEntry[] = [
     source: { type: "github", repo: "NickFox007/PlayerSettingsCS2", prefer: [/linux/i] },
     requires: ["anybaselib"],
     looseDir: "plugins/PlayerSettings",
+    library: true,
   },
   {
     id: "menumanager",
@@ -72,15 +100,34 @@ export const CATALOG: CatalogEntry[] = [
     source: { type: "github", repo: "NickFox007/MenuManagerCS2", prefer: [/linux/i] },
     requires: ["playersettings"],
     looseDir: "plugins/MenuManagerCore",
+    library: true,
   },
   {
     id: "cs2-simpleadmin",
     name: "CS2-SimpleAdmin",
-    description: "Admin commands in game: kick, ban, mute, map change. Bans are shared across servers.",
+    description: "Admin commands in game: kick, ban, mute, map change.",
     homepage: "https://github.com/daffyyyy/CS2-SimpleAdmin",
     source: { type: "github", repo: "daffyyyy/CS2-SimpleAdmin", only: /^CS2-SimpleAdmin-.*\.zip$/i },
     requires: ["menumanager", "playersettings", "anybaselib", "counterstrikesharp"],
     looseDir: "plugins/CS2-SimpleAdmin",
+    database: {
+      configFile: "addons/counterstrikesharp/configs/plugins/CS2-SimpleAdmin/CS2-SimpleAdmin.json",
+      benefit: "bans, mutes and admins apply on every server",
+      apply: (config, db) => ({
+        ConfigVersion: 25,
+        ...config,
+        DatabaseConfig: {
+          ...((config.DatabaseConfig as Record<string, unknown>) ?? {}),
+          DatabaseType: "MySQL",
+          DatabaseHost: db.host,
+          DatabasePort: db.port,
+          DatabaseUser: db.user,
+          DatabasePassword: db.password,
+          DatabaseName: db.database,
+        },
+        MultiServerMode: true,
+      }),
+    },
   },
 ];
 

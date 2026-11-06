@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, type HostInfo, type Preset } from "../api";
+import { api, type CatalogPlugin, type HostInfo, type Preset } from "../api";
 import { useAction, useApp } from "../app-context";
 import { PortField } from "../components/PortField";
 
@@ -34,19 +34,29 @@ export function NewServerPage() {
   const [autostart, setAutostart] = useState(true);
   const [startNow, setStartNow] = useState(true);
   const [extraArgs, setExtraArgs] = useState("");
-  const [plugins, setPlugins] = useState<"none" | "counterstrikesharp" | "cs2-simpleadmin">("none");
+  const [catalog, setCatalog] = useState<CatalogPlugin[]>([]);
+  const [picked, setPicked] = useState<string[]>([]);
 
   useEffect(() => {
     void api.presets().then((r) => {
       setPresets(r.presets);
       setPresetId((p) => p ?? r.presets[0]?.id ?? null);
     });
+    void api.catalog().then((r) => setCatalog(r.plugins)).catch(() => undefined);
     void api.host().then((h) => {
       setHost(h);
       setCpu(String(h.suggestedCpu));
       if (!h.cs2.installed) setStartNow(false);
     });
   }, []);
+
+  /** True if plugin `id` needs `dep`, directly or through other plugins. */
+  const needs = (id: string, dep: string, seen = new Set<string>()): boolean => {
+    if (seen.has(id)) return false;
+    seen.add(id);
+    const reqs = catalog.find((c) => c.id === id)?.requires ?? [];
+    return reqs.includes(dep) || reqs.some((r) => needs(r, dep, seen));
+  };
 
   const preset = useMemo(() => presets.find((p) => p.id === presetId) ?? null, [presets, presetId]);
   const effectiveSlug = slugEdited ? slug : slugify(name);
@@ -75,10 +85,11 @@ export function NewServerPage() {
       `Created ${name}.`,
     );
     if (!r) return;
-    if (plugins !== "none" && can("plugins.manage")) {
+    if (picked.length && can("plugins.manage")) {
       toast(`Created ${name}. Installing plugins…`, "info");
       try {
-        await api.installPlugin(r.server.id, plugins);
+        // Each install also installs what that plugin needs, so order doesn't matter.
+        for (const id of picked) await api.installPlugin(r.server.id, id);
         toast(`Created ${name} with plugins installed.`);
       } catch (e) {
         toast(`Created ${name}, but installing plugins failed: ${(e as Error).message}`, "error");
@@ -179,16 +190,33 @@ export function NewServerPage() {
               <span>Join password</span>
               <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Leave empty for a public server" autoComplete="off" />
             </label>
-            {can("plugins.manage") && (
-              <label className="field wide">
-                <span>Plugins</span>
-                <select value={plugins} onChange={(e) => setPlugins(e.target.value as typeof plugins)}>
-                  <option value="none">None (add them later on the Plugins tab)</option>
-                  <option value="counterstrikesharp">Metamod and CounterStrikeSharp</option>
-                  <option value="cs2-simpleadmin">Metamod, CounterStrikeSharp and CS2-SimpleAdmin</option>
-                </select>
-                <small>Downloaded and installed right after the server is created; this can take a minute.</small>
-              </label>
+            {can("plugins.manage") && catalog.length > 0 && (
+              <fieldset className="field choice wide">
+                <legend>Plugins</legend>
+                <div className="plugin-picks">
+                  {catalog
+                    .filter((p) => !p.library)
+                    .map((p) => {
+                      const neededBy = catalog.filter((o) => picked.includes(o.id) && o.id !== p.id && needs(o.id, p.id)).map((o) => o.name);
+                      const on = picked.includes(p.id) || neededBy.length > 0;
+                      return (
+                        <label key={p.id} className="check">
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            disabled={neededBy.length > 0}
+                            onChange={(e) => setPicked((cur) => (e.target.checked ? [...cur, p.id] : cur.filter((x) => x !== p.id)))}
+                          />
+                          <span>
+                            {p.name}
+                            <small className="hint"> — {neededBy.length ? `needed by ${neededBy.join(", ")}` : p.description}</small>
+                          </span>
+                        </label>
+                      );
+                    })}
+                </div>
+                <small className="hint">Optional. Installed right after the server is created, along with anything they need. You can also add them later on the Plugins tab.</small>
+              </fieldset>
             )}
             {can("server.rawargs") && (
               <label className="field wide">

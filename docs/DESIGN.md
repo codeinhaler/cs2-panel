@@ -547,8 +547,8 @@ Downloads the latest (or a specified) panel release, swaps it in, runs database 
 - Post-update verification over RCON.
 
 **Phase 3 — Players**
-- Live player list, kick.
-- Bans, unbans and admins through CS2-SimpleAdmin's shared database.
+- Live player list and kick work on every server, with or without plugins.
+- Bans, unbans and admins through a ban provider: the panel uses one when a plugin that offers it is installed (CS2-SimpleAdmin first), and hides ban features otherwise.
 - Decide whether a separate `Cs2Panel.Bridge` plugin is still needed once SimpleAdmin covers bans.
 - Player history.
 
@@ -576,8 +576,8 @@ Downloads the latest (or a specified) panel release, swaps it in, runs database 
 | 2026-11-05 | Server ports are set manually; the panel validates them. |
 | 2026-11-05 | Workshop maps are a later nice-to-have (Phase 4). |
 | 2026-11-05 | Backend switched from ASP.NET Core to TypeScript/Node.js so code can be built and tested before pushing. |
-| 2026-11-05 | CS2-SimpleAdmin is the ban system (Phase 3 reads and writes its bans). It and its dependencies are in the plugin catalog. |
-| 2026-11-05 | A local MariaDB (127.0.0.1 only, set up by `setup-mariadb.sh`) holds SimpleAdmin's data so bans apply on every server; the panel writes SimpleAdmin's database settings on install. |
+| 2026-11-05 | CS2-SimpleAdmin and its dependencies are in the plugin catalog. Like every plugin, it's optional. |
+| 2026-11-06 | Nothing outside the catalog knows about specific plugins. A catalog entry can declare a database integration (config file + how to fill it in); the panel applies it to any such plugin when the optional shared MariaDB (127.0.0.1 only, `setup-mariadb.sh`) is set up. |
 | 2026-11-05 | While a server's overlay is mounted, the panel writes through merged/ and never deletes there; changes that remove or replace files happen with the overlay unmounted. |
 
 ## 18. Open questions

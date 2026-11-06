@@ -25,6 +25,7 @@ import { ConfigService } from "./servers/configs.js";
 import { OperationGate, ServerService, type Actor } from "./servers/service.js";
 import { PluginSources } from "./plugins/sources.js";
 import { PluginService } from "./plugins/service.js";
+import { CATALOG } from "./plugins/catalog.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -452,7 +453,14 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     requirePerm(req, "view");
     const { id } = idParam.parse(req.params);
     const { refresh } = z.object({ refresh: z.coerce.boolean().optional() }).parse(req.query);
-    return { plugins: await plugins.overview(id, refresh), mysqlConfigured: plugins.mysqlConfigured };
+    return { plugins: await plugins.overview(id, refresh), databaseConfigured: plugins.databaseConfigured };
+  });
+
+  app.get("/api/plugins/catalog", async (req) => {
+    requirePerm(req, "view");
+    return {
+      plugins: CATALOG.map((e) => ({ id: e.id, name: e.name, description: e.description, requires: e.requires, library: !!e.library })),
+    };
   });
 
   app.get("/api/plugins/:pluginId/versions", async (req) => {

@@ -10,16 +10,9 @@ import type { OperationGate, ServerService } from "../servers/service.js";
 import type { ServerRecord } from "../servers/store.js";
 import { slugify } from "../servers/validation.js";
 import { extractArchive, isPreservedConfig, listFiles, mapArchiveFiles } from "./archive.js";
-import { CATALOG, catalogEntry, dependencyOrder, type CatalogEntry } from "./catalog.js";
+import { CATALOG, catalogEntry, dependencyOrder, type CatalogEntry, type DatabaseSettings } from "./catalog.js";
 import type { PluginRelease, PluginSources } from "./sources.js";
 
-export interface MysqlSettings {
-  host: string;
-  port: number;
-  user: string;
-  password: string;
-  database: string;
-}
 
 interface InstallRow {
   id: number;
@@ -49,6 +42,9 @@ export interface PluginStatus {
   previousVersion: string | null;
   latest: string | null;
   latestError: string | null;
+  library: boolean;
+  /** Set if the plugin can use the shared database: what that gives you. */
+  databaseBenefit: string | null;
 }
 
 export interface HealthReport {
@@ -69,7 +65,6 @@ interface Prepared {
   mapping: Map<string, string>;
 }
 
-const SIMPLEADMIN_CONFIG = "addons/counterstrikesharp/configs/plugins/CS2-SimpleAdmin/CS2-SimpleAdmin.json";
 
 export class PluginService {
   private busy = new Set<number>();
@@ -83,11 +78,11 @@ export class PluginService {
     private readonly gate: OperationGate,
     private readonly rcon: RconExec,
     private readonly workDir: string,
-    private readonly mysql: MysqlSettings | undefined,
+    private readonly database: DatabaseSettings | undefined,
   ) {}
 
-  get mysqlConfigured(): boolean {
-    return !!this.mysql;
+  get databaseConfigured(): boolean {
+    return !!this.database;
   }
 
   // ------------------------------------------------------------- reading
@@ -150,6 +145,8 @@ export class PluginService {
         custom: false,
         latest: lookups[i]!.latest,
         latestError: lookups[i]!.error,
+        library: !!e.library,
+        databaseBenefit: e.database?.benefit ?? null,
       }),
     );
     for (const r of current.filter((r) => r.plugin_id.startsWith("custom:"))) {
@@ -163,6 +160,8 @@ export class PluginService {
           custom: true,
           latest: null,
           latestError: null,
+          library: false,
+          databaseBenefit: null,
         }),
       );
     }
@@ -402,7 +401,7 @@ export class PluginService {
       const mode = (await fs.stat(target)).mode;
       await fs.chmod(target, (mode & 0o777) | 0o664);
     }
-    if (p.id === "cs2-simpleadmin") await this.configureSimpleAdmin(csgo);
+    await this.configureDatabase(p.id, csgo);
     if (prev) this.db.prepare("UPDATE plugin_installs SET removed_at = datetime('now') WHERE id = ?").run(prev.id);
     this.db
       .prepare("INSERT INTO plugin_installs (server_id, plugin_id, name, version, asset, files, installed_by) VALUES (?, ?, ?, ?, ?, ?, ?)")
@@ -425,31 +424,19 @@ export class PluginService {
     }
   }
 
-  /**
-   * Points CS2-SimpleAdmin at the shared MariaDB so bans apply on every server.
-   * Keeps everything else in an existing config file.
-   */
-  private async configureSimpleAdmin(csgo: string): Promise<void> {
-    if (!this.mysql) return;
-    const file = path.join(csgo, SIMPLEADMIN_CONFIG);
-    let config: Record<string, unknown> = { ConfigVersion: 25 };
+  /** Writes the shared database settings into the plugin's config, if it declares one. */
+  private async configureDatabase(pluginId: string, csgo: string): Promise<void> {
+    const integration = catalogEntry(pluginId)?.database;
+    if (!integration || !this.database) return;
+    const file = path.join(csgo, integration.configFile);
+    let config: Record<string, unknown> = {};
     try {
       config = JSON.parse(await fs.readFile(file, "utf8")) as Record<string, unknown>;
     } catch {
       /* first install: the plugin fills in its other defaults */
     }
-    config.DatabaseConfig = {
-      ...((config.DatabaseConfig as Record<string, unknown>) ?? {}),
-      DatabaseType: "MySQL",
-      DatabaseHost: this.mysql.host,
-      DatabasePort: this.mysql.port,
-      DatabaseUser: this.mysql.user,
-      DatabasePassword: this.mysql.password,
-      DatabaseName: this.mysql.database,
-    };
-    config.MultiServerMode = true;
     await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o2775 });
-    await fs.writeFile(file, JSON.stringify(config, null, 2) + "\n", { mode: 0o660 });
+    await fs.writeFile(file, JSON.stringify(integration.apply(config, this.database), null, 2) + "\n", { mode: 0o660 });
   }
 }
 

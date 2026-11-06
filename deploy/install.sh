@@ -133,4 +133,4 @@ IP="$(hostname -I | awk '{print $1}')"
 echo
 log "Done. Open http://$IP:$PORT and sign in with Steam."
 echo "   Updates later: sudo $PANEL_DIR/deploy/update.sh"
-echo "   For CS2-SimpleAdmin (shared bans across servers): sudo $PANEL_DIR/deploy/setup-mariadb.sh"
+echo "   Optional shared database for plugins: sudo $PANEL_DIR/deploy/setup-mariadb.sh"

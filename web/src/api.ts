@@ -116,6 +116,16 @@ export interface PluginStatus {
   previousVersion: string | null;
   latest: string | null;
   latestError: string | null;
+  library: boolean;
+  databaseBenefit: string | null;
+}
+
+export interface CatalogPlugin {
+  id: string;
+  name: string;
+  description: string;
+  requires: string[];
+  library: boolean;
 }
 
 export interface PluginHealth {
@@ -215,7 +225,8 @@ export const api = {
     request<{ path: string; file: ConfigFile | null }>("POST", `/api/servers/${id}/configs/rollback`, { revisionId }),
 
   plugins: (id: number, refresh = false) =>
-    request<{ plugins: PluginStatus[]; mysqlConfigured: boolean }>("GET", `/api/servers/${id}/plugins${refresh ? "?refresh=true" : ""}`),
+    request<{ plugins: PluginStatus[]; databaseConfigured: boolean }>("GET", `/api/servers/${id}/plugins${refresh ? "?refresh=true" : ""}`),
+  catalog: () => request<{ plugins: CatalogPlugin[] }>("GET", "/api/plugins/catalog"),
   pluginVersions: (pluginId: string) =>
     request<{ versions: { version: string; publishedAt: string | null; prerelease: boolean }[] }>("GET", `/api/plugins/${encodeURIComponent(pluginId)}/versions`),
   installPlugin: (id: number, pluginId: string, version?: string) =>

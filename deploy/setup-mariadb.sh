@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Sets up a local MariaDB database for plugins that share data between
-# servers (CS2-SimpleAdmin keeps its bans, admins and mutes there), and tells
-# the panel how to reach it. Run once:
+# Optional. Sets up a local MariaDB database that plugins can share between
+# servers, and tells the panel how to reach it. Plugins in the catalog that can
+# use a database (e.g. CS2-SimpleAdmin for bans) are then pointed at it on
+# install. Run once, only if you want that:
 #
 #   sudo /opt/cs2-panel/deploy/setup-mariadb.sh
 #
@@ -15,8 +16,8 @@ source "$SCRIPT_DIR/lib.sh"
 require_root
 
 CONFIG=/etc/cs2-panel/panel.json
-DB_NAME=cs2_simpleadmin
-DB_USER=cs2sa
+DB_NAME=cs2_plugins
+DB_USER=cs2plugins
 
 [[ -f "$CONFIG" ]] || die "$CONFIG not found. Install the panel first."
 
@@ -53,6 +54,5 @@ install -m 0640 -o root -g cs2panel "$tmp" "$CONFIG"
 rm -f "$tmp"
 
 systemctl restart cs2-panel.service
-log "Done. Plugins installed from now on use this database."
-echo "   If CS2-SimpleAdmin is already installed on a server, reinstall it from the server's Plugins tab"
-echo "   so its config points at the database."
+log "Done. Plugins that can use a database are pointed at it when installed."
+echo "   Plugins already installed keep their own data until you reinstall them from the server's Plugins tab."
