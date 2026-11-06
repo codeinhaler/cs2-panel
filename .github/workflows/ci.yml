@@ -20,3 +20,14 @@ jobs:
       - run: npm run build
       - name: Lint shell scripts
         run: shellcheck -x deploy/install.sh deploy/update.sh deploy/setup-mariadb.sh deploy/cs2ctl deploy/lib.sh
+
+  bridge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+      - name: Build companion plugin
+        run: bridge/package.sh cs2panel-bridge.zip
+      - run: unzip -l cs2panel-bridge.zip

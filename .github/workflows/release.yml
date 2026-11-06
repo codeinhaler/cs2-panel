@@ -14,6 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
       - uses: actions/setup-node@v5
         with:
           node-version: 24
@@ -46,6 +49,9 @@ jobs:
           cp -r deploy/. "$out/deploy/"
           chmod +x "$out/deploy/"*.sh "$out/deploy/cs2ctl"
           echo "${GITHUB_REF_NAME}" > "$out/VERSION"
+          mkdir -p "$out/bridge"
+          bridge/package.sh "$out/bridge/cs2panel-bridge.zip"
+          echo "${GITHUB_REF_NAME}" > "$out/bridge/VERSION"
           tar -czf cs2-panel-linux-x64.tar.gz -C stage cs2-panel
           ls -lh cs2-panel-linux-x64.tar.gz
 
