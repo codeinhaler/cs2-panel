@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, parseTime, type AuditEntry } from "../api";
+import { api, fullTime, parseTime, type AuditEntry } from "../api";
 
 /** Turns an audit entry into a sentence. */
 function describe(e: AuditEntry): string {
@@ -96,7 +96,7 @@ export function ActivityList({ serverId, limit = 50, compact = false }: { server
             {entries.map((e) => (
               <tr key={e.id}>
                 <td style={{ whiteSpace: "nowrap", color: "var(--ink-faint)", width: 1 }}>
-                  <time dateTime={parseTime(e.createdAt).toISOString()}>{parseTime(e.createdAt).toLocaleString()}</time>
+                  <time dateTime={parseTime(e.createdAt).toISOString()}>{fullTime(e.createdAt)}</time>
                 </td>
                 <td>
                   <b style={{ fontWeight: 600 }}>{e.userName ?? (e.userSteamId ? e.userSteamId : "System")}</b> {describe(e)}

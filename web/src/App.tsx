@@ -9,6 +9,7 @@ import { ServerPage } from "./pages/Server";
 import { GameUpdatePage } from "./pages/GameUpdate";
 import { TeamPage } from "./pages/Team";
 import { ActivityPage } from "./pages/Activity";
+import { PreferencesPage } from "./pages/Preferences";
 
 export function App() {
   const [me, setMe] = useState<Me | null | "loading">("loading");
@@ -37,6 +38,7 @@ export function App() {
             <Route path="game" element={<GameUpdatePage />} />
             <Route path="team" element={<TeamPage />} />
             <Route path="activity" element={<ActivityPage />} />
+            <Route path="preferences" element={<PreferencesPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         ) : (
@@ -81,6 +83,9 @@ function Shell() {
         )}
         <NavLink to="/activity" className="nav-link">
           Activity
+        </NavLink>
+        <NavLink to="/preferences" className="nav-link">
+          Preferences
         </NavLink>
         <div className="sidebar-foot">
           {me.user.avatarUrl ? <img src={me.user.avatarUrl} alt="" /> : <span className="avatar" aria-hidden="true" />}

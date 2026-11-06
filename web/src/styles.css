@@ -1038,3 +1038,20 @@ dialog h2 {
 .health li[data-ok="true"]::before {
   background: var(--run);
 }
+
+fieldset.choice {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  gap: 8px;
+}
+fieldset.choice legend {
+  font-weight: 500;
+  font-size: 0.92rem;
+  padding: 0;
+  margin-bottom: 6px;
+}
+input[type="radio"] {
+  width: auto;
+  accent-color: var(--accent);
+}

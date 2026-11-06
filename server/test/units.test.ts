@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createServer } from "node:net";
 import { hasMetamodPath, parseSteamInf, patchGameinfo } from "../src/game/gameinfo.js";
-import { decodePackets, encodePacket, rconExec } from "../src/game/rcon.js";
+import { decodePackets, encodePacket, rconExec, withLocalFallback } from "../src/game/rcon.js";
 import { parseInfoResponse } from "../src/game/a2s.js";
 import { portProblem, slugify } from "../src/servers/validation.js";
 import { normalizeConfigPath } from "../src/servers/configs.js";
@@ -267,5 +267,31 @@ describe("systemctl show parsing", () => {
     expect(parseSystemdTimestamp("garbage")).toBeNull();
     expect(parseSystemctlShow("ActiveState=active\nActiveEnterTimestamp=whenever").since).toBeNull();
     expect(parseSystemctlShow("").state).toBe("unknown");
+  });
+});
+
+describe("RCON local fallback", () => {
+  it("retries a refused 127.0.0.1 connection on the LAN address", async () => {
+    const tried: (string | undefined)[] = [];
+    const exec = withLocalFallback(
+      async (o) => {
+        tried.push(o.host);
+        if (o.host !== "192.168.1.20") throw new Error("RCON connection refused. Is the server running?");
+        return "ok";
+      },
+      () => ["10.0.0.5", "192.168.1.20"],
+    );
+    await expect(exec({ port: 27015, password: "x" }, "status")).resolves.toBe("ok");
+    expect(tried).toEqual([undefined, "10.0.0.5", "192.168.1.20"]);
+  });
+
+  it("doesn't retry other errors", async () => {
+    let calls = 0;
+    const exec = withLocalFallback(async () => {
+      calls++;
+      throw new Error("RCON password was rejected.");
+    }, () => ["192.168.1.20"]);
+    await expect(exec({ port: 27015, password: "x" }, "status")).rejects.toThrow(/rejected/);
+    expect(calls).toBe(1);
   });
 });

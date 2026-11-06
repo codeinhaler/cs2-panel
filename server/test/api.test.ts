@@ -109,6 +109,14 @@ describe("auth", () => {
     expect(res.statusCode).toBe(403);
   });
 
+  it("stores display preferences per user, defaulting to 24-hour time", async () => {
+    const c = await login();
+    expect((await call(c, "GET", "/api/me")).body.user.prefs).toEqual({ timeFormat: "24h", dateFormat: "dmy" });
+    expect((await call(c, "PUT", "/api/me/prefs", { timeFormat: "12h", dateFormat: "ymd" })).status).toBe(200);
+    expect((await call(c, "GET", "/api/me")).body.user.prefs).toEqual({ timeFormat: "12h", dateFormat: "ymd" });
+    expect((await call(c, "PUT", "/api/me/prefs", { timeFormat: "25h" })).status).toBe(400);
+  });
+
   it("logs out", async () => {
     const c = await login();
     await call(c, "POST", "/api/auth/logout", {});
@@ -167,7 +175,7 @@ describe("servers", () => {
     const cfg = app.services.servers.require(s.id);
     const env = readFileSync(path.join(dir, "env", "comp-1.env"), "utf8");
     expect(env).toContain("CS2_CPU=0");
-    expect(env).toContain("-port 27015 -usercon -maxplayers 10 +game_type 0 +game_mode 1 +exec cs2panel_generated.cfg +sv_setsteamaccount ABCDEF0123456789 +map de_mirage");
+    expect(env).toContain("+ip 0.0.0.0 -port 27015 -usercon -maxplayers 10 +game_type 0 +game_mode 1 +exec cs2panel_generated.cfg +sv_setsteamaccount ABCDEF0123456789 +map de_mirage");
     const generated = readFileSync(path.join(dir, "cs2/instances/comp-1/upper/game/csgo/cfg/cs2panel_generated.cfg"), "utf8");
     expect(generated).toContain('hostname "Comp #1"');
     expect(generated).toContain('sv_password "pw1"');

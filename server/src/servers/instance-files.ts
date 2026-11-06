@@ -118,6 +118,10 @@ export class InstanceFiles {
 
   async writeLaunchEnv(slug: string, s: LaunchSettings): Promise<void> {
     const args = [
+      // Without this CS2 may bind RCON (TCP) to the LAN address only, and the
+      // panel's connection to 127.0.0.1 is refused.
+      "+ip",
+      "0.0.0.0",
       "-port",
       String(s.port),
       "-usercon",

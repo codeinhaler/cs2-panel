@@ -11,12 +11,12 @@ import { HttpError, badRequest, forbidden, notFound } from "./errors.js";
 import { AuditLog } from "./audit.js";
 import { SecretBox } from "./crypto.js";
 import { can, permissionsFor, type Permission } from "./auth/permissions.js";
-import { UserStore, type User } from "./auth/users.js";
+import { PrefsSchema, UserStore, type User } from "./auth/users.js";
 import { SESSION_COOKIE, MAX_AGE_MS, SessionStore } from "./auth/sessions.js";
 import { buildLoginUrl, verifyCallback } from "./auth/steam-openid.js";
 import { fetchProfile, resolveSteamId } from "./auth/steam-profile.js";
 import type { Host } from "./host/host.js";
-import { rconExec as defaultRcon, type RconExec } from "./game/rcon.js";
+import { rconExec as defaultRcon, withLocalFallback, type RconExec } from "./game/rcon.js";
 import { GameUpdater } from "./game/updater.js";
 import { InstanceFiles } from "./servers/instance-files.js";
 import { PresetStore } from "./servers/presets.js";
@@ -61,7 +61,7 @@ const idParam = z.object({ id: z.coerce.number().int().positive() });
 
 export async function buildApp(deps: AppDeps): Promise<App> {
   const { config, db, host } = deps;
-  const rcon = deps.rcon ?? defaultRcon;
+  const rcon = deps.rcon ?? withLocalFallback(defaultRcon);
   const fetchFn = deps.fetchFn ?? fetch;
 
   const box = new SecretBox(config.secretKey);
@@ -185,6 +185,13 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   app.get("/api/me", async (req) => {
     const user = requireUser(req);
     return { user, permissions: permissionsFor(user.role), dev: config.dev };
+  });
+
+  app.put("/api/me/prefs", async (req) => {
+    const user = requireUser(req);
+    const prefs = PrefsSchema.parse(req.body ?? {});
+    users.setPrefs(user.id, prefs);
+    return { prefs };
   });
 
   // ------------------------------------------------------------- users
@@ -332,7 +339,14 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     try {
       return { output: await rcon({ port: s.port, password: s.rconPassword }, command) };
     } catch (e) {
-      throw badRequest((e as Error).message);
+      const msg = (e as Error).message;
+      const status = await host.serviceStatus(s.slug);
+      if (/refused/i.test(msg) && status.state === "active") {
+        throw badRequest(
+          "The server is running but isn't accepting RCON connections. Restart it once from the panel so it picks up the current launch settings; if that doesn't help, check the Console for errors.",
+        );
+      }
+      throw badRequest(msg);
     }
   });
 

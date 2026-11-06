@@ -1,5 +1,20 @@
 import type { Db } from "../db.js";
+import { z } from "zod";
 import type { Role } from "./permissions.js";
+
+export const PrefsSchema = z.object({
+  timeFormat: z.enum(["24h", "12h"]).default("24h"),
+  dateFormat: z.enum(["dmy", "ymd", "mdy"]).default("dmy"),
+});
+export type Prefs = z.infer<typeof PrefsSchema>;
+
+function parsePrefs(raw: string | undefined): Prefs {
+  try {
+    return PrefsSchema.parse(JSON.parse(raw ?? "{}"));
+  } catch {
+    return PrefsSchema.parse({});
+  }
+}
 
 export interface User {
   id: number;
@@ -10,6 +25,7 @@ export interface User {
   disabled: boolean;
   createdAt: string;
   lastLoginAt: string | null;
+  prefs: Prefs;
 }
 
 interface UserRow {
@@ -21,6 +37,7 @@ interface UserRow {
   disabled: number;
   created_at: string;
   last_login_at: string | null;
+  prefs?: string;
 }
 
 const toUser = (r: UserRow): User => ({
@@ -32,6 +49,7 @@ const toUser = (r: UserRow): User => ({
   disabled: r.disabled === 1,
   createdAt: r.created_at,
   lastLoginAt: r.last_login_at,
+  prefs: parsePrefs(r.prefs),
 });
 
 export class UserStore {
@@ -81,6 +99,10 @@ export class UserStore {
     this.db
       .prepare("UPDATE users SET display_name = COALESCE(?, display_name), avatar_url = COALESCE(?, avatar_url) WHERE id = ?")
       .run(profile.name ?? null, profile.avatarUrl ?? null, id);
+  }
+
+  setPrefs(id: number, prefs: Prefs): void {
+    this.db.prepare("UPDATE users SET prefs = ? WHERE id = ?").run(JSON.stringify(prefs), id);
   }
 
   touchLogin(id: number): void {

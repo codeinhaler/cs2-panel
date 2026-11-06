@@ -16,6 +16,8 @@ export type Permission =
   | "server.rawargs"
   | "users.manage";
 
+import { formatDate, formatDateTime, type Prefs } from "./format";
+
 export interface User {
   id: number;
   steamId: string;
@@ -25,6 +27,7 @@ export interface User {
   disabled: boolean;
   createdAt: string;
   lastLoginAt: string | null;
+  prefs: Prefs;
 }
 
 export interface Me {
@@ -173,6 +176,7 @@ const q = (params: Record<string, string | number | undefined>) =>
 export const api = {
   me: () => request<Me>("GET", "/api/me"),
   logout: () => request<{ ok: true }>("POST", "/api/auth/logout", {}),
+  savePrefs: (prefs: Prefs) => request<{ prefs: Prefs }>("PUT", "/api/me/prefs", prefs),
 
   users: () => request<{ users: User[] }>("GET", "/api/users"),
   addUser: (steam: string, role: "admin" | "moderator") => request<{ user: User }>("POST", "/api/users", { steam, role }),
@@ -264,7 +268,7 @@ export function timeAgo(t: string | null): string {
   if (s < 60) return "just now";
   if (s < 3600) return `${Math.floor(s / 60)} min ago`;
   if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
-  return parseTime(t).toLocaleDateString();
+  return formatDate(parseTime(t));
 }
 
 export function uptime(since: string | null): string {
@@ -275,4 +279,9 @@ export function uptime(since: string | null): string {
   const h = Math.floor((s % 86400) / 3600);
   const m = Math.floor((s % 3600) / 60);
   return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
+}
+
+/** Full date and time in the user's format, for tooltips and logs. */
+export function fullTime(t: string | null): string {
+  return t ? formatDateTime(parseTime(t)) : "";
 }

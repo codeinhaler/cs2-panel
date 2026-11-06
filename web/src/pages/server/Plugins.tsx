@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, timeAgo, type PluginHealth, type PluginStatus, type Server } from "../../api";
+import { api, fullTime, timeAgo, type PluginHealth, type PluginStatus, type Server } from "../../api";
 import { useAction, useApp } from "../../app-context";
+import { formatDate } from "../../format";
 
 export function PluginsTab({ server }: { server: Server }) {
   const { can, toast } = useApp();
@@ -178,7 +179,7 @@ export function PluginsTab({ server }: { server: Server }) {
                     <>
                       <b>{p.installed.version}</b>
                       <div className="hint">
-                        installed {timeAgo(p.installed.installedAt)}
+                        installed <span title={fullTime(p.installed.installedAt)}>{timeAgo(p.installed.installedAt)}</span>
                         {p.installed.installedBy ? ` by ${p.installed.installedBy}` : ""}
                       </div>
                       {updateAvailable && <div className="plugin-update">{p.latest} available</div>}
@@ -317,7 +318,7 @@ function VersionsDialog({ plugin, busy, onClose, onPick }: { plugin: PluginStatu
                 <option key={v.version} value={v.version} disabled={v.version === plugin.installed?.version}>
                   {v.version}
                   {v.prerelease ? " (pre-release)" : ""}
-                  {v.publishedAt ? `, ${new Date(v.publishedAt).toLocaleDateString()}` : ""}
+                  {v.publishedAt ? `, ${formatDate(new Date(v.publishedAt))}` : ""}
                   {v.version === plugin.installed?.version ? " (installed)" : ""}
                 </option>
               ))}

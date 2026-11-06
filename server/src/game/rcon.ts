@@ -1,4 +1,5 @@
 import { Socket } from "node:net";
+import { networkInterfaces } from "node:os";
 
 /**
  * Minimal Source RCON client. Opens a connection per command, which is fine on
@@ -108,3 +109,34 @@ export const rconExec: RconExec = (opts, command) =>
       sock.write(encodePacket(AUTH_ID, SERVERDATA_AUTH, opts.password));
     });
   });
+
+/** IPv4 addresses of this machine other than loopback, e.g. the LAN address. */
+export function localAddresses(): string[] {
+  return Object.values(networkInterfaces())
+    .flat()
+    .filter((i): i is NonNullable<typeof i> => !!i && i.family === "IPv4" && !i.internal)
+    .map((i) => i.address);
+}
+
+/**
+ * Wraps an RCON client so a refused connection on 127.0.0.1 is retried on the
+ * machine's own LAN addresses (servers started before +ip 0.0.0.0 was added
+ * bind RCON there).
+ */
+export function withLocalFallback(exec: RconExec, addresses: () => string[] = localAddresses): RconExec {
+  return async (opts, command) => {
+    try {
+      return await exec(opts, command);
+    } catch (e) {
+      if (opts.host || !/refused/i.test((e as Error).message)) throw e;
+      for (const host of addresses()) {
+        try {
+          return await exec({ ...opts, host }, command);
+        } catch (inner) {
+          if (!/refused/i.test((inner as Error).message)) throw inner;
+        }
+      }
+      throw e;
+    }
+  };
+}

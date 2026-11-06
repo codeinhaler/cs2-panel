@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, timeAgo, type GameState } from "../api";
+import { api, fullTime, timeAgo, type GameState } from "../api";
 import { useAction, useApp } from "../app-context";
 
 export function GameUpdatePage() {
@@ -112,8 +112,8 @@ export function GameUpdatePage() {
         <div className="panel">
           <div className="panel-head">
             <h2>{running ? "Update in progress" : "Last update"}</h2>
-            {state.job.state === "succeeded" && <span className="state-pill" data-state="active">Finished {timeAgo(state.job.finishedAt)}</span>}
-            {state.job.state === "failed" && <span className="state-pill" data-state="failed">Failed {timeAgo(state.job.finishedAt)}</span>}
+            {state.job.state === "succeeded" && <span className="state-pill" data-state="active">Finished <span title={fullTime(state.job.finishedAt)}>{timeAgo(state.job.finishedAt)}</span></span>}
+            {state.job.state === "failed" && <span className="state-pill" data-state="failed">Failed <span title={fullTime(state.job.finishedAt)}>{timeAgo(state.job.finishedAt)}</span></span>}
             {running && <span className="state-pill" data-state="activating">Running</span>}
           </div>
           <div className="log" ref={logBox} role="log" aria-live="polite">

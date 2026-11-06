@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react";
 import { Link, NavLink, Route, Routes, useParams } from "react-router-dom";
-import { api, modeName, timeAgo, uptime, type Server } from "../api";
+import { api, modeName, fullTime, timeAgo, uptime, type Server } from "../api";
 import { useApp, usePolling } from "../app-context";
 import { ControlButtons, Slots, StateLabel } from "../components/server-bits";
 import { ConsoleTab } from "./server/Console";
@@ -126,7 +126,7 @@ function Overview({ server: s }: { server: Server }) {
           )}
           <div>
             <dt>Created</dt>
-            <dd>{timeAgo(s.createdAt)}</dd>
+            <dd><span title={fullTime(s.createdAt)}>{timeAgo(s.createdAt)}</span></dd>
           </div>
         </dl>
         <p className="hint" style={{ marginTop: 18, marginBottom: 0 }}>

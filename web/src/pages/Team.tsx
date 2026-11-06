@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, timeAgo, type User } from "../api";
+import { api, fullTime, timeAgo, type User } from "../api";
 import { useAction, useApp } from "../app-context";
 
 const ROLE_HELP = {
@@ -124,7 +124,7 @@ export function TeamPage() {
                     )}
                     {u.disabled && <div className="hint">Disabled</div>}
                   </td>
-                  <td>{u.lastLoginAt ? timeAgo(u.lastLoginAt) : "Not yet"}</td>
+                  <td>{u.lastLoginAt ? <span title={fullTime(u.lastLoginAt)}>{timeAgo(u.lastLoginAt)}</span> : "Not yet"}</td>
                   <td>
                     {u.role !== "owner" && (
                       <div className="row-actions" style={{ justifyContent: "flex-end" }}>

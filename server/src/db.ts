@@ -113,6 +113,9 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX plugin_installs_server ON plugin_installs(server_id, plugin_id, id);
   `,
+  /* 3: per-user display preferences */ `
+  ALTER TABLE users ADD COLUMN prefs TEXT NOT NULL DEFAULT '{}';
+  `,
 ];
 
 export function openDb(file: string): Db {

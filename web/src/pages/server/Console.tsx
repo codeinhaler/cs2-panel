@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type Server } from "../../api";
 import { useApp } from "../../app-context";
+import { formatLogLine } from "../../format";
 
 interface Line {
   kind: "log" | "cmd" | "out" | "err";
@@ -88,7 +89,7 @@ export function ConsoleTab({ server }: { server: Server }) {
         {!connected && lines.length === 0 && "Connecting to the server log…"}
         {lines.map((l, i) => (
           <div key={i} className={l.kind === "log" ? undefined : l.kind}>
-            {l.text}
+            {l.kind === "log" ? formatLogLine(l.text) : l.text}
           </div>
         ))}
       </div>

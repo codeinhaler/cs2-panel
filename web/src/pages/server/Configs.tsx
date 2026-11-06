@@ -1,7 +1,7 @@
 import "../../monaco-setup";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Editor, { DiffEditor } from "@monaco-editor/react";
-import { api, timeAgo, type ConfigFile, type ConfigFileInfo, type Revision, type Server } from "../../api";
+import { api, fullTime, timeAgo, type ConfigFile, type ConfigFileInfo, type Revision, type Server } from "../../api";
 import { useAction, useApp } from "../../app-context";
 import { languageFor } from "../../monaco-setup";
 
@@ -108,7 +108,7 @@ export function ConfigsTab({ server }: { server: Server }) {
 
   const rollback = async (rev: Revision) => {
     if (!file) return;
-    if (!window.confirm(`Restore ${file.path} to the version from ${timeAgo(rev.createdAt)}?`)) return;
+    if (!window.confirm(`Restore ${file.path} to the version from ${fullTime(rev.createdAt)}?`)) return;
     const r = await run(() => api.rollback(server.id, rev.id), `Restored ${file.path}.`);
     if (!r) return;
     await loadList();
@@ -222,7 +222,7 @@ export function ConfigsTab({ server }: { server: Server }) {
               {compare && (
                 <div className="editor-foot">
                   <span className="hint">
-                    Left: version from {timeAgo(compare.rev.createdAt)}
+                    Left: version from <span title={fullTime(compare.rev.createdAt)}>{timeAgo(compare.rev.createdAt)}</span>
                     {compare.content === null ? " (file did not exist)" : ""}. Right: current text.
                   </span>
                 </div>
@@ -258,7 +258,7 @@ export function ConfigsTab({ server }: { server: Server }) {
                   <div>
                     <div>{rev.comment || (rev.deleted ? "Removed" : "Saved")}</div>
                     <div className="when">
-                      {timeAgo(rev.createdAt)}
+                      <span title={fullTime(rev.createdAt)}>{timeAgo(rev.createdAt)}</span>
                       {rev.authorName ? ` by ${rev.authorName}` : ""}
                       {i === 0 ? " (current)" : ""}
                     </div>
