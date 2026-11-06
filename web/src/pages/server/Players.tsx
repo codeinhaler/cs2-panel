@@ -1,73 +1,42 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, fullTime, timeAgo, type Ban, type GameAdmin, type ModerationInfo, type OnlinePlayer, type RecentPlayer, type Server } from "../../api";
+import { Link } from "react-router-dom";
+import { api, fullTime, timeAgo, type BanCoverage, type OnlinePlayer, type PanelBan, type RecentPlayer, type Server } from "../../api";
 import { useAction, useApp, usePolling } from "../../app-context";
-
-const DURATIONS = [
-  { label: "30 minutes", minutes: 30 },
-  { label: "1 hour", minutes: 60 },
-  { label: "1 day", minutes: 1440 },
-  { label: "1 week", minutes: 10080 },
-  { label: "30 days", minutes: 43200 },
-  { label: "Permanent", minutes: 0 },
-];
-
-function lengthText(minutes: number): string {
-  if (minutes === 0) return "Permanent";
-  return DURATIONS.find((d) => d.minutes === minutes)?.label ?? (minutes % 1440 === 0 ? `${minutes / 1440} days` : `${minutes} min`);
-}
-
-function SteamLink({ id }: { id: string | null }) {
-  if (!id) return <span className="hint">unknown</span>;
-  return (
-    <a href={`https://steamcommunity.com/profiles/${id}`} target="_blank" rel="noreferrer" className="mono">
-      {id}
-    </a>
-  );
-}
+import { DurationSelect, lengthText, SteamLink } from "../../components/player-bits";
 
 type Target = { kind: "kick" | "ban"; player: OnlinePlayer } | { kind: "ban-offline"; name: string; steamId: string };
 
-export function PlayersTab({ server }: { server: Server }) {
+export function PlayersTab({ server, bridge }: { server: Server; bridge: boolean }) {
   const { can, toast } = useApp();
   const { busy, run } = useAction();
-  const [mod, setMod] = useState<ModerationInfo | null>(null);
-  const [bans, setBans] = useState<Ban[] | null>(null);
+  const [bans, setBans] = useState<PanelBan[] | null>(null);
   const [showAllBans, setShowAllBans] = useState(false);
-  const [admins, setAdmins] = useState<GameAdmin[] | null>(null);
+  const [coverage, setCoverage] = useState<BanCoverage | null>(null);
   const [recent, setRecent] = useState<RecentPlayer[]>([]);
   const [target, setTarget] = useState<Target | null>(null);
 
   const live = usePolling(() => api.players(server.id), 10_000, [server.id]);
 
-  const loadModeration = useCallback(async () => {
-    const info = await api.moderation(server.id);
-    setMod(info);
-    if (info.provider) {
-      const [b, a] = await Promise.all([api.bans(server.id, showAllBans).catch(() => ({ bans: [] })), api.gameAdmins(server.id).catch(() => ({ admins: [] }))]);
-      setBans(b.bans);
-      setAdmins(a.admins);
-    }
-  }, [server.id, showAllBans]);
-
+  const loadBans = useCallback(async () => {
+    const [b, c] = await Promise.all([api.panelBans(showAllBans), api.banCoverage()]);
+    setBans(b.bans);
+    setCoverage(c);
+  }, [showAllBans]);
   const loadRecent = useCallback(async () => setRecent((await api.recentPlayers(server.id)).players), [server.id]);
 
   useEffect(() => {
-    void loadModeration().catch((e: Error) => toast(e.message, "error"));
+    void loadBans().catch((e: Error) => toast(e.message, "error"));
     void loadRecent();
-  }, [loadModeration, loadRecent, toast]);
+  }, [loadBans, loadRecent, toast]);
 
   const afterChange = async () => {
-    await Promise.all([loadModeration(), live.refresh(), loadRecent()]);
+    await Promise.all([loadBans(), live.refresh(), loadRecent()]);
   };
 
-  const unban = async (b: Ban) => {
-    if (!b.steamId || !window.confirm(`Unban ${b.playerName ?? b.steamId}?`)) return;
-    if (await run(() => api.unban(server.id, b.steamId!), `Unbanned ${b.playerName ?? b.steamId}.`)) await afterChange();
-  };
-
-  const removeAdmin = async (a: GameAdmin) => {
-    if (!window.confirm(`Remove ${a.name} as in-game admin?`)) return;
-    if (await run(() => api.removeGameAdmin(server.id, a.steamId), `Removed ${a.name} as admin.`)) await afterChange();
+  const unban = async (b: PanelBan) => {
+    const who = b.name ?? b.steamId;
+    if (!window.confirm(`Unban ${who}? They can join every server again.`)) return;
+    if (await run(() => api.panelUnban(b.id), `Unbanned ${who}.`)) await afterChange();
   };
 
   const moderate = can("players.moderate");
@@ -78,6 +47,13 @@ export function PlayersTab({ server }: { server: Server }) {
 
   return (
     <>
+      {!bridge && (
+        <div className="notice info" style={{ marginBottom: 16 }}>
+          This server doesn't have CS2 Panel Bridge, so it can't show SteamIDs or enforce panel bans. Install it on the{" "}
+          <Link to={`/servers/${server.id}/plugins`}>Plugins tab</Link>; it needs CounterStrikeSharp, which is added with it if missing. Kicking works either way.
+        </div>
+      )}
+
       <div className="panel">
         <div className="panel-head">
           <div>
@@ -124,11 +100,14 @@ export function PlayersTab({ server }: { server: Server }) {
                           <button className="btn small" onClick={() => setTarget({ kind: "kick", player: p })}>
                             Kick
                           </button>
-                          {mod?.provider && (
-                            <button className="btn small danger" onClick={() => setTarget({ kind: "ban", player: p })}>
-                              Ban
-                            </button>
-                          )}
+                          <button
+                            className="btn small danger"
+                            disabled={!p.steamId}
+                            title={p.steamId ? undefined : "The SteamID isn't known yet, so this player can't be banned from here."}
+                            onClick={() => setTarget({ kind: "ban", player: p })}
+                          >
+                            Ban
+                          </button>
                         </div>
                       )}
                     </td>
@@ -138,144 +117,78 @@ export function PlayersTab({ server }: { server: Server }) {
             </table>
           </div>
         )}
-        {live.data?.running && humans.length > 0 && !mod?.provider && (
-          <p className="hint" style={{ marginBottom: 0 }}>
-            CS2 doesn't report SteamIDs on its own. Install CS2-SimpleAdmin on the Plugins tab to see them, and to ban players.
-          </p>
-        )}
       </div>
 
-      {mod && !mod.provider && (
-        <div className="panel">
-          <h2 style={{ marginBottom: 6 }}>Bans and in-game admins</h2>
-          <p className="hint" style={{ margin: 0 }}>
-            These need a plugin that provides them. Install CS2-SimpleAdmin on the Plugins tab and they appear here.
-          </p>
-        </div>
-      )}
-
-      {mod?.provider && (
-        <>
-          {mod.error && <div className="notice error" style={{ marginBottom: 16 }}>Couldn't read {mod.provider}'s data: {mod.error}</div>}
-          {!mod.canAct && (
-            <div className="notice info" style={{ marginBottom: 16 }}>
-              The server is stopped. You can look at bans and admins, but changes need the server running because {mod.provider} makes them.
-            </div>
-          )}
-
-          <div className="panel">
-            <div className="panel-head">
-              <div>
-                <h2>Bans</h2>
-                <p className="hint" style={{ margin: "4px 0 0" }}>
-                  Managed by {mod.provider}. {mod.shared ? "Shared by every server that uses the same database." : "These apply to this server only."}
-                </p>
-              </div>
-              <label className="check">
-                <input type="checkbox" checked={showAllBans} onChange={(e) => setShowAllBans(e.target.checked)} />
-                <span className="hint">Show expired and lifted bans</span>
-              </label>
-            </div>
-            {moderate && <OfflineBanForm server={server} disabled={!mod.canAct} onDone={afterChange} />}
-            {bans && bans.length === 0 && <p className="hint">No {showAllBans ? "" : "active "}bans.</p>}
-            {bans && bans.length > 0 && (
-              <div className="table-wrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Player</th>
-                      <th>Reason</th>
-                      <th>Length</th>
-                      <th>Ends</th>
-                      <th>
-                        <span className="visually-hidden">Actions</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {bans.map((b) => (
-                      <tr key={b.id} style={b.status !== "active" ? { opacity: 0.6 } : undefined}>
-                        <td>
-                          {b.playerName ?? <span className="hint">Name unknown</span>}
-                          <small style={{ display: "block" }}>
-                            <SteamLink id={b.steamId} />
-                          </small>
-                        </td>
-                        <td>
-                          {b.reason}
-                          <small className="hint" style={{ display: "block" }}>
-                            by {b.adminName || "unknown"}, <span title={fullTime(b.createdAt)}>{timeAgo(b.createdAt)}</span>
-                          </small>
-                        </td>
-                        <td>{lengthText(b.duration)}</td>
-                        <td>{b.status === "unbanned" ? "Lifted" : b.status === "expired" ? "Expired" : b.endsAt ? fullTime(b.endsAt) : "Never"}</td>
-                        <td>
-                          {moderate && b.status === "active" && b.steamId && (
-                            <button className="btn small" disabled={busy || !mod.canAct} onClick={() => void unban(b)}>
-                              Unban
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          <div className="panel">
-            <h2 style={{ marginBottom: 6 }}>In-game admins</h2>
-            <p className="hint" style={{ marginTop: 0 }}>
-              People who can use {mod.provider}'s commands in game (like !admin). This is separate from who can use this panel.
+      <div className="panel">
+        <div className="panel-head">
+          <div>
+            <h2>Bans</h2>
+            <p className="hint" style={{ margin: "4px 0 0" }}>
+              One list for all your servers. Banned players are kicked as soon as they join.
+              {coverage && coverage.missing.length > 0 && <> Not enforced on {coverage.missing.map((s) => s.name).join(", ")} (no bridge plugin).</>}
             </p>
-            {can("gameadmins.manage") && <AddAdminForm server={server} presets={mod.flagPresets} disabled={!mod.canAct} onDone={afterChange} />}
-            {admins && admins.length === 0 && <p className="hint">No in-game admins yet.</p>}
-            {admins && admins.length > 0 && (
-              <div className="table-wrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Admin</th>
-                      <th>Permissions</th>
-                      <th>Immunity</th>
-                      <th>Until</th>
-                      <th>
-                        <span className="visually-hidden">Actions</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {admins.map((a) => (
-                      <tr key={a.steamId}>
-                        <td>
-                          {a.name}
-                          <small style={{ display: "block" }}>
-                            <SteamLink id={a.steamId} />
-                          </small>
-                        </td>
-                        <td>
-                          {a.group && <div>Group: {a.group}</div>}
-                          <span className="mono">{a.flags.join(", ") || "none"}</span>
-                        </td>
-                        <td>{a.immunity}</td>
-                        <td>{a.endsAt ? fullTime(a.endsAt) : "Permanent"}</td>
-                        <td>
-                          {can("gameadmins.manage") && (
-                            <button className="btn small danger" disabled={busy || !mod.canAct} onClick={() => void removeAdmin(a)}>
-                              Remove
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
           </div>
-        </>
-      )}
+          <label className="check">
+            <input type="checkbox" checked={showAllBans} onChange={(e) => setShowAllBans(e.target.checked)} />
+            <span className="hint">Show expired and lifted bans</span>
+          </label>
+        </div>
+        {moderate && <SteamBanForm onDone={afterChange} />}
+        {bans && bans.length === 0 && <p className="hint">No {showAllBans ? "" : "active "}bans.</p>}
+        {bans && bans.length > 0 && (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Player</th>
+                  <th>Reason</th>
+                  <th>Ends</th>
+                  <th>
+                    <span className="visually-hidden">Actions</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {bans.map((b) => (
+                  <tr key={b.id} style={b.status !== "active" ? { opacity: 0.6 } : undefined}>
+                    <td>
+                      {b.name ?? <span className="hint">Name unknown</span>}
+                      <small style={{ display: "block" }}>
+                        <SteamLink id={b.steamId} />
+                      </small>
+                    </td>
+                    <td>
+                      {b.reason}
+                      <small className="hint" style={{ display: "block" }}>
+                        by {b.createdBy ?? "unknown"}
+                        {b.serverName && <> on {b.serverName}</>}, <span title={fullTime(b.createdAt)}>{timeAgo(b.createdAt)}</span>
+                      </small>
+                    </td>
+                    <td>
+                      {b.status === "unbanned" ? (
+                        <span title={b.revokeReason ?? undefined}>Lifted by {b.revokedBy ?? "unknown"}</span>
+                      ) : b.status === "expired" ? (
+                        "Expired"
+                      ) : b.expiresAt ? (
+                        fullTime(b.expiresAt)
+                      ) : (
+                        "Never"
+                      )}
+                    </td>
+                    <td>
+                      {moderate && b.status === "active" && (
+                        <button className="btn small" disabled={busy} onClick={() => void unban(b)}>
+                          Unban
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       <div className="panel">
         <h2 style={{ marginBottom: 6 }}>Recent players</h2>
@@ -303,12 +216,17 @@ export function PlayersTab({ server }: { server: Server }) {
                     </td>
                     <td>{r.online ? "Online now" : <span title={fullTime(r.lastSeenAt)}>{timeAgo(r.lastSeenAt)}</span>}</td>
                     <td>
-                      {moderate && mod?.provider && r.steamId && !r.online && !banned.has(r.steamId) && (
-                        <button className="btn small danger" disabled={!mod.canAct} onClick={() => setTarget({ kind: "ban-offline", name: r.name, steamId: r.steamId! })}>
-                          Ban
-                        </button>
+                      {r.steamId && banned.has(r.steamId) ? (
+                        <span className="hint">Banned</span>
+                      ) : (
+                        moderate &&
+                        r.steamId &&
+                        !r.online && (
+                          <button className="btn small danger" onClick={() => setTarget({ kind: "ban-offline", name: r.name, steamId: r.steamId! })}>
+                            Ban
+                          </button>
+                        )
                       )}
-                      {r.steamId && banned.has(r.steamId) && <span className="hint">Banned</span>}
                     </td>
                   </tr>
                 ))}
@@ -321,6 +239,11 @@ export function PlayersTab({ server }: { server: Server }) {
       {target && <ActionDialog server={server} target={target} onClose={() => setTarget(null)} onDone={afterChange} />}
     </>
   );
+}
+
+function coverageNote(c: BanCoverage): string | null {
+  if (c.missing.length === 0) return null;
+  return ` Not enforced on ${c.missing.map((s) => s.name).join(", ")}.`;
 }
 
 function ActionDialog({ server, target, onClose, onDone }: { server: Server; target: Target; onClose: () => void; onDone: () => Promise<void> }) {
@@ -338,15 +261,12 @@ function ActionDialog({ server, target, onClose, onDone }: { server: Server; tar
     let action: () => Promise<unknown>;
     if (target.kind === "ban-offline") {
       const steam = target.steamId;
-      action = () => api.ban(server.id, { steam, minutes, reason });
+      action = () => api.panelBan({ steam, name, minutes, reason, serverId: server.id });
     } else {
       const userId = target.player.userId;
-      action = target.kind === "kick" ? () => api.kick(server.id, userId, reason) : () => api.ban(server.id, { userId, minutes, reason });
+      action = isKick ? () => api.kick(server.id, userId, reason) : () => api.panelBan({ serverId: server.id, userId, minutes, reason });
     }
-    const ok = await run(
-      action,
-      isKick ? `Kicked ${name}.` : `Banned ${name} (${lengthText(minutes).toLowerCase()}).`,
-    );
+    const ok = await run(action, isKick ? `Kicked ${name}.` : `Banned ${name} (${lengthText(minutes).toLowerCase()}).`);
     if (ok) {
       ref.current?.close();
       await onDone();
@@ -360,16 +280,15 @@ function ActionDialog({ server, target, onClose, onDone }: { server: Server; tar
           {isKick ? "Kick" : "Ban"} {name}
         </h2>
         {!isKick && (
-          <label className="field" style={{ marginBottom: 12 }}>
-            <span>Length</span>
-            <select value={minutes} onChange={(e) => setMinutes(Number(e.target.value))}>
-              {DURATIONS.map((d) => (
-                <option key={d.minutes} value={d.minutes}>
-                  {d.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <>
+            <p className="hint" style={{ marginTop: 0 }}>
+              The ban applies on all your servers.
+            </p>
+            <label className="field" style={{ marginBottom: 12 }}>
+              <span>Length</span>
+              <DurationSelect value={minutes} onChange={setMinutes} />
+            </label>
+          </>
         )}
         <label className="field">
           <span>Reason</span>
@@ -388,16 +307,25 @@ function ActionDialog({ server, target, onClose, onDone }: { server: Server; tar
   );
 }
 
-function OfflineBanForm({ server, disabled, onDone }: { server: Server; disabled: boolean; onDone: () => Promise<void> }) {
+function SteamBanForm({ onDone }: { onDone: () => Promise<void> }) {
   const { busy, run } = useAction();
+  const { toast } = useApp();
   const box = useRef<HTMLDetailsElement>(null);
   const [steam, setSteam] = useState("");
+  const [name, setName] = useState("");
   const [minutes, setMinutes] = useState(0);
   const [reason, setReason] = useState("");
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (await run(() => api.ban(server.id, { steam, minutes, reason }), "Ban added.")) {
+    let note: string | null = null;
+    const ok = await run(async () => {
+      const r = await api.panelBan({ steam, name: name || undefined, minutes, reason });
+      note = coverageNote(r.coverage);
+    }, "Ban added.");
+    if (ok) {
+      if (note) toast(`Ban added.${note}`, "info");
       setSteam("");
+      setName("");
       setReason("");
       if (box.current) box.current.open = false;
       await onDone();
@@ -412,92 +340,20 @@ function OfflineBanForm({ server, disabled, onDone }: { server: Server; disabled
           <input value={steam} onChange={(e) => setSteam(e.target.value)} placeholder="Profile URL or SteamID64" required spellCheck={false} />
         </label>
         <label className="field">
-          <span>Length</span>
-          <select value={minutes} onChange={(e) => setMinutes(Number(e.target.value))}>
-            {DURATIONS.map((d) => (
-              <option key={d.minutes} value={d.minutes}>
-                {d.label}
-              </option>
-            ))}
-          </select>
+          <span>Name</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} maxLength={64} placeholder="Optional, to recognise them" />
         </label>
-        <label className="field wide">
+        <label className="field">
+          <span>Length</span>
+          <DurationSelect value={minutes} onChange={setMinutes} />
+        </label>
+        <label className="field">
           <span>Reason</span>
           <input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={120} required />
         </label>
         <div className="wide">
-          <button className="btn danger" disabled={busy || disabled}>
+          <button className="btn danger" disabled={busy}>
             Add ban
-          </button>
-        </div>
-      </form>
-    </details>
-  );
-}
-
-function AddAdminForm({ server, presets, disabled, onDone }: { server: Server; presets: { label: string; flags: string }[]; disabled: boolean; onDone: () => Promise<void> }) {
-  const { busy, run } = useAction();
-  const box = useRef<HTMLDetailsElement>(null);
-  const [steam, setSteam] = useState("");
-  const [name, setName] = useState("");
-  const [preset, setPreset] = useState(presets[0]?.flags ?? "custom");
-  const [custom, setCustom] = useState("");
-  const [immunity, setImmunity] = useState("50");
-  const [minutes, setMinutes] = useState(0);
-  const flags = preset === "custom" ? custom : preset;
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (await run(() => api.addGameAdmin(server.id, { steam, name, flags, immunity: Number(immunity), minutes }), `Added ${name} as admin.`)) {
-      setSteam("");
-      setName("");
-      if (box.current) box.current.open = false;
-      await onDone();
-    }
-  };
-  return (
-    <details className="inline-form" ref={box}>
-      <summary className="btn small">Add admin</summary>
-      <form onSubmit={submit} className="form-grid" style={{ marginTop: 12 }}>
-        <label className="field">
-          <span>Steam profile</span>
-          <input value={steam} onChange={(e) => setSteam(e.target.value)} placeholder="Profile URL or SteamID64" required spellCheck={false} />
-        </label>
-        <label className="field">
-          <span>Name</span>
-          <input value={name} onChange={(e) => setName(e.target.value)} maxLength={64} required />
-        </label>
-        <label className="field">
-          <span>Permissions</span>
-          <select value={preset} onChange={(e) => setPreset(e.target.value)}>
-            {presets.map((p) => (
-              <option key={p.flags} value={p.flags}>
-                {p.label}
-              </option>
-            ))}
-            <option value="custom">Custom flags…</option>
-          </select>
-          {preset === "custom" && (
-            <input value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="@css/generic,@css/kick" style={{ marginTop: 6 }} required spellCheck={false} />
-          )}
-        </label>
-        <label className="field">
-          <span>Immunity</span>
-          <input inputMode="numeric" value={immunity} onChange={(e) => setImmunity(e.target.value)} />
-          <small>0–100. Admins can't target admins with higher immunity.</small>
-        </label>
-        <label className="field">
-          <span>For how long</span>
-          <select value={minutes} onChange={(e) => setMinutes(Number(e.target.value))}>
-            {DURATIONS.map((d) => (
-              <option key={d.minutes} value={d.minutes}>
-                {d.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="wide">
-          <button className="btn primary" disabled={busy || disabled}>
-            Add admin
           </button>
         </div>
       </form>

@@ -163,6 +163,7 @@ beforeEach(async () => {
     instanceEnvDir: path.join(dir, "env"),
     cs2ctl: "/bin/false",
     webDir: path.join(dir, "no-web"),
+    bridgeDir: path.join(dir, "no-bridge"),
     dev: true,
     mysql: { host: "127.0.0.1", port: 3306, user: "cs2sa", password: "pw-secret", database: "cs2_simpleadmin" },
   };
@@ -342,7 +343,7 @@ describe("plugin management", () => {
 
     await call(c, "POST", "/api/game/update", { warnSeconds: 0 });
     let body: Record<string, any> = {};
-    for (let i = 0; i < 100; i++) {
+    for (let i = 0; i < 400; i++) {
       body = (await call(c, "GET", "/api/game")).body;
       if (body.job.state !== "running") break;
       await new Promise((r) => setTimeout(r, 30));

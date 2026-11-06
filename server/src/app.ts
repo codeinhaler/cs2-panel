@@ -25,8 +25,9 @@ import { ConfigService } from "./servers/configs.js";
 import { OperationGate, ServerService, type Actor } from "./servers/service.js";
 import { PluginSources } from "./plugins/sources.js";
 import { PluginService } from "./plugins/service.js";
-import { CATALOG } from "./plugins/catalog.js";
+import { CATALOG, pluginPages } from "./plugins/catalog.js";
 import { PlayerService } from "./players/service.js";
+import { BanService, BRIDGE_ID } from "./players/bans.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -57,6 +58,7 @@ export interface App {
     presets: PresetStore;
     plugins: PluginService;
     players: PlayerService;
+    bans: BanService;
   };
 }
 
@@ -78,10 +80,14 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const gate = new OperationGate();
   const servers = new ServerService(serverStore, presets, files, configs, host, audit, gate);
   const updater = new GameUpdater(host, files, serverStore, audit, gate, rcon);
-  const pluginSources = new PluginSources(path.join(config.dataDir, "plugin-cache"), fetchFn);
+  const pluginSources = new PluginSources(path.join(config.dataDir, "plugin-cache"), fetchFn, Date.now, config.bridgeDir);
   const plugins = new PluginService(db, pluginSources, servers, files, audit, gate, rcon, path.join(config.dataDir, "tmp"), config.mysql);
   updater.afterStart = (started) => plugins.healthLines(started);
   const players = new PlayerService(db, servers, plugins, files, host, rcon, audit);
+  const bans = new BanService(db, servers, plugins, files, host, rcon, audit);
+  // Every server with the bridge gets the current ban list before it starts and right after the bridge is installed.
+  servers.beforeStart.push((s) => bans.writeFor(s));
+  plugins.afterApply.push((s, ids) => (ids.includes(BRIDGE_ID) ? bans.writeFor(s) : Promise.resolve()));
   if (deps.pluginCheckDelayMs !== undefined) updater.pluginCheckDelayMs = deps.pluginCheckDelayMs;
 
   users.ensureOwner(config.ownerSteamId);
@@ -296,7 +302,8 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     const server = await servers.get(id);
     // Moderators don't need the join password.
     if (!can(user.role, "server.manage")) server.password = server.password ? "••••" : "";
-    return { server };
+    const installed = plugins.installedIds(id);
+    return { server, pluginPages: pluginPages(installed), bridge: installed.includes(BRIDGE_ID) };
   });
 
   app.post("/api/servers", async (req) => {
@@ -544,20 +551,69 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     return { players: players.recent(serverId) };
   });
 
+  // Panel bans: one list for all servers, enforced by the bridge plugin.
+  app.get("/api/bans", async (req) => {
+    requirePerm(req, "view");
+    const { all } = z.object({ all: z.enum(["0", "1", "true", "false"]).default("0") }).parse(req.query);
+    return { bans: bans.list(all === "1" || all === "true") };
+  });
+
+  app.post("/api/bans", async (req) => {
+    const user = requirePerm(req, "players.moderate");
+    const body = z
+      .object({
+        serverId: z.number().int().optional(),
+        userId: z.number().int().min(0).optional(),
+        steam: z.string().max(200).optional(),
+        name: z.string().max(64).optional(),
+        minutes: z.number().int(),
+        reason: z.string().max(200),
+      })
+      .parse(req.body);
+    let steamId: string;
+    let name = body.name?.trim() || null;
+    if (body.userId !== undefined) {
+      if (body.serverId === undefined) throw badRequest("Pick the server the player is on.");
+      const p = (await players.live(body.serverId)).players.find((x) => x.userId === body.userId);
+      if (!p) throw badRequest("That player isn't on the server anymore. Ban them by SteamID instead.");
+      if (!p.steamId) throw badRequest("The panel can't see this player's SteamID. Install CS2 Panel Bridge on the server (Plugins tab), or ban by SteamID.");
+      steamId = p.steamId;
+      name = p.name;
+    } else {
+      if (!body.steam?.trim()) throw badRequest("Pick a player or enter a SteamID.");
+      steamId = await steamIdFrom(body.steam);
+    }
+    const ban = await bans.ban({ steamId, name, minutes: body.minutes, reason: body.reason, serverId: body.serverId ?? null }, user.id);
+    return { ban, coverage: bans.coverage() };
+  });
+
+  app.post("/api/bans/:id/unban", async (req) => {
+    const user = requirePerm(req, "players.moderate");
+    const { id } = idParam.parse(req.params);
+    const { reason } = z.object({ reason: z.string().max(200).default("") }).parse(req.body ?? {});
+    await bans.unban(id, reason, user.id);
+    return { ok: true };
+  });
+
+  app.get("/api/bans/coverage", async (req) => {
+    requirePerm(req, "view");
+    return bans.coverage();
+  });
+
   app.get("/api/servers/:id/moderation", async (req) => {
     requirePerm(req, "view");
     const { id } = idParam.parse(req.params);
     return players.moderationInfo(id);
   });
 
-  app.get("/api/servers/:id/bans", async (req) => {
+  app.get("/api/servers/:id/moderation/bans", async (req) => {
     requirePerm(req, "view");
     const { id } = idParam.parse(req.params);
     const { all } = z.object({ all: z.coerce.boolean().default(false) }).parse(req.query);
     return { bans: await players.bans(id, all) };
   });
 
-  app.post("/api/servers/:id/bans", async (req) => {
+  app.post("/api/servers/:id/moderation/bans", async (req) => {
     const user = requirePerm(req, "players.moderate");
     const { id } = idParam.parse(req.params);
     const body = z
@@ -569,7 +625,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     return { ok: true };
   });
 
-  app.post("/api/servers/:id/bans/unban", async (req) => {
+  app.post("/api/servers/:id/moderation/bans/unban", async (req) => {
     const user = requirePerm(req, "players.moderate");
     const { id } = idParam.parse(req.params);
     const body = z.object({ steamId: z.string(), reason: z.string().max(200).default("") }).parse(req.body);
@@ -577,13 +633,13 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     return { ok: true };
   });
 
-  app.get("/api/servers/:id/gameadmins", async (req) => {
+  app.get("/api/servers/:id/moderation/admins", async (req) => {
     requirePerm(req, "view");
     const { id } = idParam.parse(req.params);
     return { admins: await players.admins(id) };
   });
 
-  app.post("/api/servers/:id/gameadmins", async (req) => {
+  app.post("/api/servers/:id/moderation/admins", async (req) => {
     const user = requirePerm(req, "gameadmins.manage");
     const { id } = idParam.parse(req.params);
     const body = z
@@ -599,7 +655,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     return { ok: true };
   });
 
-  app.delete("/api/servers/:id/gameadmins/:steamId", async (req) => {
+  app.delete("/api/servers/:id/moderation/admins/:steamId", async (req) => {
     const user = requirePerm(req, "gameadmins.manage");
     const { id, steamId } = z.object({ id: z.coerce.number().int(), steamId: z.string() }).parse(req.params);
     await players.removeAdmin(id, steamId, user.id);
@@ -644,6 +700,6 @@ export async function buildApp(deps: AppDeps): Promise<App> {
 
   return {
     fastify: app,
-    services: { users, sessions, audit, servers, configs, updater, presets, plugins, players },
+    services: { users, sessions, audit, servers, configs, updater, presets, plugins, players, bans },
   };
 }

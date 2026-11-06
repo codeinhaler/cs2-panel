@@ -134,6 +134,7 @@ beforeEach(async () => {
     instanceEnvDir: path.join(dir, "env"),
     cs2ctl: "/bin/false",
     webDir: path.join(dir, "no-web"),
+    bridgeDir: path.join(dir, "no-bridge"),
     dev: true,
   };
   installFakeBase(config.cs2Root);
@@ -206,7 +207,7 @@ describe("players without plugins", () => {
     await call(c, "POST", `/api/servers/${s.id}/stop`, {});
     expect((await call(c, "GET", `/api/servers/${s.id}/players`)).body).toEqual({ running: false, players: [], error: null });
     expect((await call(c, "GET", `/api/servers/${s.id}/moderation`)).body.provider).toBeNull();
-    expect((await call(c, "GET", `/api/servers/${s.id}/bans`)).body.error).toMatch(/need a plugin/);
+    expect((await call(c, "GET", `/api/servers/${s.id}/moderation/bans`)).body.error).toMatch(/need a plugin/);
   });
 });
 
@@ -222,9 +223,9 @@ describe("bans and admins through SimpleAdmin", () => {
     const live = (await call(c, "GET", `/api/servers/${s.id}/players`)).body;
     expect(live.players[1]).toMatchObject({ name: "Alice", steamId: ALICE });
 
-    expect((await call(c, "POST", `/api/servers/${s.id}/bans`, { userId: 2, minutes: 60, reason: "Spawn camping" })).status).toBe(200);
+    expect((await call(c, "POST", `/api/servers/${s.id}/moderation/bans`, { userId: 2, minutes: 60, reason: "Spawn camping" })).status).toBe(200);
     expect(commands).toContain('css_ban #2 60 "Spawn camping"');
-    const bans = (await call(c, "GET", `/api/servers/${s.id}/bans`)).body.bans;
+    const bans = (await call(c, "GET", `/api/servers/${s.id}/moderation/bans`)).body.bans;
     expect(bans).toHaveLength(1);
     expect(bans[0]).toMatchObject({ steamId: ALICE, playerName: "Alice", reason: "Spawn camping", duration: 60, status: "active" });
     expect(Date.parse(bans[0].endsAt)).toBeGreaterThan(Date.now());
@@ -236,31 +237,31 @@ describe("bans and admins through SimpleAdmin", () => {
     const c = await login();
     const s = await runningServer(c);
     installSimpleAdmin(s.id, s.slug);
-    await call(c, "POST", `/api/servers/${s.id}/bans`, { steam: `https://steamcommunity.com/profiles/${BOB}`, minutes: 0, reason: "Cheating" });
+    await call(c, "POST", `/api/servers/${s.id}/moderation/bans`, { steam: `https://steamcommunity.com/profiles/${BOB}`, minutes: 0, reason: "Cheating" });
     expect(commands).toContain(`css_addban ${BOB} 0 "Cheating"`);
-    let bans = (await call(c, "GET", `/api/servers/${s.id}/bans`)).body.bans;
+    let bans = (await call(c, "GET", `/api/servers/${s.id}/moderation/bans`)).body.bans;
     expect(bans[0]).toMatchObject({ steamId: BOB, duration: 0, endsAt: null, status: "active" });
 
-    await call(c, "POST", `/api/servers/${s.id}/bans/unban`, { steamId: BOB, reason: "Appeal accepted" });
-    expect((await call(c, "GET", `/api/servers/${s.id}/bans`)).body.bans).toEqual([]);
-    bans = (await call(c, "GET", `/api/servers/${s.id}/bans?all=true`)).body.bans;
+    await call(c, "POST", `/api/servers/${s.id}/moderation/bans/unban`, { steamId: BOB, reason: "Appeal accepted" });
+    expect((await call(c, "GET", `/api/servers/${s.id}/moderation/bans`)).body.bans).toEqual([]);
+    bans = (await call(c, "GET", `/api/servers/${s.id}/moderation/bans?all=true`)).body.bans;
     expect(bans[0].status).toBe("unbanned");
 
     // Expired bans aren't active even if the plugin hasn't marked them yet.
     sa!.prepare("INSERT INTO sa_bans (player_steamid, admin_steamid, admin_name, reason, duration, ends) VALUES (?, '0', 'x', 'old', 10, '2020-01-01 00:00:00')").run(ALICE);
-    expect((await call(c, "GET", `/api/servers/${s.id}/bans`)).body.bans).toEqual([]);
+    expect((await call(c, "GET", `/api/servers/${s.id}/moderation/bans`)).body.bans).toEqual([]);
   });
 
   it("validates bans and needs a running server", async () => {
     const c = await login();
     const s = await runningServer(c);
     installSimpleAdmin(s.id, s.slug);
-    expect((await call(c, "POST", `/api/servers/${s.id}/bans`, { steam: BOB, minutes: 60, reason: "" })).body.error).toMatch(/reason/);
-    expect((await call(c, "POST", `/api/servers/${s.id}/bans`, { steam: "nope", minutes: 60, reason: "x" })).status).toBe(400);
+    expect((await call(c, "POST", `/api/servers/${s.id}/moderation/bans`, { steam: BOB, minutes: 60, reason: "" })).body.error).toMatch(/reason/);
+    expect((await call(c, "POST", `/api/servers/${s.id}/moderation/bans`, { steam: "nope", minutes: 60, reason: "x" })).status).toBe(400);
     await call(c, "POST", `/api/servers/${s.id}/stop`, {});
-    expect((await call(c, "POST", `/api/servers/${s.id}/bans`, { steam: BOB, minutes: 60, reason: "x" })).body.error).toMatch(/Start the server/);
+    expect((await call(c, "POST", `/api/servers/${s.id}/moderation/bans`, { steam: BOB, minutes: 60, reason: "x" })).body.error).toMatch(/Start the server/);
     // Reading still works while stopped.
-    expect((await call(c, "GET", `/api/servers/${s.id}/bans`)).status).toBe(200);
+    expect((await call(c, "GET", `/api/servers/${s.id}/moderation/bans`)).status).toBe(200);
   });
 
   it("explains when the plugin doesn't answer (not loaded or hibernating)", async () => {
@@ -269,7 +270,7 @@ describe("bans and admins through SimpleAdmin", () => {
     installSimpleAdmin(s.id, s.slug);
     const keep = sa;
     sa = null;
-    expect((await call(c, "POST", `/api/servers/${s.id}/bans`, { steam: BOB, minutes: 60, reason: "x" })).body.error).toMatch(/didn't respond/);
+    expect((await call(c, "POST", `/api/servers/${s.id}/moderation/bans`, { steam: BOB, minutes: 60, reason: "x" })).body.error).toMatch(/didn't respond/);
     sa = keep;
   });
 
@@ -280,13 +281,13 @@ describe("bans and admins through SimpleAdmin", () => {
     installSimpleAdmin(s.id, s.slug);
     const a = await login(ADMIN);
     const body = { steam: ALICE, name: "Alice", flags: "@css/generic,@css/kick", immunity: 10, minutes: 0 };
-    expect((await call(a, "POST", `/api/servers/${s.id}/gameadmins`, body)).status).toBe(403);
-    expect((await call(c, "POST", `/api/servers/${s.id}/gameadmins`, { ...body, flags: "@css/root; quit" })).status).toBe(400);
-    expect((await call(c, "POST", `/api/servers/${s.id}/gameadmins`, body)).status).toBe(200);
+    expect((await call(a, "POST", `/api/servers/${s.id}/moderation/admins`, body)).status).toBe(403);
+    expect((await call(c, "POST", `/api/servers/${s.id}/moderation/admins`, { ...body, flags: "@css/root; quit" })).status).toBe(400);
+    expect((await call(c, "POST", `/api/servers/${s.id}/moderation/admins`, body)).status).toBe(200);
     expect(commands).toContain(`css_addadmin ${ALICE} "Alice" @css/generic,@css/kick 10 0`);
-    const admins = (await call(a, "GET", `/api/servers/${s.id}/gameadmins`)).body.admins;
+    const admins = (await call(a, "GET", `/api/servers/${s.id}/moderation/admins`)).body.admins;
     expect(admins).toEqual([{ steamId: ALICE, name: "Alice", flags: ["@css/generic", "@css/kick"], group: null, immunity: 10, endsAt: null }]);
-    expect((await call(c, "DELETE", `/api/servers/${s.id}/gameadmins/${ALICE}`)).status).toBe(200);
-    expect((await call(c, "GET", `/api/servers/${s.id}/gameadmins`)).body.admins).toEqual([]);
+    expect((await call(c, "DELETE", `/api/servers/${s.id}/moderation/admins/${ALICE}`)).status).toBe(200);
+    expect((await call(c, "GET", `/api/servers/${s.id}/moderation/admins`)).body.admins).toEqual([]);
   });
 });

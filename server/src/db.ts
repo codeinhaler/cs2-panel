@@ -131,6 +131,22 @@ const MIGRATIONS: string[] = [
   CREATE INDEX player_sessions_seen ON player_sessions(last_seen_at DESC);
   CREATE INDEX player_sessions_steam ON player_sessions(steam_id);
   `,
+  /* 5: bans owned by the panel, enforced by the bridge plugin on every server */ `
+  CREATE TABLE bans (
+    id             INTEGER PRIMARY KEY,
+    steam_id       TEXT NOT NULL,
+    name           TEXT,
+    reason         TEXT NOT NULL,
+    created_by     INTEGER REFERENCES users(id),
+    created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    server_id      INTEGER REFERENCES servers(id),
+    expires_at     TEXT,
+    revoked_by     INTEGER REFERENCES users(id),
+    revoked_at     TEXT,
+    revoke_reason  TEXT
+  );
+  CREATE INDEX bans_steam ON bans(steam_id);
+  `,
 ];
 
 export function openDb(file: string): Db {

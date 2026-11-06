@@ -170,6 +170,39 @@ export interface Ban {
   status: "active" | "expired" | "unbanned";
 }
 
+/** A ban the panel owns; it applies on every server running the bridge. */
+export interface PanelBan {
+  id: number;
+  steamId: string;
+  name: string | null;
+  reason: string;
+  createdBy: string | null;
+  createdAt: string;
+  serverName: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  revokedBy: string | null;
+  revokeReason: string | null;
+  status: "active" | "expired" | "unbanned";
+}
+
+export interface BanCoverage {
+  enforced: { id: number; name: string }[];
+  missing: { id: number; name: string }[];
+}
+
+export interface PluginPage {
+  pluginId: string;
+  label: string;
+  kind: "moderation";
+}
+
+export interface ServerDetail {
+  server: Server;
+  pluginPages: PluginPage[];
+  bridge: boolean;
+}
+
 export interface GameAdmin {
   steamId: string;
   name: string;
@@ -254,7 +287,7 @@ export const api = {
     request<{ problem: string | null }>("GET", `/api/ports/check?${q({ port, serverId })}`),
 
   servers: () => request<{ servers: Server[] }>("GET", "/api/servers"),
-  server: (id: number) => request<{ server: Server }>("GET", `/api/servers/${id}`),
+  server: (id: number) => request<ServerDetail>("GET", `/api/servers/${id}`),
   createServer: (input: Record<string, unknown>) => request<{ server: Server }>("POST", "/api/servers", input),
   updateServer: (id: number, input: Record<string, unknown>) =>
     request<{ server: Server; restartRequired: boolean }>("PATCH", `/api/servers/${id}`, input),
@@ -306,15 +339,22 @@ export const api = {
   players: (id: number) => request<{ running: boolean; players: OnlinePlayer[]; error: string | null }>("GET", `/api/servers/${id}/players`),
   kick: (id: number, userId: number, reason: string) => request<{ ok: true }>("POST", `/api/servers/${id}/players/${userId}/kick`, { reason }),
   recentPlayers: (serverId?: number) => request<{ players: RecentPlayer[] }>("GET", `/api/players/recent?${q({ serverId })}`),
+  panelBans: (all: boolean) => request<{ bans: PanelBan[] }>("GET", `/api/bans${all ? "?all=1" : ""}`),
+  banCoverage: () => request<BanCoverage>("GET", "/api/bans/coverage"),
+  panelBan: (body: { serverId?: number; userId?: number; steam?: string; name?: string; minutes: number; reason: string }) =>
+    request<{ ban: PanelBan; coverage: BanCoverage }>("POST", "/api/bans", body),
+  panelUnban: (banId: number, reason = "") => request<{ ok: true }>("POST", `/api/bans/${banId}/unban`, { reason }),
+
+  // A moderation plugin's own bans and admins (CS2-SimpleAdmin), shown on its tab.
   moderation: (id: number) => request<ModerationInfo>("GET", `/api/servers/${id}/moderation`),
-  bans: (id: number, all: boolean) => request<{ bans: Ban[] }>("GET", `/api/servers/${id}/bans${all ? "?all=true" : ""}`),
+  bans: (id: number, all: boolean) => request<{ bans: Ban[] }>("GET", `/api/servers/${id}/moderation/bans${all ? "?all=true" : ""}`),
   ban: (id: number, body: { userId?: number; steam?: string; minutes: number; reason: string }) =>
-    request<{ ok: true }>("POST", `/api/servers/${id}/bans`, body),
-  unban: (id: number, steamId: string, reason = "") => request<{ ok: true }>("POST", `/api/servers/${id}/bans/unban`, { steamId, reason }),
-  gameAdmins: (id: number) => request<{ admins: GameAdmin[] }>("GET", `/api/servers/${id}/gameadmins`),
+    request<{ ok: true }>("POST", `/api/servers/${id}/moderation/bans`, body),
+  unban: (id: number, steamId: string, reason = "") => request<{ ok: true }>("POST", `/api/servers/${id}/moderation/bans/unban`, { steamId, reason }),
+  gameAdmins: (id: number) => request<{ admins: GameAdmin[] }>("GET", `/api/servers/${id}/moderation/admins`),
   addGameAdmin: (id: number, body: { steam: string; name: string; flags: string; immunity: number; minutes: number }) =>
-    request<{ ok: true }>("POST", `/api/servers/${id}/gameadmins`, body),
-  removeGameAdmin: (id: number, steamId: string) => request<{ ok: true }>("DELETE", `/api/servers/${id}/gameadmins/${steamId}`),
+    request<{ ok: true }>("POST", `/api/servers/${id}/moderation/admins`, body),
+  removeGameAdmin: (id: number, steamId: string) => request<{ ok: true }>("DELETE", `/api/servers/${id}/moderation/admins/${steamId}`),
 
   game: (since = 0) => request<GameState>("GET", `/api/game?${q({ since })}`),
   startUpdate: (validate: boolean, warnSeconds: number) => request<{ ok: true }>("POST", "/api/game/update", { validate, warnSeconds }),

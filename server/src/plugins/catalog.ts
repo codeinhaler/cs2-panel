@@ -12,7 +12,9 @@ export type PluginSource =
       /** Only assets matching this are considered at all. */
       only?: RegExp;
     }
-  | { type: "metamod" };
+  | { type: "metamod" }
+  /** Shipped inside the panel's release (bridge/<file>), built from this repo. */
+  | { type: "bundled"; file: string };
 
 import type { ModerationIntegration } from "./moderation.js";
 import { simpleAdminModeration } from "./integrations/simpleadmin.js";
@@ -56,6 +58,13 @@ export interface CatalogEntry {
   database?: DatabaseIntegration;
   /** Bans and in-game admins the panel can manage through this plugin. */
   moderation?: ModerationIntegration;
+  /**
+   * Gives the plugin its own tab on the server page while it's installed.
+   * `kind` picks which panel view renders it.
+   */
+  page?: { label: string; kind: "moderation" };
+  /** Installed automatically whenever this other plugin is installed. */
+  companionOf?: string;
   /** Libraries other plugins need; hidden from "pick plugins" lists. */
   library?: boolean;
 }
@@ -76,6 +85,16 @@ export const CATALOG: CatalogEntry[] = [
     homepage: "https://github.com/roflmuffin/CounterStrikeSharp",
     source: { type: "github", repo: "roflmuffin/CounterStrikeSharp", only: /linux/i, prefer: [/with-runtime/i] },
     requires: ["metamod"],
+  },
+  {
+    id: "cs2panel-bridge",
+    name: "CS2 Panel Bridge",
+    description: "Comes with the panel. Enforces the panel's bans and shows players' SteamIDs.",
+    homepage: "https://github.com/codeinhaler/cs2-panel/tree/main/bridge",
+    source: { type: "bundled", file: "cs2panel-bridge.zip" },
+    requires: ["counterstrikesharp"],
+    companionOf: "counterstrikesharp",
+    library: true,
   },
   {
     id: "anybaselib",
@@ -115,6 +134,7 @@ export const CATALOG: CatalogEntry[] = [
     source: { type: "github", repo: "daffyyyy/CS2-SimpleAdmin", only: /^CS2-SimpleAdmin-.*\.zip$/i },
     requires: ["menumanager", "playersettings", "anybaselib", "counterstrikesharp"],
     looseDir: "plugins/CS2-SimpleAdmin",
+    page: { label: "SimpleAdmin", kind: "moderation" },
     moderation: simpleAdminModeration,
     database: {
       configFile: "addons/counterstrikesharp/configs/plugins/CS2-SimpleAdmin/CS2-SimpleAdmin.json",
@@ -168,4 +188,9 @@ export function pickAsset<T extends { name: string }>(assets: T[], source: Extra
     if (hit) return hit;
   }
   return candidates.find((a) => /linux/i.test(a.name)) ?? candidates[0];
+}
+
+/** The extra server tabs that this server's installed plugins bring. */
+export function pluginPages(installedIds: string[]): { pluginId: string; label: string; kind: "moderation" }[] {
+  return CATALOG.filter((e) => e.page && installedIds.includes(e.id)).map((e) => ({ pluginId: e.id, ...e.page! }));
 }

@@ -7,6 +7,7 @@ import { ConsoleTab } from "./server/Console";
 import { SettingsTab } from "./server/Settings";
 import { PluginsTab } from "./server/Plugins";
 import { PlayersTab } from "./server/Players";
+import { ModerationTab } from "./server/Moderation";
 import { ActivityList } from "./Activity";
 
 // The config editor pulls in Monaco, so load it only when that tab opens.
@@ -14,7 +15,7 @@ const ConfigsTab = lazy(() => import("./server/Configs").then((m) => ({ default:
 
 export function ServerPage() {
   const id = Number(useParams().id);
-  const { data, error, setData, refresh } = usePolling(() => api.server(id).then((r) => r.server), 5000, [id]);
+  const { data, error, setData, refresh } = usePolling(() => api.server(id), 5000, [id]);
 
   if (error && !data) {
     return (
@@ -24,7 +25,8 @@ export function ServerPage() {
     );
   }
   if (!data) return null;
-  const s = data;
+  const s = data.server;
+  const setServer = (server: Server) => setData({ ...data, server });
 
   return (
     <>
@@ -40,7 +42,7 @@ export function ServerPage() {
           </p>
         </div>
         <div className="row-actions">
-          <ControlButtons server={s} onChange={setData} showForceStop />
+          <ControlButtons server={s} onChange={setServer} showForceStop />
         </div>
       </div>
 
@@ -63,6 +65,11 @@ export function ServerPage() {
         <NavLink to={`/servers/${id}/settings`} className="tab">
           Settings
         </NavLink>
+        {data.pluginPages.map((p) => (
+          <NavLink key={p.pluginId} to={`/servers/${id}/plugin/${p.pluginId}`} className="tab tab-plugin" title={`Provided by the ${p.label} plugin`}>
+            {p.label}
+          </NavLink>
+        ))}
       </nav>
 
       <Routes>
@@ -77,7 +84,10 @@ export function ServerPage() {
           }
         />
         <Route path="plugins" element={<PluginsTab server={s} />} />
-        <Route path="players" element={<PlayersTab server={s} />} />
+        <Route path="players" element={<PlayersTab server={s} bridge={data.bridge} />} />
+        {data.pluginPages.map((p) => (
+          <Route key={p.pluginId} path={`plugin/${p.pluginId}`} element={<ModerationTab server={s} label={p.label} />} />
+        ))}
         <Route path="settings" element={<SettingsTab server={s} onSaved={() => void refresh()} />} />
       </Routes>
     </>

@@ -10,6 +10,7 @@ import type { PluginService } from "../plugins/service.js";
 import type { InstanceFiles } from "../servers/instance-files.js";
 import type { ServerService } from "../servers/service.js";
 import type { ServerRecord } from "../servers/store.js";
+import { BRIDGE_ID, parseBridgePlayers } from "./bans.js";
 import { consoleArg, parseStatus, type StatusPlayer } from "./status.js";
 
 export interface OnlinePlayer extends StatusPlayer {
@@ -85,18 +86,26 @@ export class PlayerService {
     } catch (e) {
       return { running: true, players: [], error: (e as Error).message };
     }
-    // A moderation plugin can tell us SteamIDs; CS2's own status doesn't.
-    const mod = this.moderationFor(serverId);
-    if (mod && players.some((p) => !p.bot)) {
-      try {
-        const ids = new Map(mod.integration.commands.parsePlayers(await this.exec(s, mod.integration.commands.listPlayers)).map((x) => [x.userId, x.steamId]));
-        for (const p of players) p.steamId = ids.get(p.userId) ?? null;
-      } catch {
-        /* list without SteamIDs */
-      }
+    // CS2's own status has no SteamIDs. Our bridge plugin provides them; failing that, a moderation plugin may.
+    if (players.some((p) => !p.bot)) {
+      const ids = await this.steamIds(s).catch(() => null);
+      if (ids) for (const p of players) p.steamId = ids.get(p.userId) ?? null;
     }
     this.recordSessions(serverId, players);
     return { running: true, players, error: null };
+  }
+
+  private async steamIds(s: ServerRecord): Promise<Map<number, string> | null> {
+    if (this.plugins.installedIds(s.id).includes(BRIDGE_ID)) {
+      try {
+        return parseBridgePlayers(await this.exec(s, "cs2panel_players"));
+      } catch {
+        /* try the moderation plugin */
+      }
+    }
+    const mod = this.moderationFor(s.id);
+    if (!mod) return null;
+    return new Map(mod.integration.commands.parsePlayers(await this.exec(s, mod.integration.commands.listPlayers)).map((x) => [x.userId, x.steamId]));
   }
 
   async kick(serverId: number, userId: number, reason: string, actorId: number): Promise<void> {

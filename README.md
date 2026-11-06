@@ -24,9 +24,11 @@ The design is in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## What's in Phase 3
 
-- A **Players** tab per server: who's online right now (name, connected time, ping), with kick. Works on every server, no plugins needed.
-- With CS2-SimpleAdmin installed: SteamIDs in the list, ban online players, ban by SteamID or profile link, a bans list with unban, and in-game admins (Owner only). Changes go through SimpleAdmin itself, so its in-game effects happen as usual; with the shared database, bans apply on every server.
+- A **Players** tab per server: who's online right now (name, SteamID, connected time, ping), with kick and ban.
+- **Bans owned by the panel**: one list for all your servers. Ban an online player, a recent player, or anyone by SteamID or profile link. Unban works any time, even while servers are stopped. Banned players are kicked as soon as they join.
+- Bans are enforced by **CS2 Panel Bridge**, a small CounterStrikeSharp plugin that ships with the panel and is installed automatically together with CounterStrikeSharp. It also tells the panel players' SteamIDs. It has no network access of its own: the panel writes the ban list into the server's files and tells it to reload over RCON. Source is in `bridge/`.
 - **Recent players**: everyone seen on a server in the last 90 days, so you can ban someone after they left.
+- **Plugin tabs**: some plugins bring their own tab on the server page while installed. CS2-SimpleAdmin gets a *SimpleAdmin* tab with its own bans and in-game admins (Owner only), which its in-game commands like `!ban` also use. Without SimpleAdmin, the tab simply isn't there.
 - Every kick, ban, unban and admin change is in the Activity log with who did it.
 
 ## Installing on the server

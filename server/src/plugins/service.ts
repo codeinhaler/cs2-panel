@@ -68,6 +68,8 @@ interface Prepared {
 
 export class PluginService {
   private busy = new Set<number>();
+  /** Run after plugin files change on a server (overlay unmounted), e.g. to write the ban list. */
+  readonly afterApply: ((server: ServerRecord, pluginIds: string[]) => Promise<void>)[] = [];
 
   constructor(
     private readonly db: Db,
@@ -212,6 +214,12 @@ export class PluginService {
       const server = this.servers.require(serverId);
       const have = new Set(this.installedIds(serverId));
       const plan = [...dependencyOrder(pluginId).filter((d) => !have.has(d)), pluginId];
+      // Companions (the panel's own bridge) come along with the plugin they belong to.
+      for (const id of [...plan]) {
+        for (const c of CATALOG.filter((e) => e.companionOf === id && !have.has(e.id) && !plan.includes(e.id))) {
+          if ((await this.sources.releases(c).catch(() => [])).some((r) => r.asset)) plan.push(c.id);
+        }
+      }
       const prepared: Prepared[] = [];
       try {
         for (const id of plan) {
@@ -399,6 +407,7 @@ export class PluginService {
     return this.servers.withUnmounted(server, { restart: true }, async () => {
       for (const p of prepared) await this.applyOne(server, p, actorId);
       await this.files.regenerateGameinfo(server.slug);
+      for (const hook of this.afterApply) await hook(server, prepared.map((p) => p.id));
     });
   }
 

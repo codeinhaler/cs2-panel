@@ -67,11 +67,11 @@ A self-hosted web panel for creating, running and administering CS2 community se
  │   ├─ Server manager ──▶ cs2ctl (root helper, via sudo, fixed verbs)      │
  │   ├─ SteamCMD runner                                                      │
  │   ├─ RCON client      ──▶ TCP game port of each instance (localhost)     │
- │   └─ Bridge hub       ◀── WebSocket from the companion plugin            │
+ │   └─ Ban sync         ──▶ bans.json in each server + cs2panel_reload     │
  │                                                                           │
  │  cs2@<slug>.service  (one per server created in the panel)                │
  │    └─ CS2 dedicated server (user: cs2)                                    │
- │         └─ Metamod → CSSharp → Cs2Panel.Bridge plugin                     │
+ │         └─ Metamod → CSSharp → CS2 Panel Bridge plugin                    │
  │                                                                           │
  └───────────────────────────────────────────────────────────────────────────┘
         ▲
@@ -289,7 +289,7 @@ Triggered manually or automatically when Valve releases a new build.
 5. For each instance: delete `upper/.../gameinfo.gi`, copy the new base version, re-apply the Metamod patch (insert `Game csgo/addons/metamod` into `SearchPaths`).
 6. Run the upper-dir hygiene scan (section 5).
 7. Remount and start the servers.
-8. Verify: Metamod loaded, CSSharp loaded, Bridge plugin connected back to the panel. Flag any server where that fails.
+8. Verify: Metamod loaded, CSSharp loaded. Flag any server where that fails.
 9. Record everything in the audit log.
 
 **Update policy per host:**
@@ -359,38 +359,33 @@ The verification step (section 7, step 8) checks that Metamod and CSSharp loaded
 
 ## 10. Player management
 
-### Companion plugin: `Cs2Panel.Bridge`
+### Companion plugin: CS2 Panel Bridge (`bridge/`)
 
-A CSSharp plugin we write and ship with the panel. It opens a WebSocket from each server to the panel on localhost, authenticated with a per-instance token.
+A small CSSharp plugin we write and ship inside every panel release (`bridge/cs2panel-bridge.zip`, built by CI). It's in the plugin catalog as a *bundled* source and is installed automatically whenever CounterStrikeSharp is (`companionOf`).
 
-**Server → panel events**
+It deliberately has **no networking**: no sockets, no tokens. Everything goes through files and RCON, which the panel already has.
 
-| Event | Payload |
+| Console command | Effect |
 |---|---|
-| `hello` | instance id, plugin version, map |
-| `player_connect` | SteamID64, name |
-| `player_disconnect` | SteamID64, reason |
-| `snapshot` (every ~10 s) | full player list: SteamID64, name, team, ping, score, connected-since |
-| `map_change` | map name |
+| `cs2panel_reload` | Re-reads `configs/plugins/Cs2PanelBridge/bans.json` and kicks anyone on it who is online |
+| `cs2panel_players` | Prints `CS2PANEL_PLAYERS <json>` with userId, SteamID64 and name for each human player |
+| `cs2panel_version` | Prints the plugin version |
 
-**Panel → server commands**
-
-| Command | Effect |
-|---|---|
-| `kick` | Kick a player with a reason |
-| `ban` | Kick immediately; the ban itself is stored by the panel |
-| `message` | Say to all, or to one player |
-| `reload_bans` | Refresh the plugin's local ban cache |
+On `OnClientAuthorized` the plugin checks its in-memory ban list and kicks a banned player with the reason. Because the list is a file on the server, bans are enforced even while the panel is down.
 
 ### Bans
 
-Bans are **owned by the panel database** and apply to every server.
+Bans are **owned by the panel database** and apply to every server that runs the bridge.
 
-- On `player_connect`, the plugin checks the ban. It keeps a **local cache of active bans**, refreshed from the panel, so bans are still enforced if the panel is restarting.
-- Ban fields: SteamID64, reason, created by, created at, expires at (null = permanent), revoked by/at.
-- Unbanning sets the revocation fields rather than deleting, so history is kept.
-- Banning by SteamID works for players who are offline, e.g. from the player history page.
-- **Fallback:** if the Bridge plugin isn't loaded, kick still works via RCON (`kickid`). Ban enforcement depends on the plugin, and the UI shows a clear warning when it isn't connected.
+- Ban fields: SteamID64, name, reason, created by, created at, the server it was made on, expires at (null = permanent), revoked by/at/reason.
+- Unbanning sets the revocation fields rather than deleting, so history is kept. Expired bans stay in the list as "expired".
+- On every ban or unban the panel writes the active list to each bridge server's `bans.json` (through `merged/` when mounted) and sends `cs2panel_reload` to the running ones. Each server also gets a fresh file just before it starts and right after the bridge is installed.
+- Banning by SteamID works for players who are offline, e.g. from Recent players. Unbanning needs no running server.
+- **Fallback:** kick works on every server via RCON (`kickid`). A server without the bridge shows no SteamIDs and doesn't enforce panel bans; the Players tab says so and names the servers that aren't covered.
+
+### Plugin tabs
+
+A catalog entry can declare `page: { label, kind }`. While that plugin is installed on a server, the server page shows an extra tab after the panel's own ones. The only kind today is `moderation`: CS2-SimpleAdmin's tab lists its own bans (from its database) and in-game admins, and changes them through its console commands (`/api/servers/:id/moderation/...`). These are separate from the panel's bans.
 
 ### Player history
 
@@ -496,7 +491,7 @@ GitHub Actions on every tag `v*`:
 1. Build the frontend.
 2. Bundle the backend into a single JavaScript file.
 3. Add the official Node.js linux-x64 binary.
-4. Attach `cs2-panel-linux-x64.tar.gz` to the GitHub release. (From Phase 3, also `cs2panel-bridge.zip`.)
+4. Attach `cs2-panel-linux-x64.tar.gz` to the GitHub release. The bridge plugin is built into the same tarball under `bridge/`.
 
 ### Access from the server
 
@@ -549,8 +544,8 @@ Downloads the latest (or a specified) panel release, swaps it in, runs database 
 
 **Phase 3 — Players** (done)
 - Live player list and kick work on every server, with or without plugins.
-- Bans, unbans and admins through a ban provider: the panel uses one when a plugin that offers it is installed (CS2-SimpleAdmin first), and hides ban features otherwise.
-- Decide whether a separate `Cs2Panel.Bridge` plugin is still needed once SimpleAdmin covers bans.
+- Panel-owned bans on all servers, enforced by the bundled CS2 Panel Bridge plugin.
+- Plugin tabs: CS2-SimpleAdmin's own bans and in-game admins on a tab that appears only when it's installed.
 - Player history.
 
 **Phase 4 — Polish**
@@ -579,6 +574,7 @@ Downloads the latest (or a specified) panel release, swaps it in, runs database 
 | 2026-11-05 | Backend switched from ASP.NET Core to TypeScript/Node.js so code can be built and tested before pushing. |
 | 2026-11-05 | CS2-SimpleAdmin and its dependencies are in the plugin catalog. Like every plugin, it's optional. |
 | 2026-11-06 | Player list comes from CS2's `status` (no SteamIDs). A catalog entry can declare a moderation integration (CS2-SimpleAdmin): it adds SteamIDs, and bans/admins are read from its database and changed through its console commands. No separate Bridge plugin is needed. |
+| 2026-11-06 | Bans are native again: the panel owns them, and the bundled CS2 Panel Bridge plugin (files + RCON, no networking) enforces them and supplies SteamIDs. SimpleAdmin is fully optional and gets its own tab for its bans and in-game admins. Supersedes the entry above about not needing a Bridge plugin. |
 | 2026-11-06 | Nothing outside the catalog knows about specific plugins. A catalog entry can declare a database integration (config file + how to fill it in); the panel applies it to any such plugin when the optional shared MariaDB (127.0.0.1 only, `setup-mariadb.sh`) is set up. |
 | 2026-11-05 | While a server's overlay is mounted, the panel writes through merged/ and never deletes there; changes that remove or replace files happen with the overlay unmounted. |
 

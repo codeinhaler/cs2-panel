@@ -443,6 +443,25 @@ input[type="checkbox"] {
   color: var(--ink);
   border-bottom-color: var(--accent);
 }
+/* Tabs that installed plugins bring, set apart from the panel's own. */
+.tab-plugin {
+  position: relative;
+  margin-left: 10px;
+}
+.tab-plugin::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 25%;
+  bottom: 25%;
+  border-left: 1px solid var(--line);
+}
+.tab-plugin + .tab-plugin {
+  margin-left: 0;
+}
+.tab-plugin + .tab-plugin::before {
+  display: none;
+}
 
 /* ---------------------------------------------------------------- rack rows (server list) */
 

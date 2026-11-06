@@ -31,6 +31,7 @@ async function setup(opts: { baseInstalled?: boolean } = {}) {
     instanceEnvDir: path.join(dir, "env"),
     cs2ctl: "/bin/false",
     webDir: path.join(dir, "no-web"),
+    bridgeDir: path.join(dir, "no-bridge"),
     dev: true,
   };
   if (opts.baseInstalled !== false) installFakeBase(config.cs2Root);

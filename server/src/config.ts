@@ -13,6 +13,8 @@ const ConfigSchema = z.object({
   instanceEnvDir: z.string().default("/etc/cs2-panel/instances"),
   cs2ctl: z.string().default("/usr/local/lib/cs2-panel/cs2ctl"),
   webDir: z.string().optional(),
+  /** Plugins shipped with the release (the bridge). Defaults to ./bridge next to server.mjs. */
+  bridgeDir: z.string().optional(),
   /** Optional local MariaDB that plugins can share across servers. Set by setup-mariadb.sh. */
   mysql: z
     .object({
@@ -27,7 +29,7 @@ const ConfigSchema = z.object({
   dev: z.boolean().default(false),
 });
 
-export type Config = z.infer<typeof ConfigSchema> & { webDir: string };
+export type Config = z.infer<typeof ConfigSchema> & { webDir: string; bridgeDir: string };
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -47,6 +49,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       instanceEnvDir: path.join(root, "env"),
       cs2ctl: "/bin/false",
       webDir: env.CS2PANEL_WEB_DIR,
+      bridgeDir: env.CS2PANEL_BRIDGE_DIR,
       dev: true,
     };
   } else {
@@ -56,5 +59,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const parsed = ConfigSchema.parse(raw);
   // In a release, the frontend sits next to server.mjs in ./web.
   const webDir = parsed.webDir ?? path.resolve(here, "web");
-  return { ...parsed, webDir };
+  const bridgeDir = parsed.bridgeDir ?? path.resolve(here, "bridge");
+  return { ...parsed, webDir, bridgeDir };
 }

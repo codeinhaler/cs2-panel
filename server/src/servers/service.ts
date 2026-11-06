@@ -343,8 +343,12 @@ export class ServerService {
     return this.view(s);
   }
 
+  /** Run before every start with the overlay unmounted, e.g. to refresh the ban list file. */
+  readonly beforeStart: ((s: ServerRecord) => Promise<void>)[] = [];
+
   /** Files that must be current before CS2 starts. Needs the overlay unmounted. */
   private async prepareForStart(s: ServerRecord): Promise<void> {
+    for (const hook of this.beforeStart) await hook(s);
     await this.writeLaunchFiles(s);
     await this.files.regenerateGameinfo(s.slug);
     await this.files.dedupeStockConfigs(s.slug);

@@ -30,13 +30,20 @@ export class PluginSources {
     private readonly cacheDir: string,
     private readonly fetchFn: FetchFn = fetch,
     private readonly now: () => number = Date.now,
+    /** Folder with plugins shipped in the panel release (bridge/). */
+    private readonly bundledDir: string | null = null,
   ) {}
 
   /** Newest first. Cached for a few minutes to stay well inside GitHub's anonymous rate limit. */
   async releases(entry: CatalogEntry, force = false): Promise<PluginRelease[]> {
     const hit = this.cache.get(entry.id);
     if (hit && !force && this.now() - hit.at < CACHE_MS) return hit.releases;
-    const releases = entry.source.type === "metamod" ? await this.metamodReleases(entry) : await this.githubReleases(entry);
+    const releases =
+      entry.source.type === "metamod"
+        ? await this.metamodReleases(entry)
+        : entry.source.type === "bundled"
+          ? await this.bundledReleases(entry.source.file)
+          : await this.githubReleases(entry);
     this.cache.set(entry.id, { at: this.now(), releases });
     return releases;
   }
@@ -68,6 +75,19 @@ export class PluginSources {
           asset: a ? { name: a.name, url: a.browser_download_url, size: a.size } : null,
         };
       });
+  }
+
+  /** The one version shipped with this panel release. */
+  private async bundledReleases(file: string): Promise<PluginRelease[]> {
+    if (!this.bundledDir) return [];
+    const archive = path.join(this.bundledDir, file);
+    try {
+      await fs.access(archive);
+    } catch {
+      return [];
+    }
+    const version = (await fs.readFile(path.join(this.bundledDir, "VERSION"), "utf8").catch(() => "dev")).trim() || "dev";
+    return [{ version, publishedAt: null, prerelease: false, asset: { name: file, url: `file://${archive}`, size: null } }];
   }
 
   /** Metamod publishes only "latest" plus the files it names; older builds come from our cache. */
@@ -106,6 +126,8 @@ export class PluginSources {
   /** Returns the local path of a release's archive, downloading it if needed. */
   async download(pluginId: string, release: PluginRelease): Promise<string> {
     if (!release.asset) throw new Error(`Release ${release.version} has no Linux download.`);
+    // Shipped with the panel: always use the file in the release, never a cached copy.
+    if (release.asset.url?.startsWith("file://")) return release.asset.url.slice("file://".length);
     const safeVersion = release.version.replace(/[^\w.+-]/g, "_");
     const dir = path.join(this.cacheDir, pluginId, safeVersion);
     const file = path.join(dir, path.basename(release.asset.name));
