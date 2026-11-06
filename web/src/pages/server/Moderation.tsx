@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, fullTime, timeAgo, type Ban, type GameAdmin, type ModerationInfo, type Server } from "../../api";
 import { useAction, useApp } from "../../app-context";
+import { MapMenuPanel } from "./MapMenu";
 import { DurationSelect, lengthText, SteamLink } from "../../components/player-bits";
 
 /** The tab a moderation plugin (CS2-SimpleAdmin) brings: its own bans and in-game admins. */
@@ -166,6 +167,7 @@ export function ModerationTab({ server, label }: { server: Server; label: string
           </div>
         )}
       </div>
+      {mod.mapMenu && <MapMenuPanel server={server} provider={mod.provider} />}
     </>
   );
 }

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -289,5 +289,36 @@ describe("bans and admins through SimpleAdmin", () => {
     expect(admins).toEqual([{ steamId: ALICE, name: "Alice", flags: ["@css/generic", "@css/kick"], group: null, immunity: 10, endsAt: null }]);
     expect((await call(c, "DELETE", `/api/servers/${s.id}/moderation/admins/${ALICE}`)).status).toBe(200);
     expect((await call(c, "GET", `/api/servers/${s.id}/moderation/admins`)).body.admins).toEqual([]);
+  });
+
+  it("edits the maps in SimpleAdmin's change-map menu and keeps the rest of its config", async () => {
+    const c = await login();
+    const s = await runningServer(c);
+    installSimpleAdmin(s.id, s.slug);
+    const file = path.join(dir, "cs2/instances", s.slug, "upper/game/csgo/addons/counterstrikesharp/configs/plugins/CS2-SimpleAdmin/CS2-SimpleAdmin.json");
+    expect((await call(c, "GET", `/api/servers/${s.id}/moderation`)).body.mapMenu).toBe(true);
+    const mapsDir = path.join(dir, "cs2/base/game/csgo/maps");
+    mkdirSync(mapsDir, { recursive: true });
+    for (const f of ["de_mirage.vpk", "de_mirage_vanity.vpk", "cs_office.vpk", "lobby_mapveto.vpk", "de_nuke.txt"]) writeFileSync(path.join(mapsDir, f), "");
+    const first = (await call(c, "GET", `/api/servers/${s.id}/moderation/maps`)).body;
+    expect(first.menu).toMatchObject({ maps: [], workshop: [] });
+    expect(first.installed).toEqual(["cs_office", "de_mirage"]);
+
+    const res = await call(c, "PUT", `/api/servers/${s.id}/moderation/maps`, {
+      maps: ["de_mirage", " de_inferno ", "de_mirage"],
+      workshop: [{ name: "awp_lego_2", id: "3146105097" }],
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.menu).toMatchObject({ maps: ["de_mirage", "de_inferno"], workshop: [{ name: "awp_lego_2", id: "3146105097" }] });
+    const json = JSON.parse(readFileSync(file, "utf8"));
+    expect(json).toEqual({ DatabaseConfig: { DatabaseType: "SQLite" }, DefaultMaps: ["de_mirage", "de_inferno"], WorkshopMaps: { awp_lego_2: 3146105097 } });
+    // Shows up in the config history like any other edit.
+    const hist = (await call(c, "GET", `/api/servers/${s.id}/configs/file?path=${encodeURIComponent("addons/counterstrikesharp/configs/plugins/CS2-SimpleAdmin/CS2-SimpleAdmin.json")}`)).body;
+    expect(JSON.stringify(hist)).toContain("Change-map menu");
+
+    expect((await call(c, "PUT", `/api/servers/${s.id}/moderation/maps`, { maps: ["de_dust2; quit"], workshop: [] })).status).toBe(400);
+    expect((await call(c, "PUT", `/api/servers/${s.id}/moderation/maps`, { maps: [], workshop: [{ name: "x", id: "abc" }] })).status).toBe(400);
+    await call(c, "POST", "/api/users", { steam: MOD, role: "moderator" });
+    expect((await call(await login(MOD), "PUT", `/api/servers/${s.id}/moderation/maps`, { maps: [], workshop: [] })).status).toBe(403);
   });
 });

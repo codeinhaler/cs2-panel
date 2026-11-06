@@ -385,7 +385,7 @@ Bans are **owned by the panel database** and apply to every server that runs the
 
 ### Plugin tabs
 
-A catalog entry can declare `page: { label, kind }`. While that plugin is installed on a server, the server page shows an extra tab after the panel's own ones. The only kind today is `moderation`: CS2-SimpleAdmin's tab lists its own bans (from its database) and in-game admins, and changes them through its console commands (`/api/servers/:id/moderation/...`). These are separate from the panel's bans.
+A catalog entry can declare `page: { label, kind }`. While that plugin is installed on a server, the server page shows an extra tab after the panel's own ones. The only kind today is `moderation`: CS2-SimpleAdmin's tab lists its own bans (from its database) and in-game admins, and changes them through its console commands (`/api/servers/:id/moderation/...`). These are separate from the panel's bans. If the integration declares a `mapMenu` (config file + keys), the tab also edits the maps in the plugin's in-game change-map menu; the edit is saved through the config service, so it shows in the file's history.
 
 ### Player history
 

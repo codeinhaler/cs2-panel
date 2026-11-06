@@ -1100,3 +1100,22 @@ details.inline-form > summary::-webkit-details-marker {
 details.inline-form[open] > summary {
   background: var(--panel-sunk);
 }
+
+.subhead {
+  font-size: 0.95rem;
+  margin: 16px 0 8px;
+}
+.map-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+}
+.map-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}

@@ -39,6 +39,8 @@ export interface ModerationInfo {
   /** Whether commands can be sent right now (server running). */
   canAct: boolean;
   flagPresets: { label: string; flags: string }[];
+  /** Whether the plugin has an in-game change-map menu whose maps the panel can edit. */
+  mapMenu: boolean;
   error: string | null;
 }
 
@@ -209,7 +211,7 @@ export class PlayerService {
   async moderationInfo(serverId: number): Promise<ModerationInfo> {
     const s = this.servers.require(serverId);
     const mod = this.moderationFor(serverId);
-    if (!mod) return { provider: null, shared: false, canAct: false, flagPresets: [], error: null };
+    if (!mod) return { provider: null, shared: false, canAct: false, flagPresets: [], mapMenu: false, error: null };
     let shared = false;
     let error: string | null = null;
     try {
@@ -221,7 +223,7 @@ export class PlayerService {
     } catch (e) {
       error = (e as Error).message;
     }
-    return { provider: mod.name, shared, canAct: await this.isRunning(s), flagPresets: mod.integration.flagPresets, error };
+    return { provider: mod.name, shared, canAct: await this.isRunning(s), flagPresets: mod.integration.flagPresets, mapMenu: !!mod.integration.mapMenu, error };
   }
 
   private async openStore(s: ServerRecord, integration: ModerationIntegration) {

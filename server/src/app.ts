@@ -28,6 +28,7 @@ import { PluginService } from "./plugins/service.js";
 import { CATALOG, pluginPages } from "./plugins/catalog.js";
 import { PlayerService } from "./players/service.js";
 import { BanService, BRIDGE_ID } from "./players/bans.js";
+import { MapMenuService } from "./plugins/map-menu.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -84,6 +85,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const plugins = new PluginService(db, pluginSources, servers, files, audit, gate, rcon, path.join(config.dataDir, "tmp"), config.mysql);
   updater.afterStart = (started) => plugins.healthLines(started);
   const players = new PlayerService(db, servers, plugins, files, host, rcon, audit);
+  const mapMenus = new MapMenuService(configs, plugins, files.baseDir);
   const bans = new BanService(db, servers, plugins, files, host, rcon, audit);
   // Every server with the bridge gets the current ban list before it starts and right after the bridge is installed.
   servers.beforeStart.push((s) => bans.writeFor(s));
@@ -631,6 +633,28 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     const body = z.object({ steamId: z.string(), reason: z.string().max(200).default("") }).parse(req.body);
     await players.unban(id, body.steamId, body.reason, user.id);
     return { ok: true };
+  });
+
+  // The maps in the plugin's in-game change-map menu (SimpleAdmin's DefaultMaps/WorkshopMaps).
+  app.get("/api/servers/:id/moderation/maps", async (req) => {
+    requirePerm(req, "view");
+    const { id } = idParam.parse(req.params);
+    return { menu: await mapMenus.get(servers.require(id)), installed: await mapMenus.installedMaps() };
+  });
+
+  app.put("/api/servers/:id/moderation/maps", async (req) => {
+    const user = requirePerm(req, "config.edit");
+    const { id } = idParam.parse(req.params);
+    const body = z
+      .object({
+        maps: z.array(z.string().max(100)).max(300),
+        workshop: z.array(z.object({ name: z.string().max(100), id: z.string().max(30) })).max(300),
+      })
+      .parse(req.body);
+    const s = servers.require(id);
+    const { changed, file } = await mapMenus.set(s, body, user.id);
+    if (changed) audit.record(user.id, "config.save", id, { path: file, comment: "Change-map menu" });
+    return { changed, menu: await mapMenus.get(s) };
   });
 
   app.get("/api/servers/:id/moderation/admins", async (req) => {

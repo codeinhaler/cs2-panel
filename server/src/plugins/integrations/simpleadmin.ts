@@ -161,6 +161,7 @@ export const simpleAdminModeration: ModerationIntegration = {
       `css_addadmin ${steamId} "${consoleArg(name, 64)}" ${flags} ${immunity} ${minutes}`,
     removeAdmin: (steamId) => `css_deladmin ${steamId}`,
   },
+  mapMenu: { file: CONFIG, mapsKey: "DefaultMaps", workshopKey: "WorkshopMaps" },
   flagPresets: [
     { label: "Full access (root)", flags: "@css/root" },
     { label: "Moderator: kick, ban, mute, change map", flags: "@css/generic,@css/kick,@css/ban,@css/unban,@css/chat,@css/changemap" },

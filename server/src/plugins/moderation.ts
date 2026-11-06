@@ -46,7 +46,19 @@ export interface ModerationCommands {
   removeAdmin(steamId: string): string;
 }
 
+/** Where the plugin keeps the maps its in-game change-map menu offers. */
+export interface MapMenuConfig {
+  /** JSON config file, relative to game/csgo. The plugin writes it on its first start. */
+  file: string;
+  /** Key holding a list of map names. */
+  mapsKey: string;
+  /** Key holding an object of workshop map name → workshop ID. */
+  workshopKey: string;
+}
+
 export interface ModerationIntegration {
+  /** The maps in the plugin's own change-map menu, if it has one. */
+  mapMenu?: MapMenuConfig;
   /** Opens the plugin's data for a server. csgoDir is that server's game/csgo as it currently looks. */
   openStore(csgoDir: string): Promise<ModerationStore | null>;
   commands: ModerationCommands;

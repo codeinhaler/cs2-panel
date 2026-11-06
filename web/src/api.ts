@@ -155,7 +155,13 @@ export interface ModerationInfo {
   shared: boolean;
   canAct: boolean;
   flagPresets: { label: string; flags: string }[];
+  mapMenu: boolean;
   error: string | null;
+}
+
+export interface MapMenu {
+  maps: string[];
+  workshop: { name: string; id: string }[];
 }
 
 export interface Ban {
@@ -351,6 +357,8 @@ export const api = {
   ban: (id: number, body: { userId?: number; steam?: string; minutes: number; reason: string }) =>
     request<{ ok: true }>("POST", `/api/servers/${id}/moderation/bans`, body),
   unban: (id: number, steamId: string, reason = "") => request<{ ok: true }>("POST", `/api/servers/${id}/moderation/bans/unban`, { steamId, reason }),
+  mapMenu: (id: number) => request<{ menu: (MapMenu & { file: string }) | null; installed: string[] }>("GET", `/api/servers/${id}/moderation/maps`),
+  saveMapMenu: (id: number, menu: MapMenu) => request<{ changed: boolean; menu: MapMenu }>("PUT", `/api/servers/${id}/moderation/maps`, menu),
   gameAdmins: (id: number) => request<{ admins: GameAdmin[] }>("GET", `/api/servers/${id}/moderation/admins`),
   addGameAdmin: (id: number, body: { steam: string; name: string; flags: string; immunity: number; minutes: number }) =>
     request<{ ok: true }>("POST", `/api/servers/${id}/moderation/admins`, body),

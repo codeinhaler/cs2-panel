@@ -317,12 +317,9 @@ function SteamBanForm({ onDone }: { onDone: () => Promise<void> }) {
   const [reason, setReason] = useState("");
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    let note: string | null = null;
-    const ok = await run(async () => {
-      const r = await api.panelBan({ steam, name: name || undefined, minutes, reason });
-      note = coverageNote(r.coverage);
-    }, "Ban added.");
-    if (ok) {
+    const r = await run(() => api.panelBan({ steam, name: name || undefined, minutes, reason }), "Ban added.");
+    if (r) {
+      const note = coverageNote(r.coverage);
       if (note) toast(`Ban added.${note}`, "info");
       setSteam("");
       setName("");
