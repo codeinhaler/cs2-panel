@@ -418,6 +418,7 @@ Every connect and disconnect is recorded, enabling "seen on which servers, when,
 | Create and edit game mode presets | ✓ | ✓ | |
 | Delete servers | ✓ | | |
 | Manage panel users and roles | ✓ | | |
+| Manage in-game admins (moderation plugin) | ✓ | | |
 | Edit raw launch args | ✓ | | |
 
 **Audit log:** every state-changing action records who, what, which server, when, plus before/after details where relevant (e.g. config diffs). It's viewable in the UI and append-only from the panel's point of view.
@@ -546,7 +547,7 @@ Downloads the latest (or a specified) panel release, swaps it in, runs database 
 - Plugin catalog with CS2-SimpleAdmin and its dependencies, pinned versions, update, pick a version, rollback, Owner uploads.
 - Post-update verification over RCON.
 
-**Phase 3 — Players**
+**Phase 3 — Players** (done)
 - Live player list and kick work on every server, with or without plugins.
 - Bans, unbans and admins through a ban provider: the panel uses one when a plugin that offers it is installed (CS2-SimpleAdmin first), and hides ban features otherwise.
 - Decide whether a separate `Cs2Panel.Bridge` plugin is still needed once SimpleAdmin covers bans.
@@ -577,6 +578,7 @@ Downloads the latest (or a specified) panel release, swaps it in, runs database 
 | 2026-11-05 | Workshop maps are a later nice-to-have (Phase 4). |
 | 2026-11-05 | Backend switched from ASP.NET Core to TypeScript/Node.js so code can be built and tested before pushing. |
 | 2026-11-05 | CS2-SimpleAdmin and its dependencies are in the plugin catalog. Like every plugin, it's optional. |
+| 2026-11-06 | Player list comes from CS2's `status` (no SteamIDs). A catalog entry can declare a moderation integration (CS2-SimpleAdmin): it adds SteamIDs, and bans/admins are read from its database and changed through its console commands. No separate Bridge plugin is needed. |
 | 2026-11-06 | Nothing outside the catalog knows about specific plugins. A catalog entry can declare a database integration (config file + how to fill it in); the panel applies it to any such plugin when the optional shared MariaDB (127.0.0.1 only, `setup-mariadb.sh`) is set up. |
 | 2026-11-05 | While a server's overlay is mounted, the panel writes through merged/ and never deletes there; changes that remove or replace files happen with the overlay unmounted. |
 

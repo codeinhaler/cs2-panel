@@ -14,7 +14,8 @@ export type Permission =
   | "preset.manage"
   | "server.delete"
   | "server.rawargs"
-  | "users.manage";
+  | "users.manage"
+  | "gameadmins.manage";
 
 import { formatDate, formatDateTime, type Prefs } from "./format";
 
@@ -137,6 +138,56 @@ export interface PluginHealth {
   cssharpOutput: string;
 }
 
+export interface OnlinePlayer {
+  userId: number;
+  name: string;
+  time: string | null;
+  ping: number;
+  loss: number;
+  state: string;
+  address: string | null;
+  bot: boolean;
+  steamId: string | null;
+}
+
+export interface ModerationInfo {
+  provider: string | null;
+  shared: boolean;
+  canAct: boolean;
+  flagPresets: { label: string; flags: string }[];
+  error: string | null;
+}
+
+export interface Ban {
+  id: number;
+  steamId: string | null;
+  playerName: string | null;
+  reason: string;
+  adminName: string;
+  duration: number;
+  createdAt: string;
+  endsAt: string | null;
+  status: "active" | "expired" | "unbanned";
+}
+
+export interface GameAdmin {
+  steamId: string;
+  name: string;
+  flags: string[];
+  group: string | null;
+  immunity: number;
+  endsAt: string | null;
+}
+
+export interface RecentPlayer {
+  name: string;
+  steamId: string | null;
+  serverId: number;
+  serverName: string | null;
+  lastSeenAt: string;
+  online: boolean;
+}
+
 export interface AuditEntry {
   id: number;
   userId: number | null;
@@ -251,6 +302,19 @@ export const api = {
     return data as { name: string; restarted: boolean };
   },
   pluginHealth: (id: number) => request<PluginHealth>("GET", `/api/servers/${id}/plugins/health`),
+
+  players: (id: number) => request<{ running: boolean; players: OnlinePlayer[]; error: string | null }>("GET", `/api/servers/${id}/players`),
+  kick: (id: number, userId: number, reason: string) => request<{ ok: true }>("POST", `/api/servers/${id}/players/${userId}/kick`, { reason }),
+  recentPlayers: (serverId?: number) => request<{ players: RecentPlayer[] }>("GET", `/api/players/recent?${q({ serverId })}`),
+  moderation: (id: number) => request<ModerationInfo>("GET", `/api/servers/${id}/moderation`),
+  bans: (id: number, all: boolean) => request<{ bans: Ban[] }>("GET", `/api/servers/${id}/bans${all ? "?all=true" : ""}`),
+  ban: (id: number, body: { userId?: number; steam?: string; minutes: number; reason: string }) =>
+    request<{ ok: true }>("POST", `/api/servers/${id}/bans`, body),
+  unban: (id: number, steamId: string, reason = "") => request<{ ok: true }>("POST", `/api/servers/${id}/bans/unban`, { steamId, reason }),
+  gameAdmins: (id: number) => request<{ admins: GameAdmin[] }>("GET", `/api/servers/${id}/gameadmins`),
+  addGameAdmin: (id: number, body: { steam: string; name: string; flags: string; immunity: number; minutes: number }) =>
+    request<{ ok: true }>("POST", `/api/servers/${id}/gameadmins`, body),
+  removeGameAdmin: (id: number, steamId: string) => request<{ ok: true }>("DELETE", `/api/servers/${id}/gameadmins/${steamId}`),
 
   game: (since = 0) => request<GameState>("GET", `/api/game?${q({ since })}`),
   startUpdate: (validate: boolean, warnSeconds: number) => request<{ ok: true }>("POST", "/api/game/update", { validate, warnSeconds }),

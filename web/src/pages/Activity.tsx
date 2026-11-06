@@ -45,6 +45,18 @@ function describe(e: AuditEntry): string {
       return `deleted ${str("path")}`;
     case "config.rollback":
       return `restored an earlier version of ${str("path")}`;
+    case "player.kick":
+      return `kicked ${str("name")}${d.reason ? `: ${str("reason")}` : ""}`;
+    case "player.ban": {
+      const len = Number(d.minutes) === 0 ? "permanently" : `for ${Number(d.minutes) >= 1440 ? `${Number(d.minutes) / 1440} days` : `${str("minutes")} min`}`;
+      return `banned ${str("name") || str("steamId")} ${len}: ${str("reason")}`;
+    }
+    case "player.unban":
+      return `unbanned ${str("steamId")}${d.reason ? `: ${str("reason")}` : ""}`;
+    case "gameadmin.add":
+      return `made ${str("name")} (${str("steamId")}) an in-game admin with ${str("flags")}`;
+    case "gameadmin.remove":
+      return `removed in-game admin ${str("steamId")}`;
     case "plugin.install": {
       const extra = Array.isArray(d.alsoInstalled) && d.alsoInstalled.length ? `, plus ${(d.alsoInstalled as string[]).join(", ")}` : "";
       return `installed ${str("plugin")} ${str("version")}${extra}`;

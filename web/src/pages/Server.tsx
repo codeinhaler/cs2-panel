@@ -6,6 +6,7 @@ import { ControlButtons, Slots, StateLabel } from "../components/server-bits";
 import { ConsoleTab } from "./server/Console";
 import { SettingsTab } from "./server/Settings";
 import { PluginsTab } from "./server/Plugins";
+import { PlayersTab } from "./server/Players";
 import { ActivityList } from "./Activity";
 
 // The config editor pulls in Monaco, so load it only when that tab opens.
@@ -47,6 +48,9 @@ export function ServerPage() {
         <NavLink end to={`/servers/${id}`} className="tab">
           Overview
         </NavLink>
+        <NavLink to={`/servers/${id}/players`} className="tab">
+          Players
+        </NavLink>
         <NavLink to={`/servers/${id}/console`} className="tab">
           Console
         </NavLink>
@@ -73,6 +77,7 @@ export function ServerPage() {
           }
         />
         <Route path="plugins" element={<PluginsTab server={s} />} />
+        <Route path="players" element={<PlayersTab server={s} />} />
         <Route path="settings" element={<SettingsTab server={s} onSaved={() => void refresh()} />} />
       </Routes>
     </>

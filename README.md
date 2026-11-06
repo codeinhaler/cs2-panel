@@ -22,7 +22,12 @@ The design is in [docs/DESIGN.md](docs/DESIGN.md).
 - A health check that asks the running server whether Metamod and CounterStrikeSharp loaded. It also runs automatically after each CS2 update.
 - The New server form can install the plugins right away.
 
-Player management in the panel (live player list, kick, and bans when a ban plugin is installed) is Phase 3.
+## What's in Phase 3
+
+- A **Players** tab per server: who's online right now (name, connected time, ping), with kick. Works on every server, no plugins needed.
+- With CS2-SimpleAdmin installed: SteamIDs in the list, ban online players, ban by SteamID or profile link, a bans list with unban, and in-game admins (Owner only). Changes go through SimpleAdmin itself, so its in-game effects happen as usual; with the shared database, bans apply on every server.
+- **Recent players**: everyone seen on a server in the last 90 days, so you can ban someone after they left.
+- Every kick, ban, unban and admin change is in the Activity log with who did it.
 
 ## Installing on the server
 

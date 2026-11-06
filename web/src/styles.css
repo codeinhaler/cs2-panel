@@ -1067,3 +1067,17 @@ input[type="radio"] {
   display: grid;
   gap: 8px;
 }
+
+details.inline-form {
+  margin-bottom: 14px;
+}
+details.inline-form > summary {
+  list-style: none;
+  display: inline-flex;
+}
+details.inline-form > summary::-webkit-details-marker {
+  display: none;
+}
+details.inline-form[open] > summary {
+  background: var(--panel-sunk);
+}
