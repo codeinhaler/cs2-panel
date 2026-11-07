@@ -65,6 +65,8 @@ export type ControlAction = "start" | "stop" | "restart" | "kill";
 export class ServerService {
   /** Run after a server's settings are saved (e.g. to move the configs-to-run block when the game mode changed). */
   readonly afterUpdate: ((s: ServerRecord, info: { modeChanged: boolean; appliedPreset: Preset | null }, actorId: number) => Promise<void>)[] = [];
+  /** Exact people/bots counts from RCON, when known; preferred over Steam's query, which miscounts bots. */
+  liveCounts: (serverId: number) => { humans: number; bots: number } | null = () => null;
   /** Run after a server is created from a preset, once its files exist. */
   readonly afterCreate: ((s: ServerRecord, preset: Preset, actorId: number) => Promise<void>)[] = [];
   constructor(
@@ -101,6 +103,11 @@ export class ServerService {
   private async view(s: ServerRecord): Promise<ServerView> {
     const status = await this.host.serviceStatus(s.slug);
     const live = status.state === "active" ? await queryInfo(s.port) : null;
+    const exact = live ? this.liveCounts(s.id) : null;
+    if (live && exact) {
+      live.players = exact.humans + exact.bots;
+      live.bots = exact.bots;
+    }
     // systemd only knows the process runs; the game answering Steam queries means players can join.
     let answering: ServerView["answering"] = null;
     if (status.state === "active") {

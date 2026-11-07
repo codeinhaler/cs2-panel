@@ -33,11 +33,13 @@ let host: FakeHost;
 let db: Db;
 let now: number;
 const live = new Map<number, A2sInfo | null>();
+let statusText = "";
 
 beforeEach(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "cs2panel-monitor-"));
   now = Date.now() - 20 * 60_000;
   live.clear();
+  statusText = "";
   const config: Config = {
     host: "127.0.0.1",
     port: 0,
@@ -61,7 +63,7 @@ beforeEach(async () => {
     host,
     logLevel: "silent",
     pluginCheckDelayMs: 0,
-    rcon: async () => "",
+    rcon: async (_o, cmd) => (cmd === "status" ? statusText : ""),
     a2sQuery: async (port) => (live.has(port) ? live.get(port)! : { name: "x", map: "de_dust2", players: 5, maxPlayers: 10, bots: 3, version: "1" }),
   });
 });
@@ -177,4 +179,22 @@ describe("monitor", () => {
     expect(long.bucketMs).toBeGreaterThanOrEqual(3_600_000);
     expect(long.points[0].cpu).toBeCloseTo(40, 0);
   });
+
+  it("counts people and bots from the server's own status when Steam's query gets them wrong", async () => {
+    const c = await login();
+    const s = await runningServer(c);
+    // Steam's query: 10 players of which 8 bots (so "2 people"); the real status: 1 person, 9 bots.
+    live.set(s.port, { name: "x", map: "de_inferno", players: 10, maxPlayers: 20, bots: 8, version: "1" });
+    statusText = `---------players--------
+  id     time ping loss      state   rate adr name
+${Array.from({ length: 9 }, (_, i) => `     ${i + 1}      BOT    0    0     active      0 'Bot${i}'`).join("\n")}
+    10    29:22   25    0     active 786432 2.110.18.243:21046 'tsunamo'
+#end
+`;
+    await app.services.players.live(s.id);
+    expect(app.services.players.recentCounts(s.id)).toEqual({ humans: 1, bots: 9 });
+    await app.services.monitor.sample(now);
+    expect((await call(c, "GET", "/api/monitor")).body.latest[s.id]).toMatchObject({ players: 1, bots: 9 });
+  });
 });
+

@@ -79,9 +79,21 @@ export class PlayerService {
     return this.rcon({ port: s.port, password: s.rconPassword, timeoutMs: 4000 }, command);
   }
 
+  /** The last exact head count per server, from RCON status (Steam's query miscounts bots in CS2). */
+  private counts = new Map<number, { humans: number; bots: number; at: number }>();
+
+  /** People and bots on a server from the last status check, if it's recent. */
+  recentCounts(serverId: number, maxAgeMs = 75_000): { humans: number; bots: number } | null {
+    const c = this.counts.get(serverId);
+    return c && Date.now() - c.at <= maxAgeMs ? { humans: c.humans, bots: c.bots } : null;
+  }
+
   async live(serverId: number): Promise<LiveView> {
     const s = this.servers.require(serverId);
-    if (!(await this.isRunning(s))) return { running: false, players: [], error: null };
+    if (!(await this.isRunning(s))) {
+      this.counts.delete(serverId);
+      return { running: false, players: [], error: null };
+    }
     let players: OnlinePlayer[];
     try {
       players = parseStatus(await this.exec(s, "status")).map((p) => ({ ...p, steamId: null }));
@@ -94,6 +106,8 @@ export class PlayerService {
       if (ids) for (const p of players) p.steamId = ids.get(p.userId) ?? null;
     }
     this.recordSessions(serverId, players);
+    const bots = players.filter((p) => p.bot).length;
+    this.counts.set(serverId, { humans: players.length - bots, bots, at: Date.now() });
     return { running: true, players, error: null };
   }
 

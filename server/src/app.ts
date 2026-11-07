@@ -126,7 +126,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const humans = humanCounter(players);
   const discord = new DiscordNotifier(db, settings, box, fetchFn);
   audit.listeners.push(discord.onEvent);
-  const monitor = new Monitor({ db, host, servers: () => servers.listRecords(), query: deps.a2sQuery ?? ((port) => queryInfo(port)), audit });
+  const monitor = new Monitor({ db, host, servers: () => servers.listRecords(), query: deps.a2sQuery ?? ((port) => queryInfo(port)), counts: (id) => players.recentCounts(id), audit });
   const automation = new Automation(
     new UpdateWatcher(settings, files, host, updater, gate, serverStore, humans, audit),
     new RestartScheduler(db, settings, servers, host, gate, updater, humans, rcon, audit, deps.automationSleep),
@@ -134,6 +134,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   );
   const mapMenus = new MapMenuService(configs, plugins, files.baseDir);
   const bans = new BanService(db, servers, plugins, files, host, rcon, audit);
+  servers.liveCounts = (id) => players.recentCounts(id);
   // Every server with the bridge gets the current ban list before it starts and right after the bridge is installed.
   servers.beforeStart.push((s) => bans.writeFor(s));
   plugins.afterApply.push((s, ids) => (ids.includes(BRIDGE_ID) ? bans.writeFor(s) : Promise.resolve()));

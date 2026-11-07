@@ -70,6 +70,8 @@ export interface MonitorDeps {
   host: Host;
   servers: () => ServerRecord[];
   query: (port: number) => Promise<A2sInfo | null>;
+  /** Exact people/bots from RCON status, preferred when known. */
+  counts?: (serverId: number) => { humans: number; bots: number } | null;
   audit: AuditLog;
 }
 
@@ -132,6 +134,10 @@ export class Monitor {
       this.resolve("server.not_answering", s.id);
     }
 
+    const exact = live ? (this.d.counts?.(s.id) ?? null) : null;
+    if (live && exact) {
+      live = { ...live, players: exact.humans + exact.bots, bots: exact.bots };
+    }
     return {
       ts: now,
       scope: s.id,
