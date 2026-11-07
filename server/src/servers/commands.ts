@@ -69,13 +69,14 @@ export function rconFor(c: Command): string {
 }
 
 /**
- * RCON line that switches a running server's game mode: CS2 reads game_type and
- * game_mode when a map loads, so the mode is set and a map is loaded in one go.
+ * RCON line that switches a running server's game mode. CS2 only picks up new
+ * game_type/game_mode values on a full map load: `map`, not `changelevel` (which
+ * keeps the current mode).
  */
 export function gameModeLine(gameType: number, gameMode: number, map: string): string {
   const spec = parseMapSpec(map);
   if (!spec) throw new CommandError("Enter a map name like de_dust2, or a Workshop map or collection ID.");
   const load =
-    spec.kind === "stock" ? `changelevel ${spec.map}` : spec.kind === "workshop" ? `host_workshop_map ${spec.id}` : `host_workshop_collection ${spec.id}`;
+    spec.kind === "stock" ? `map ${spec.map}` : spec.kind === "workshop" ? `host_workshop_map ${spec.id}` : `host_workshop_collection ${spec.id}`;
   return `game_type ${gameType}; game_mode ${gameMode}; ${load}`;
 }

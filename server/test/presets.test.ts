@@ -194,7 +194,7 @@ describe("switching game mode from the Commands tab", () => {
 
     const r = await call(c, "POST", `/api/servers/${s.id}/gamemode`, { presetId: comp.id });
     expect(r.status, JSON.stringify(r.body)).toBe(200);
-    expect(rconSent.at(-1)).toBe("game_type 0; game_mode 1; changelevel de_mirage");
+    expect(rconSent.at(-1)).toBe("game_type 0; game_mode 1; map de_mirage");
     let g = (await call(c, "GET", `/api/servers/${s.id}/gamemode`)).body;
     expect(g.live).toMatchObject({ presetName: "Competitive", map: "de_mirage" });
     expect(g.saved).toMatchObject({ presetName: "Casual", gameMode: 0 });
@@ -224,7 +224,7 @@ describe("switching game mode from the Commands tab", () => {
     expect(g.saved).toMatchObject({ presetName: "Practice", gameType: 0, gameMode: 1, map: "de_mirage" });
     expect(await readCfg(c, s.id, "practice.cfg")).toContain("mp_maxmoney 60000");
     expect(await readCfg(c, s.id, "gamemode_competitive_server.cfg")).toContain("exec practice");
-    expect(rconSent.at(-1)).toBe("game_type 0; game_mode 1; changelevel de_mirage");
+    expect(rconSent.at(-1)).toBe("game_type 0; game_mode 1; map de_mirage");
     const actions = (await call(c, "GET", "/api/audit")).body.entries.map((e: { action: string }) => e.action);
     expect(actions).toContain("server.gamemode");
   });

@@ -53,7 +53,6 @@ export function CommandsTab({ server, onChanged }: { server: Server; onChanged?:
     <>
       {control && (
         <>
-          <GameModePanel server={server} onKept={() => onChanged?.()} />
           <div className="panel">
             <h2 style={{ marginBottom: 6 }}>Map</h2>
             <p className="hint" style={{ marginTop: 0 }}>
@@ -161,6 +160,8 @@ export function CommandsTab({ server, onChanged }: { server: Server; onChanged?:
           </button>
         </div>
       </form>
+
+      {control && <GameModePanel server={server} onKept={() => onChanged?.()} onOutput={(o) => setLastOutput(o.trim() || null)} />}
 
       {lastOutput && (
         <div className="panel">

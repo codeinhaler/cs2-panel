@@ -6,7 +6,7 @@ import { mapLabel } from "../../components/MapPicker";
 type ModeState = Awaited<ReturnType<typeof api.gameMode>>;
 
 /** Switch a running server to another preset's game mode, now or for good. */
-export function GameModePanel({ server, onKept }: { server: Server; onKept: () => void }) {
+export function GameModePanel({ server, onKept, onOutput }: { server: Server; onKept: () => void; onOutput?: (output: string) => void }) {
   const { can, toast } = useApp();
   const { busy, run } = useAction();
   const mapsId = useId();
@@ -38,6 +38,7 @@ export function GameModePanel({ server, onKept }: { server: Server; onKept: () =
     if (server.live && server.live.players - server.live.bots > 0 && !window.confirm(`Switch to ${what}? Everyone on the server moves to the new map.`)) return;
     const r = await run(() => api.switchGameMode(server.id, { presetId: preset.id, map: chosenMap, keep: keep && manage, applyConfigs: keep && applyConfigs }));
     if (r) {
+      onOutput?.(r.output);
       toast(`Switching to ${what}${keep ? "" : " until the next restart"}.${r.maxPlayersNote ? ` ${r.maxPlayersNote}` : ""}`, r.maxPlayersNote ? "warn" : "ok");
       setMap("");
       setApplyConfigs(false);
