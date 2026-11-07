@@ -17,10 +17,12 @@ export class Automation {
     if (this.running) return;
     this.running = true;
     try {
-      await this.monitor?.sample(now.getTime()).catch(() => undefined);
+      // The monitor runs alongside, so slow server queries never delay updates or restarts.
+      const sampling = this.monitor?.sample(now.getTime()).catch(() => undefined);
       // Updates first: an update restarts every server anyway.
       await this.updates.tick(now).catch(() => undefined);
       await this.restarts.tick(now).catch(() => undefined);
+      await sampling;
     } finally {
       this.running = false;
     }

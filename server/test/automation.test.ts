@@ -80,6 +80,7 @@ beforeEach(async () => {
     logLevel: "silent",
     pluginCheckDelayMs: 0,
     automationSleep: async () => undefined,
+    a2sQuery: async () => null,
     fetchFn: (async (url: string | URL | Request, init?: RequestInit) => (await fakeSteamWorkshop(url, init)) ?? new Response("", { status: 404 })) as typeof fetch,
     rcon: async (_o, cmd) => {
       if (cmd === "status") return status;

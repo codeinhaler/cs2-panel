@@ -86,9 +86,9 @@ export class Monitor {
   constructor(private readonly d: MonitorDeps) {}
 
   async sample(now = Date.now()): Promise<void> {
-    const rows: Row[] = [];
-    for (const s of this.d.servers()) rows.push(await this.sampleServer(s, now));
-    const m = await this.sampleMachine(now);
+    // All servers at once: a server that doesn't answer costs one query timeout, not one each.
+    const [m, ...serverRows] = await Promise.all([this.sampleMachine(now), ...this.d.servers().map((s) => this.sampleServer(s, now))]);
+    const rows: Row[] = [...serverRows];
     if (m) rows.push(m);
     const insert = this.d.db.prepare(
       `INSERT INTO metrics (ts, scope, res, cpu, cpu_max, mem, mem_total, players, bots, disk_used, disk_total, net_rx, net_tx)
