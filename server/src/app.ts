@@ -29,6 +29,8 @@ import { CATALOG, pluginPages } from "./plugins/catalog.js";
 import { PlayerService } from "./players/service.js";
 import { BanService, BRIDGE_ID } from "./players/bans.js";
 import { MapMenuService } from "./plugins/map-menu.js";
+import { WorkshopLookup, workshopBlocks } from "./game/workshop.js";
+import { parseMapSpec } from "./servers/map-spec.js";
 import { CommandSchema, commandPermission, rconFor } from "./servers/commands.js";
 import { Settings } from "./settings.js";
 import { Automation } from "./automation/index.js";
@@ -90,6 +92,15 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const gate = new OperationGate();
   const servers = new ServerService(serverStore, presets, files, configs, host, audit, gate);
   const updater = new GameUpdater(host, files, serverStore, audit, gate, rcon);
+  const workshop = new WorkshopLookup(fetchFn);
+  /** Refuses Workshop maps/collections Steam says are removed, missing, private or not CS2. */
+  const checkWorkshop = async (map: unknown): Promise<void> => {
+    if (typeof map !== "string") return;
+    const spec = parseMapSpec(map);
+    if (!spec || spec.kind === "stock") return;
+    const info = await workshop.lookup(spec.id, spec.kind === "workshop" ? "map" : "collection");
+    if (workshopBlocks(info.status)) throw badRequest(info.message);
+  };
   const pluginSources = new PluginSources(path.join(config.dataDir, "plugin-cache"), fetchFn, Date.now, config.bridgeDir);
   const plugins = new PluginService(db, pluginSources, servers, files, audit, gate, rcon, path.join(config.dataDir, "tmp"), config.mysql);
   updater.afterStart = (started) => plugins.healthLines(started);
@@ -299,6 +310,14 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     };
   });
 
+  /** What Steam says about a Workshop map or collection, for the map picker. */
+  app.get("/api/workshop/:id", async (req) => {
+    requirePerm(req, "view");
+    const { id } = z.object({ id: z.string().regex(/^\d{1,20}$/) }).parse(req.params);
+    const { kind } = z.object({ kind: z.enum(["map", "collection"]).default("map") }).parse(req.query);
+    return workshop.lookup(id, kind);
+  });
+
   /** Maps in the CS2 install, for map pickers. */
   app.get("/api/maps", async (req) => {
     requirePerm(req, "view");
@@ -335,12 +354,14 @@ export async function buildApp(deps: AppDeps): Promise<App> {
 
   app.post("/api/servers", async (req) => {
     const user = requirePerm(req, "server.manage");
+    await checkWorkshop((req.body as { map?: unknown } | null)?.map);
     return { server: await servers.create(req.body, actorOf(user)) };
   });
 
   app.patch("/api/servers/:id", async (req) => {
     const user = requirePerm(req, "server.manage");
     const { id } = idParam.parse(req.params);
+    await checkWorkshop((req.body as { map?: unknown } | null)?.map);
     return servers.update(id, req.body, actorOf(user));
   });
 
@@ -396,6 +417,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     if (!can(user.role, commandPermission(cmd))) throw forbidden("Your role can't do that.");
     const s = servers.require(id);
     if ((await host.serviceStatus(s.slug)).state !== "active") throw badRequest("Start the server first.");
+    if (cmd.action === "changemap") await checkWorkshop(cmd.map);
     let line: string;
     try {
       line = rconFor(cmd);

@@ -1251,3 +1251,13 @@ details.inline-form[open] > summary {
   opacity: 0.6;
   cursor: default;
 }
+
+.field small.field-ok {
+  color: var(--run);
+}
+.field small.field-warn {
+  color: var(--busy);
+}
+.field small.field-error {
+  color: var(--fail);
+}

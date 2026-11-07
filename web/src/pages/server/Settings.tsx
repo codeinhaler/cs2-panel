@@ -93,7 +93,7 @@ export function SettingsTab({ server: s, onSaved }: { server: Server; onSaved: (
                 </span>
               </label>
             )}
-            <MapPicker value={map} onChange={setMap} />
+            <MapPicker value={map} onChange={setMap} gsltSet={clearGslt ? false : s.gsltSet || !!gslt.trim()} />
             <label className="field">
               <span>Max players</span>
               <input inputMode="numeric" value={maxPlayers} onChange={(e) => setMaxPlayers(e.target.value)} required />

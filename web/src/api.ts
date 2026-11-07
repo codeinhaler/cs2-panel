@@ -60,6 +60,8 @@ export interface Server {
   createdAt: string;
   status: { state: ServiceState; since: string | null; pid: number | null };
   live: { name: string; map: string; players: number; maxPlayers: number; bots: number; version: string } | null;
+  /** Running servers: whether the game answers yet (players can join only when it does). */
+  answering: "yes" | "starting" | "no" | null;
 }
 
 export interface Preset {
@@ -199,6 +201,16 @@ export interface BanCoverage {
   missing: { id: number; name: string }[];
 }
 
+export interface WorkshopInfo {
+  id: string;
+  kind: "map" | "collection";
+  status: "ok" | "missing" | "removed" | "private" | "wrong-game" | "wrong-kind" | "unknown";
+  title: string | null;
+  sizeBytes: number | null;
+  itemCount: number | null;
+  message: string;
+}
+
 export interface PluginPage {
   pluginId: string;
   label: string;
@@ -328,6 +340,7 @@ export const api = {
 
   host: () => request<HostInfo>("GET", "/api/host"),
   command: (id: number, body: { action: string; [k: string]: unknown }) => request<{ output: string }>("POST", `/api/servers/${id}/commands`, body),
+  workshop: (id: string, kind: "map" | "collection") => request<WorkshopInfo>("GET", `/api/workshop/${id}?kind=${kind}`),
   installedMaps: () => request<{ maps: string[] }>("GET", "/api/maps"),
   presets: () => request<{ presets: Preset[] }>("GET", "/api/presets"),
   checkPort: (port: number, serverId?: number) =>

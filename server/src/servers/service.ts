@@ -33,6 +33,9 @@ export interface Actor {
 }
 
 /** What the browser sees for a server. */
+/** How long a freshly started server may stay silent before the panel calls it "not answering". */
+const STARTUP_GRACE_MS = 90_000;
+
 export interface ServerView {
   id: number;
   slug: string;
@@ -53,6 +56,8 @@ export interface ServerView {
   createdAt: string;
   status: ServiceStatus;
   live: A2sInfo | null;
+  /** Running servers: "yes" when the game answers Steam queries, "starting" in the first 90 seconds, "no" after that. */
+  answering: "yes" | "starting" | "no" | null;
 }
 
 export type ControlAction = "start" | "stop" | "restart" | "kill";
@@ -92,6 +97,12 @@ export class ServerService {
   private async view(s: ServerRecord): Promise<ServerView> {
     const status = await this.host.serviceStatus(s.slug);
     const live = status.state === "active" ? await queryInfo(s.port) : null;
+    // systemd only knows the process runs; the game answering Steam queries means players can join.
+    let answering: ServerView["answering"] = null;
+    if (status.state === "active") {
+      const upMs = status.since ? Date.now() - Date.parse(status.since) : Infinity;
+      answering = live ? "yes" : upMs < STARTUP_GRACE_MS ? "starting" : "no";
+    }
     return {
       id: s.id,
       slug: s.slug,
@@ -112,6 +123,7 @@ export class ServerService {
       createdAt: s.createdAt,
       status,
       live,
+      answering,
     };
   }
 

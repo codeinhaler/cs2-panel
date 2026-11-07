@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from "react";
-import { api } from "../api";
+import { api, type WorkshopInfo } from "../api";
 
 type Kind = "stock" | "workshop" | "collection";
 
@@ -23,7 +23,18 @@ let installedCache: Promise<string[]> | null = null;
  * Picks what a server starts on: a map from the CS2 install, one Workshop map,
  * or a Workshop collection. The value is the server's map field text.
  */
-export function MapPicker({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+export function MapPicker({
+  value,
+  onChange,
+  placeholder,
+  gsltSet,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  /** Whether the server has a GSLT token; undefined hides the warning. */
+  gsltSet?: boolean;
+}) {
   const listId = useId();
   const [state, setState] = useState(() => parse(value));
   const [installed, setInstalled] = useState<string[]>([]);
@@ -38,6 +49,9 @@ export function MapPicker({ value, onChange, placeholder }: { value: string; onC
     const p = parse(value);
     setState((cur) => (serialize(cur) === value ? cur : p));
   }, [value]);
+
+  const lookupId = state.kind === "stock" ? "" : state.id;
+  const info = useWorkshopInfo(lookupId, state.kind === "collection" ? "collection" : "map");
 
   const update = (next: Partial<typeof state>) => {
     const s = { ...state, ...next };
@@ -119,7 +133,10 @@ export function MapPicker({ value, onChange, placeholder }: { value: string; onC
           <small>All maps in the collection become the server's map rotation.</small>
         </>
       )}
-      {state.kind !== "stock" && <small className="hint">Workshop downloads work best with a GSLT token set on the server.</small>}
+      {state.kind !== "stock" && <WorkshopNote info={info} />}
+      {state.kind !== "stock" && gsltSet === false && (
+        <small className="field-warn">This server has no GSLT token. Steam often refuses Workshop downloads without one, and the server then never finishes starting.</small>
+      )}
     </div>
   );
 }
@@ -136,4 +153,44 @@ export function mapLabel(value: string): string {
   if (p.kind === "workshop") return `Workshop map ${p.id}`;
   if (p.kind === "collection") return `Workshop collection ${p.id}`;
   return value;
+}
+
+/** Asks the panel what Steam says about an item, shortly after typing stops. */
+function useWorkshopInfo(id: string, kind: "map" | "collection"): WorkshopInfo | "loading" | null {
+  const [info, setInfo] = useState<WorkshopInfo | "loading" | null>(null);
+  useEffect(() => {
+    if (!/^\d{3,20}$/.test(id)) {
+      setInfo(null);
+      return;
+    }
+    setInfo("loading");
+    let cancelled = false;
+    const t = setTimeout(() => {
+      api.workshop(id, kind).then(
+        (r) => !cancelled && setInfo(r),
+        () => !cancelled && setInfo(null),
+      );
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [id, kind]);
+  return info;
+}
+
+function WorkshopNote({ info }: { info: WorkshopInfo | "loading" | null }) {
+  if (info === null) return null;
+  if (info === "loading") return <small className="hint">Asking Steam about this item…</small>;
+  if (info.status === "ok") {
+    const extra = info.kind === "collection" ? (info.itemCount !== null ? `${info.itemCount} maps` : null) : info.sizeBytes ? `${(info.sizeBytes / 1024 / 1024).toFixed(0)} MB` : null;
+    return (
+      <small className="field-ok">
+        ✓ {info.title ?? `Workshop item ${info.id}`}
+        {extra && ` (${extra})`}
+      </small>
+    );
+  }
+  if (info.status === "unknown") return <small className="hint">{info.message} You can still save.</small>;
+  return <small className="field-error">{info.message}</small>;
 }

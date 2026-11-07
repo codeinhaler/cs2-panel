@@ -2,7 +2,7 @@ import { lazy, Suspense } from "react";
 import { Link, NavLink, Route, Routes, useParams } from "react-router-dom";
 import { api, modeName, fullTime, timeAgo, uptime, type Server } from "../api";
 import { useApp, usePolling } from "../app-context";
-import { ControlButtons, Slots, StateLabel } from "../components/server-bits";
+import { ControlButtons, NotAnsweringNotice, Slots, StateLabel } from "../components/server-bits";
 import { ConsoleTab } from "./server/Console";
 import { SettingsTab } from "./server/Settings";
 import { PluginsTab } from "./server/Plugins";
@@ -39,7 +39,7 @@ export function ServerPage() {
         <div className="titles">
           <h1>{s.name}</h1>
           <p>
-            <StateLabel state={s.status.state} />
+            <StateLabel server={s} />
             {s.status.state === "active" && <span style={{ marginLeft: 12 }}>up {uptime(s.status.since)}</span>}
           </p>
         </div>
@@ -104,6 +104,7 @@ function Overview({ server: s }: { server: Server }) {
   const { can } = useApp();
   return (
     <>
+      <NotAnsweringNotice server={s} consoleHref={`/servers/${s.id}/console`} />
       <div className="panel">
         <div className="unit-slots" style={{ border: 0, padding: 0, maxWidth: 420, marginBottom: 20 }}>
           <Slots server={s} />

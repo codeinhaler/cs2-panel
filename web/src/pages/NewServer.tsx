@@ -143,7 +143,7 @@ export function NewServerPage() {
               </select>
               {preset && <small>{preset.description}</small>}
             </label>
-            <MapPicker value={map} onChange={setMap} placeholder={preset?.defaultMap ?? "de_dust2"} />
+            <MapPicker value={map} onChange={setMap} placeholder={preset?.defaultMap ?? "de_dust2"} gsltSet={!!gslt.trim()} />
             <label className="field">
               <span>Max players</span>
               <input

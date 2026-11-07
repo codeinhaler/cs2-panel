@@ -13,7 +13,8 @@ export class FakeHost implements Host {
   readonly calls: string[] = [];
   readonly busyPorts = new Set<number>();
   private readonly listeners = new Map<string, Set<(line: string) => void>>();
-  private since = new Map<string, string>();
+  /** When each service started (tests may move it back to simulate a long-running server). */
+  readonly since = new Map<string, string>();
 
   constructor(
     private readonly cs2Root: string,

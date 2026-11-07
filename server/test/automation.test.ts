@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fakeSteamWorkshop } from "./fake-steam.js";
 import { openDb } from "../src/db.js";
 import { buildApp, type App } from "../src/app.js";
 import { FakeHost, installFakeBase } from "../src/host/fake-host.js";
@@ -79,6 +80,7 @@ beforeEach(async () => {
     logLevel: "silent",
     pluginCheckDelayMs: 0,
     automationSleep: async () => undefined,
+    fetchFn: (async (url: string | URL | Request, init?: RequestInit) => (await fakeSteamWorkshop(url, init)) ?? new Response("", { status: 404 })) as typeof fetch,
     rcon: async (_o, cmd) => {
       if (cmd === "status") return status;
       if (cmd.startsWith("say ")) said.push(cmd.slice(4));
@@ -319,6 +321,7 @@ describe("commands tab", () => {
     expect((await send({ action: "changemap", map: "de_nuke" })).status).toBe(200);
     expect((await send({ action: "changemap", map: "workshop:3070288532" })).status).toBe(200);
     expect((await send({ action: "changemap", map: "de_dust2; quit" })).status).toBe(400);
+    expect((await send({ action: "changemap", map: "workshop:3094994703" })).body.error).toMatch(/removed/);
     expect((await send({ action: "bot-quota", count: 99 })).status).toBe(400);
     expect((await send({ action: "rcon_password", value: "x" })).status).toBe(400);
     expect((await send({ action: "say", text: 'hi"; quit; say "' })).status).toBe(200);
@@ -347,6 +350,18 @@ describe("rconFor", () => {
     expect(rconFor({ action: "bot-add", team: "ct" })).toBe("bot_add_ct");
     expect(rconFor({ action: "bot-quota", count: 4 })).toBe("bot_quota 4");
     expect(rconFor({ action: "unpause" })).toBe("mp_unpause_match");
+  });
+});
+
+describe("server status", () => {
+  it("tells a server that runs but doesn't answer apart from one that's still starting", async () => {
+    const c = await login();
+    const s = await runningServer(c);
+    expect((await call(c, "GET", `/api/servers/${s.id}`)).body.server.answering).toBe("starting");
+    host.since.set(s.slug, new Date(Date.now() - 5 * 60_000).toISOString());
+    expect((await call(c, "GET", `/api/servers/${s.id}`)).body.server.answering).toBe("no");
+    await call(c, "POST", `/api/servers/${s.id}/stop`, {});
+    expect((await call(c, "GET", `/api/servers/${s.id}`)).body.server.answering).toBeNull();
   });
 });
 

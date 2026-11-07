@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fakeSteamWorkshop } from "./fake-steam.js";
 import { openDb } from "../src/db.js";
 import { buildApp, type App } from "../src/app.js";
 import { FakeHost, installFakeBase } from "../src/host/fake-host.js";
@@ -37,7 +38,9 @@ async function setup(opts: { baseInstalled?: boolean } = {}) {
   if (opts.baseInstalled !== false) installFakeBase(config.cs2Root);
   host = new FakeHost(config.cs2Root, config.instanceEnvDir);
   rconLog = [];
-  const fetchFn = (async (url: string | URL | Request) => {
+  const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
+    const steam = await fakeSteamWorkshop(url, init);
+    if (steam) return steam;
     const m = /profiles\/(\d+)|id\/(\w+)/.exec(String(url));
     return new Response(profileXml(m?.[1] ?? ADMIN, m?.[1] ? `Name ${m[1].slice(-1)}` : "Vanity"));
   }) as typeof fetch;
@@ -261,6 +264,17 @@ describe("servers", () => {
 
     await call(c, "PATCH", `/api/servers/${id}`, { map: "collection:125499818" });
     expect(readFileSync(path.join(dir, "env", "w.env"), "utf8")).not.toContain("start_map");
+
+    // Steam says no: removed, missing, private, other game, or the wrong kind.
+    const refused = async (map: string) => (await call(c, "PATCH", `/api/servers/${id}`, { map })).body.error as string;
+    expect(await refused("workshop:3094994703")).toMatch(/cs_mansion.*removed from the Steam Workshop/);
+    expect(await refused("workshop:12345")).toMatch(/no Workshop item 12345/);
+    expect(await refused("workshop:777")).toMatch(/isn't public/);
+    expect(await refused("workshop:4000000001")).toMatch(/isn't a Counter-Strike 2/);
+    expect(await refused("workshop:125499818")).toMatch(/is a collection/);
+    expect(await refused("collection:3070288532")).toMatch(/not a collection/);
+    expect((await call(c, "GET", "/api/workshop/125499818?kind=collection")).body).toMatchObject({ status: "ok", title: "Old school maps", itemCount: 3 });
+    expect((await call(c, "GET", "/api/workshop/3070288532")).body).toMatchObject({ status: "ok", title: "Lego 2", sizeBytes: 31457280 });
 
     for (const bad of ["workshop:abc", "collection:12/x", "de_dust2; quit", "http://evil"]) {
       expect((await call(c, "PATCH", `/api/servers/${id}`, { map: bad })).status, bad).toBe(400);

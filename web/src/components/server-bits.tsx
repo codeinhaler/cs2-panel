@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { api, type Server, type ServiceState } from "../api";
 import { useAction, useApp } from "../app-context";
 
@@ -10,11 +11,42 @@ const STATE_TEXT: Record<ServiceState, string> = {
   unknown: "Unknown",
 };
 
-export function StateLabel({ state }: { state: ServiceState }) {
+/** The server's state; "Running" only once the game actually answers. */
+export function StateLabel({ server }: { server: Server }) {
+  const state = server.status.state;
+  if (state === "active" && server.answering === "starting") {
+    return (
+      <span className="state-pill" data-state="activating" title="The process runs; the game is still loading">
+        Starting
+      </span>
+    );
+  }
+  if (state === "active" && server.answering === "no") {
+    return (
+      <span className="state-pill" data-state="failed" title="The process runs, but the game doesn't answer, so players can't join">
+        Not answering
+      </span>
+    );
+  }
   return (
     <span className="state-pill" data-state={state}>
       {STATE_TEXT[state]}
     </span>
+  );
+}
+
+/** Explains a server that runs but doesn't answer, with the most likely reason. */
+export function NotAnsweringNotice({ server, consoleHref }: { server: Server; consoleHref: string }) {
+  if (server.status.state !== "active" || server.answering !== "no") return null;
+  const workshop = /^(workshop|collection):/.test(server.map);
+  return (
+    <div className="notice error" style={{ marginBottom: 16 }}>
+      <strong>The server process is running, but the game doesn't answer, so players can't join.</strong>{" "}
+      {workshop
+        ? "It's set to start on a Workshop map. It's probably still downloading it, or stuck because Steam won't hand it out (a removed map, or no GSLT token). Try an installed map in Settings to check."
+        : "It may still be loading, or it's stuck. "}
+      <Link to={consoleHref}>Check the Console</Link> for errors.
+    </div>
   );
 }
 

@@ -92,7 +92,7 @@ export function ServersPage() {
                 {s.name}
               </Link>
               <div className="unit-meta">
-                <StateLabel state={s.status.state} />
+                <StateLabel server={s} />
                 <span>{modeName(s)}</span>
                 <span>{s.live?.map ?? mapLabel(s.map)}</span>
                 {s.status.state === "active" && <span>up {uptime(s.status.since)}</span>}
