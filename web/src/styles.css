@@ -622,6 +622,15 @@ input[type="checkbox"] {
 .slots i.on {
   background: var(--run);
 }
+/* Bots take slots too, but they aren't people. */
+.slots i.bot {
+  background: var(--ink-faint);
+  opacity: 0.45;
+}
+.slots-bots {
+  color: var(--ink-faint);
+  font-size: 0.85em;
+}
 
 .unit-actions {
   display: flex;

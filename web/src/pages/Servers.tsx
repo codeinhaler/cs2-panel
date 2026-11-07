@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { api, fullTime, modeName, uptime, type Server } from "../api";
 import { useApp, usePolling } from "../app-context";
 import { mapLabel } from "../components/MapPicker";
-import { ControlButtons, Slots, StateLabel } from "../components/server-bits";
+import { ControlButtons, humanCount, Slots, StateLabel } from "../components/server-bits";
 
 export function ServersPage() {
   const { can } = useApp();
@@ -14,7 +14,7 @@ export function ServersPage() {
     setData((d) => (d ? [{ servers: d[0].servers.map((x) => (x.id === s.id ? s : x)) }, d[1]] : d));
 
   const running = servers?.filter((s) => s.status.state === "active").length ?? 0;
-  const players = servers?.reduce((n, s) => n + (s.live?.players ?? 0), 0) ?? 0;
+  const players = servers?.reduce((n, s) => n + humanCount(s), 0) ?? 0;
   const overCores = host && running > Math.max(1, host.cpuCount - 1);
 
   return (

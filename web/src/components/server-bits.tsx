@@ -18,23 +18,37 @@ export function StateLabel({ state }: { state: ServiceState }) {
   );
 }
 
-/** One segment per player slot, filled for each connected player. */
+/** Steam's server info counts bots as players; this is people only. */
+export function humanCount(server: Server): number {
+  return server.live ? Math.max(0, server.live.players - server.live.bots) : 0;
+}
+
+/** One segment per player slot: filled for each person, dimmed for each bot. */
 export function Slots({ server }: { server: Server }) {
   const max = server.live?.maxPlayers || server.maxPlayers;
-  const players = server.live ? server.live.players : 0;
+  const humans = humanCount(server);
+  const bots = server.live?.bots ?? 0;
   const shown = Math.min(max, 32);
-  const filled = Math.round((players / max) * shown);
+  const filledHumans = Math.min(shown, Math.round((humans / max) * shown));
+  const filledBots = Math.min(shown - filledHumans, Math.round((bots / max) * shown));
+  const label = server.live ? `${humans} of ${max} players${bots ? `, ${bots} ${bots === 1 ? "bot" : "bots"}` : ""}` : "Not running";
   return (
     <>
       <div className="slots-label">
         <span>Players</span>
         <span>
-          <b>{server.live ? players : "–"}</b> / {max}
+          <b>{server.live ? humans : "–"}</b> / {max}
+          {bots > 0 && (
+            <span className="slots-bots">
+              {" "}
+              + {bots} {bots === 1 ? "bot" : "bots"}
+            </span>
+          )}
         </span>
       </div>
-      <div className="slots" role="img" aria-label={server.live ? `${players} of ${max} players` : "Not running"}>
+      <div className="slots" role="img" aria-label={label}>
         {Array.from({ length: shown }, (_, i) => (
-          <i key={i} className={i < filled ? "on" : undefined} />
+          <i key={i} className={i < filledHumans ? "on" : i < filledHumans + filledBots ? "bot" : undefined} />
         ))}
       </div>
     </>
