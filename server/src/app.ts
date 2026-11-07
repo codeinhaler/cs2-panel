@@ -907,13 +907,21 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   // ------------------------------------------------------------- frontend
 
   if (existsSync(config.webDir)) {
-    await app.register(fastifyStatic, { root: config.webDir, wildcard: false });
+    await app.register(fastifyStatic, {
+      root: config.webDir,
+      wildcard: false,
+      // index.html must always be fresh so an update reaches the browser; the hashed
+      // files under assets/ never change, so those can be cached for good.
+      setHeaders: (res, file) => {
+        res.header("Cache-Control", file.includes(`${path.sep}assets${path.sep}`) ? "public, max-age=31536000, immutable" : "no-cache");
+      },
+    });
     // Single-page app: anything that isn't an API call or a file gets index.html.
     app.setNotFoundHandler((req, reply) => {
       if (req.url.startsWith("/api/") || path.extname(req.url.split("?")[0]!) !== "") {
         return reply.status(404).send({ error: "Not found." });
       }
-      return reply.sendFile("index.html");
+      return reply.header("Cache-Control", "no-cache").sendFile("index.html");
     });
   }
 

@@ -112,6 +112,7 @@ function Shell() {
             Development mode: servers are simulated and nothing runs for real.
           </div>
         )}
+        <UpdatedBanner loadedVersion={me.version} />
         <Outlet />
       </main>
     </div>
@@ -134,5 +135,33 @@ function SignOutIcon() {
       <path d="M16 17l5-5-5-5" />
       <path d="M21 12H9" />
     </svg>
+  );
+}
+
+/**
+ * A tab keeps the panel version it was opened with. When the panel on the server
+ * has been updated since, say so, so nobody tests old code by accident.
+ */
+function UpdatedBanner({ loadedVersion }: { loadedVersion: string }) {
+  const [serverVersion, setServerVersion] = useState(loadedVersion);
+  useEffect(() => {
+    const check = () => void api.me().then((m) => setServerVersion(m.version), () => undefined);
+    const t = setInterval(check, 60_000);
+    // Also check when coming back to the tab.
+    const onVisible = () => document.visibilityState === "visible" && check();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
+  if (serverVersion === loadedVersion) return null;
+  return (
+    <div className="notice info" style={{ marginBottom: 20 }}>
+      The panel has been updated to {serverVersion}. This page is still {loadedVersion}.{" "}
+      <button className="btn small primary" onClick={() => window.location.reload()}>
+        Reload
+      </button>
+    </div>
   );
 }
