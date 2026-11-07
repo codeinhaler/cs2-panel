@@ -3,7 +3,9 @@ import path from "node:path";
 import type { Db } from "../db.js";
 import { sha256 } from "../crypto.js";
 import { badRequest, notFound } from "../errors.js";
-import { GENERATED_CFG, InstanceFiles, exists, writeAtomic } from "./instance-files.js";
+import { InstanceFiles, MANAGED_CFGS, exists, writeAtomic } from "./instance-files.js";
+
+const isManaged = (p: string) => MANAGED_CFGS.some((f) => p === `cfg/${f}`);
 
 /** Editable areas, relative to game/csgo. */
 export const EDITABLE_ROOTS = ["cfg/", "addons/counterstrikesharp/configs/"];
@@ -99,7 +101,7 @@ export class ConfigService {
           let source: ConfigSource = fromUpper ? (prev ? "modified" : "custom") : "stock";
           // A copy identical to stock (e.g. reverted while running) still counts as stock.
           if (source === "modified" && (await sameContent(path.join(root, childRel), path.join(this.csgoBase(), childRel)))) source = "stock";
-          found.set(childRel, { path: childRel, source, size, readOnly: childRel === `cfg/${GENERATED_CFG}` });
+          found.set(childRel, { path: childRel, source, size, readOnly: isManaged(childRel) });
         }
       }
     };
@@ -131,7 +133,7 @@ export class ConfigService {
       path: p,
       content: current.content,
       source: current.source,
-      readOnly: p === `cfg/${GENERATED_CFG}`,
+      readOnly: isManaged(p),
       revisions: this.revisions(server.id, p),
     };
   }
@@ -195,7 +197,7 @@ export class ConfigService {
 
   async save(server: Server, relPath: string, content: string, authorId: number | null, comment = ""): Promise<{ changed: boolean }> {
     const p = normalizeConfigPath(relPath);
-    if (p === `cfg/${GENERATED_CFG}`) throw badRequest("This file is managed by the panel. Change the server's settings instead.");
+    if (isManaged(p)) throw badRequest("This file is managed by the panel. Change the server's settings or the shared settings instead.");
     if (Buffer.byteLength(content, "utf8") > MAX_CONFIG_BYTES) throw badRequest("File is too large (max 512 KB).");
     await this.assertNoSymlinks(this.csgoUpper(server.slug), p);
     const current = await this.readCurrent(server, p);
@@ -215,7 +217,7 @@ export class ConfigService {
   /** Removes the server's own copy: a modified stock file goes back to stock, a custom file is deleted. */
   async revert(server: Server, relPath: string, authorId: number | null, comment = ""): Promise<{ result: "stock" | "deleted" }> {
     const p = normalizeConfigPath(relPath);
-    if (p === `cfg/${GENERATED_CFG}`) throw badRequest("This file is managed by the panel.");
+    if (isManaged(p)) throw badRequest("This file is managed by the panel.");
     await this.assertNoSymlinks(this.csgoUpper(server.slug), p);
     const target = path.join(this.csgoUpper(server.slug), p);
     if (!(await exists(target))) throw notFound("This server has no copy of that file.");

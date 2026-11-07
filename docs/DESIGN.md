@@ -561,7 +561,7 @@ Downloads the latest (or a specified) panel release, swaps it in, runs database 
 - Workshop items checked with Steam's public API before use. (done)
 - Performance monitor (metrics table, warnings with hysteresis) and Discord webhook notifications driven by Activity events. (done)
 - Backups: cs2ctl backup/restore of each server's overlay upper layer (restore extracts as the game user), a sidecar JSON with plugin records and configs to run, VACUUM INTO copies of the panel DB, nightly schedule with retention, restore-db.sh for the panel DB. (done)
-- Global config layer.
+- Global config layer: shared hostname prefix, tags and cvars in a managed cs2panel_shared.cfg, exec'd from a marked block at the top of server.cfg; per-server opt-out; live apply over RCON. (done)
 - Resource graphs, backups UI.
 - Optional Discord webhooks.
 

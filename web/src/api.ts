@@ -275,6 +275,13 @@ export interface BackupSettings {
   keep: number;
 }
 
+export interface SharedConfig {
+  hostnamePrefix: string;
+  tags: string;
+  cvars: string;
+  excluded: number[];
+}
+
 export type EventGroup = "problems" | "updates" | "restarts" | "moderation" | "servers";
 
 export interface DiscordSettings {
@@ -423,6 +430,8 @@ export const api = {
     request<{ output: string; maxPlayersNote: string | null }>("POST", `/api/servers/${id}/gamemode`, body),
   command: (id: number, body: { action: string; [k: string]: unknown }) => request<{ output: string }>("POST", `/api/servers/${id}/commands`, body),
   workshop: (id: string, kind: "map" | "collection") => request<WorkshopInfo>("GET", `/api/workshop/${id}?kind=${kind}`),
+  shared: () => request<{ shared: SharedConfig; preview: { id: number; name: string; hostname: string; uses: boolean }[] }>("GET", "/api/shared"),
+  saveShared: (c: SharedConfig) => request<{ shared: SharedConfig; liveOn: string[] }>("PUT", "/api/shared", c),
   backups: () => request<{ backups: BackupInfo[]; settings: BackupSettings; totalBytes: number }>("GET", "/api/backups"),
   backupServer: (id: number) => request<{ backup: BackupInfo }>("POST", `/api/servers/${id}/backups`, {}),
   backupPanel: () => request<{ backup: BackupInfo }>("POST", "/api/backups/panel", {}),

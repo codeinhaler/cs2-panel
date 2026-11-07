@@ -30,6 +30,7 @@ import { PlayerService } from "./players/service.js";
 import { BanService, BRIDGE_ID } from "./players/bans.js";
 import { MapMenuService } from "./plugins/map-menu.js";
 import { ExecConfigService, withBlock } from "./servers/exec-configs.js";
+import { SharedConfigService, withoutSharedBlock } from "./servers/shared-config.js";
 import { WorkshopLookup, workshopBlocks } from "./game/workshop.js";
 import { parseMapSpec } from "./servers/map-spec.js";
 import { CommandSchema, commandPermission, gameModeLine, rconFor } from "./servers/commands.js";
@@ -100,6 +101,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const files = new InstanceFiles(config.cs2Root, config.instanceEnvDir, (slug) => host.isMounted(slug));
   const configs = new ConfigService(db, files);
   const gate = new OperationGate();
+  const settings = new Settings(db);
   const servers = new ServerService(serverStore, presets, files, configs, host, audit, gate);
   const updater = new GameUpdater(host, files, serverStore, audit, gate, rcon);
   const workshop = new WorkshopLookup(fetchFn);
@@ -116,6 +118,11 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   updater.afterStart = (started) => plugins.healthLines(started);
   const players = new PlayerService(db, servers, plugins, files, host, rcon, audit);
   const execConfigs = new ExecConfigService(db, configs, audit);
+  const shared = new SharedConfigService(settings, servers, configs, files, host, rcon, audit);
+  servers.hostnameFor = (s) => shared.hostnameFor(s);
+  // Every server gets the current shared file before it starts, and right after it's created.
+  servers.beforeStart.push((s) => shared.applyTo(s, null));
+  servers.afterCreate.push((s, _preset, actorId) => shared.applyTo(s, actorId));
   // A new server from a preset runs the preset's configs; changing game mode moves the exec block.
   servers.afterCreate.push(async (s, preset, actorId) => {
     if (preset.execConfigs.length) await execConfigs.set(s, preset.execConfigs, actorId).catch(() => undefined);
@@ -124,7 +131,6 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     if (info.appliedPreset) await execConfigs.set(s, info.appliedPreset.execConfigs, actorId).catch(() => undefined);
     else if (info.modeChanged) await execConfigs.apply(s, actorId);
   });
-  const settings = new Settings(db);
   const humans = humanCounter(players);
   const discord = new DiscordNotifier(db, settings, box, fetchFn);
   audit.listeners.push(discord.onEvent);
@@ -405,7 +411,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       const cur = await configs.readCurrent(s, f.path);
       if (!cur) continue;
       // The panel's exec block is saved as the preset's configs to run instead.
-      const content = withBlock(cur.content, []);
+      const content = withoutSharedBlock(withBlock(cur.content, []));
       if (content.trim()) configFiles[f.path.slice("cfg/".length)] = content;
     }
     const preset = presets.create(
@@ -1049,6 +1055,27 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     const user = requirePerm(req, "server.manage");
     const body = z.object({ enabled: z.boolean(), time: z.string().max(5), keep: z.number().int() }).parse(req.body);
     return { settings: backups.setConfig(body, user.id) };
+  });
+
+  // ---------------------------------------------------------- shared settings
+
+  app.get("/api/shared", async (req) => {
+    requirePerm(req, "view");
+    return { shared: shared.get(), preview: servers.listRecords().map((s) => ({ id: s.id, name: s.name, hostname: shared.hostnameFor(s), uses: shared.uses(s.id) })) };
+  });
+
+  app.put("/api/shared", async (req) => {
+    const user = requirePerm(req, "server.manage");
+    const body = z
+      .object({
+        hostnamePrefix: z.string().max(64).default(""),
+        tags: z.string().max(200).default(""),
+        cvars: z.string().max(20_000).default(""),
+        excluded: z.array(z.number().int()).max(200).default([]),
+      })
+      .parse(req.body);
+    const r = await shared.set(body, user.id);
+    return { shared: r.config, liveOn: r.liveOn };
   });
 
   // ---------------------------------------------------------- notifications

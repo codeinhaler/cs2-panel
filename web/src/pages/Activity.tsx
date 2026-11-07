@@ -54,6 +54,8 @@ function describe(e: AuditEntry): string {
       if (d.action === "bot-quota") return `set the bot count to ${str("count")}`;
       return names[str("action")] ?? `sent ${str("action")}`;
     }
+    case "shared.update":
+      return "changed the shared settings for all servers";
     case "backup.create": {
       const why = d.trigger === "nightly" ? " (nightly)" : d.trigger === "before-restore" ? " before restoring" : "";
       return e.serverId ? `backed up the server${why}` : `backed up the panel's database${why}`;

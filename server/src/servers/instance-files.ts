@@ -8,6 +8,10 @@ import { hasMetamodPath, parseSteamInf, patchGameinfo } from "../game/gameinfo.j
 export const UPPER_ALLOWLIST = ["game/csgo/cfg/", "game/csgo/addons/", "game/csgo/logs/", "game/csgo/gameinfo.gi"];
 
 export const GENERATED_CFG = "cs2panel_generated.cfg";
+/** Shared settings for every server, written by the panel and run at the top of server.cfg. */
+export const SHARED_CFG = "cs2panel_shared.cfg";
+/** cfg files the panel writes itself; they can't be edited on the Config files tab. */
+export const MANAGED_CFGS = [GENERATED_CFG, SHARED_CFG];
 const GAMEINFO_REL = "game/csgo/gameinfo.gi";
 
 export interface LaunchSettings {

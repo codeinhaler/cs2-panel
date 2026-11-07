@@ -14,6 +14,7 @@ import { PresetsPage } from "./pages/Presets";
 import { MonitorPage } from "./pages/Monitor";
 import { NotificationsPage } from "./pages/Notifications";
 import { BackupsPage } from "./pages/Backups";
+import { SharedPage } from "./pages/Shared";
 
 export function App() {
   const [me, setMe] = useState<Me | null | "loading">("loading");
@@ -47,6 +48,7 @@ export function App() {
             <Route path="monitor" element={<MonitorPage />} />
             <Route path="notifications" element={<NotificationsPage />} />
             <Route path="backups" element={<BackupsPage />} />
+            <Route path="shared" element={<SharedPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         ) : (
@@ -89,6 +91,9 @@ function Shell() {
         </NavLink>
         <NavLink to="/presets" className="nav-link">
           Presets
+        </NavLink>
+        <NavLink to="/shared" className="nav-link">
+          Shared settings
         </NavLink>
         <NavLink to="/backups" className="nav-link">
           Backups

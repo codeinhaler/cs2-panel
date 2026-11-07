@@ -76,6 +76,8 @@ export type ControlAction = "start" | "stop" | "restart" | "kill";
 export class ServerService {
   /** Run after a server's settings are saved (e.g. to move the configs-to-run block when the game mode changed). */
   readonly afterUpdate: ((s: ServerRecord, info: { modeChanged: boolean; appliedPreset: Preset | null }, actorId: number) => Promise<void>)[] = [];
+  /** The hostname players see; shared settings can add a prefix. */
+  hostnameFor: (s: ServerRecord) => string = (s) => s.name;
   /** Exact people/bots counts from RCON, when known; preferred over Steam's query, which miscounts bots. */
   liveCounts: (serverId: number) => { humans: number; bots: number } | null = () => null;
   /** Run after a server is created from a preset, once its files exist. */
@@ -415,8 +417,13 @@ export class ServerService {
     return { result, restarted: running && opts.restart };
   }
 
+  /** Rewrites the panel's generated cfg (e.g. after the hostname prefix changed). */
+  async refreshGeneratedCfg(s: ServerRecord): Promise<void> {
+    await this.files.writeGeneratedCfg(s.slug, { hostname: this.hostnameFor(s), password: s.password, rconPassword: s.rconPassword });
+  }
+
   private async writeLaunchFiles(s: ServerRecord): Promise<void> {
     await this.files.writeLaunchEnv(s.slug, s);
-    await this.files.writeGeneratedCfg(s.slug, { hostname: s.name, password: s.password, rconPassword: s.rconPassword });
+    await this.files.writeGeneratedCfg(s.slug, { hostname: this.hostnameFor(s), password: s.password, rconPassword: s.rconPassword });
   }
 }
