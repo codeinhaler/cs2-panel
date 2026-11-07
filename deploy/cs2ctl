@@ -13,6 +13,8 @@
 #   cs2ctl archive <slug>               Stop, unmount and archive a deleted server
 #   cs2ctl steam-update [validate]      Update the shared CS2 install (all overlays must be unmounted)
 #   cs2ctl steam-check                  Print Steam's current app info for CS2 (to spot new builds)
+#   cs2ctl backup <slug>                Pack the server's own files into $BACKUP_DIR/servers/<slug>/; prints the file name
+#   cs2ctl restore <slug> <file>        Replace the server's own files with a backup (overlay must be unmounted)
 
 set -euo pipefail
 
@@ -20,6 +22,8 @@ CS2_ROOT="/srv/cs2"
 BASE_DIR="$CS2_ROOT/base"
 INSTANCES_DIR="$CS2_ROOT/instances"
 DELETED_DIR="$CS2_ROOT/backups/deleted"
+BACKUP_DIR="$CS2_ROOT/backups"
+PANEL_USER="cs2panel"
 STEAMCMD="$CS2_ROOT/steamcmd/steamcmd.sh"
 ENV_DIR="/etc/cs2-panel/instances"
 GAME_USER="cs2"
@@ -138,6 +142,48 @@ case "$verb" in
     die "steamcmd failed after 3 attempts"
     ;;
 
+  backup)
+    validate_slug "${1:-}"
+    slug="$1"
+    [[ -d "$INSTANCES_DIR/$slug/upper" ]] || die "no files for $slug"
+    install -d -m 0755 "$BACKUP_DIR/servers"
+    install -d -o "$PANEL_USER" -g "$PANEL_USER" -m 0750 "$BACKUP_DIR/servers/$slug"
+    name="$slug-$(date +%Y%m%d-%H%M%S).tar.gz"
+    tmp="$BACKUP_DIR/servers/$slug/.$name.part"
+    # The server's own layer only (everything that differs from the shared install).
+    # Workshop downloads come back by themselves; logs and crash dumps aren't worth keeping.
+    tar --create --gzip --numeric-owner --file "$tmp" -C "$INSTANCES_DIR/$slug/upper" \
+      --exclude=./game/csgo/maps/workshop --exclude=./game/csgo/logs --exclude='*.dmp' --exclude=./core .
+    chown "$PANEL_USER:$PANEL_USER" "$tmp"
+    chmod 0640 "$tmp"
+    mv "$tmp" "$BACKUP_DIR/servers/$slug/$name"
+    echo "$name"
+    ;;
+
+  restore)
+    validate_slug "${1:-}"
+    slug="$1"
+    file="${2:-}"
+    [[ "$file" =~ ^[a-z0-9][a-z0-9-]{0,31}-[0-9]{8}-[0-9]{6}\.tar\.gz$ ]] || die "invalid backup file name"
+    src="$BACKUP_DIR/servers/$slug/$file"
+    [[ -f "$src" ]] || die "backup $file not found"
+    mountpoint -q "$INSTANCES_DIR/$slug/merged" && die "overlay for $slug is mounted; stop the server first"
+    [[ -d "$INSTANCES_DIR/$slug" ]] || die "no server $slug"
+    # Keep what was there, just in case, next to deleted servers.
+    install -d -o "$GAME_USER" -g "$GAME_USER" -m 2775 "$DELETED_DIR"
+    if [[ -d "$INSTANCES_DIR/$slug/upper" ]]; then
+      mv "$INSTANCES_DIR/$slug/upper" "$DELETED_DIR/$slug-before-restore-$(date +%Y%m%d-%H%M%S)"
+    fi
+    install -d -o "$GAME_USER" -g "$GAME_USER" -m 2775 "$INSTANCES_DIR/$slug/upper"
+    # Extract as the game user, not root: a symlink planted in a server's files can then
+    # never make tar write outside the server's folder. The game user owns these files anyway.
+    runuser -u "$GAME_USER" -- tar --extract --gzip --preserve-permissions --no-same-owner --file - -C "$INSTANCES_DIR/$slug/upper" < "$src"
+    # OverlayFS keeps internal state in work/; start it fresh for the new upper layer.
+    rm -rf --one-file-system "${INSTANCES_DIR:?}/$slug/work"
+    install -d -m 0755 "$INSTANCES_DIR/$slug/work"
+    echo "restored $slug from $file"
+    ;;
+
   steam-check)
     [[ -x "$STEAMCMD" ]] || die "steamcmd not found at $STEAMCMD"
     # SteamCMD answers app_info_print from its cache, which can be hours old.
@@ -149,6 +195,6 @@ case "$verb" in
     ;;
 
   *)
-    die "unknown verb '${verb}'. Verbs: start stop restart kill enable disable mount umount archive steam-update steam-check"
+    die "unknown verb '${verb}'. Verbs: start stop restart kill enable disable mount umount archive backup restore steam-update steam-check"
     ;;
 esac

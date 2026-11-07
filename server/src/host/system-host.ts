@@ -33,6 +33,25 @@ export class SystemHost implements Host {
     }
   }
 
+  async backupServer(slug: string): Promise<string> {
+    const out = await this.sudo(["backup", slug], 600_000);
+    return out.trim().split("\n").pop()!.trim();
+  }
+
+  async restoreServer(slug: string, file: string): Promise<void> {
+    await this.sudo(["restore", slug, file], 600_000);
+  }
+
+  private async sudo(args: string[], timeout: number): Promise<string> {
+    try {
+      const { stdout } = await execFileP("sudo", ["-n", this.cs2ctlPath, ...args], { timeout, maxBuffer: 4 * 1024 * 1024 });
+      return stdout;
+    } catch (err) {
+      const e = err as { stderr?: string; message: string };
+      throw new Error((e.stderr || e.message).trim());
+    }
+  }
+
   async steamAppInfo(): Promise<string> {
     try {
       const { stdout } = await execFileP("sudo", ["-n", this.cs2ctlPath, "steam-check"], { timeout: 180_000, maxBuffer: 16 * 1024 * 1024 });

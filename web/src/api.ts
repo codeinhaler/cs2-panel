@@ -257,6 +257,24 @@ export interface MonitorOverview {
   servers: { id: number; name: string; cpu: number }[];
 }
 
+export interface BackupInfo {
+  id: string;
+  kind: "server" | "panel";
+  file: string;
+  serverId: number | null;
+  serverName: string | null;
+  sizeBytes: number;
+  createdAt: string;
+  createdBy: string | null;
+  trigger: "manual" | "nightly" | "before-restore";
+}
+
+export interface BackupSettings {
+  enabled: boolean;
+  time: string;
+  keep: number;
+}
+
 export type EventGroup = "problems" | "updates" | "restarts" | "moderation" | "servers";
 
 export interface DiscordSettings {
@@ -405,6 +423,13 @@ export const api = {
     request<{ output: string; maxPlayersNote: string | null }>("POST", `/api/servers/${id}/gamemode`, body),
   command: (id: number, body: { action: string; [k: string]: unknown }) => request<{ output: string }>("POST", `/api/servers/${id}/commands`, body),
   workshop: (id: string, kind: "map" | "collection") => request<WorkshopInfo>("GET", `/api/workshop/${id}?kind=${kind}`),
+  backups: () => request<{ backups: BackupInfo[]; settings: BackupSettings; totalBytes: number }>("GET", "/api/backups"),
+  backupServer: (id: number) => request<{ backup: BackupInfo }>("POST", `/api/servers/${id}/backups`, {}),
+  backupPanel: () => request<{ backup: BackupInfo }>("POST", "/api/backups/panel", {}),
+  deleteBackup: (id: string) => request<{ ok: true }>("DELETE", `/api/backups?id=${encodeURIComponent(id)}`),
+  restoreBackup: (id: string) => request<{ safetyBackup: string; restarted: boolean }>("POST", "/api/backups/restore", { id }),
+  saveBackupSettings: (s: BackupSettings) => request<{ settings: BackupSettings }>("PUT", "/api/backups/settings", s),
+  backupDownloadUrl: (id: string) => `/api/backups/download?id=${encodeURIComponent(id)}`,
   notifications: () => request<{ discord: DiscordSettings; groups: Record<EventGroup, string> }>("GET", "/api/notifications"),
   saveNotifications: (body: { webhook?: string; events: Partial<Record<EventGroup, boolean>> }) => request<{ discord: DiscordSettings }>("PUT", "/api/notifications", body),
   testNotification: () => request<{ ok: true }>("POST", "/api/notifications/test", {}),

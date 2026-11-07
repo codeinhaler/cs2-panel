@@ -1,3 +1,4 @@
+import type { BackupService } from "../backups/service.js";
 import type { Monitor } from "../monitor/monitor.js";
 import type { RestartScheduler } from "./restarts.js";
 import type { UpdateWatcher } from "./updates.js";
@@ -11,6 +12,7 @@ export class Automation {
     readonly updates: UpdateWatcher,
     readonly restarts: RestartScheduler,
     readonly monitor: Monitor | null = null,
+    readonly backups: BackupService | null = null,
   ) {}
 
   async tick(now = new Date()): Promise<void> {
@@ -22,6 +24,8 @@ export class Automation {
       // Updates first: an update restarts every server anyway.
       await this.updates.tick(now).catch(() => undefined);
       await this.restarts.tick(now).catch(() => undefined);
+      // Nightly backups run in the background; the next tick sees them as busy.
+      void this.backups?.tick(now).catch(() => undefined);
       await sampling;
     } finally {
       this.running = false;

@@ -66,6 +66,15 @@ interface Prepared {
 }
 
 
+export interface PluginInstallSnapshot {
+  pluginId: string;
+  name: string;
+  version: string;
+  asset: string;
+  files: string;
+  installedAt: string;
+}
+
 export class PluginService {
   private busy = new Set<number>();
   /** Run after plugin files change on a server (overlay unmounted), e.g. to write the ban list. */
@@ -311,6 +320,21 @@ export class PluginService {
   }
 
   /** Copies another server's plugin records (Duplicate copies the files themselves). */
+  /** The plugin records a backup keeps, so a restore can put the Plugins tab back as it was. */
+  snapshotInstalls(serverId: number): PluginInstallSnapshot[] {
+    return this.current(serverId).map((r) => ({ pluginId: r.plugin_id, name: r.name, version: r.version, asset: r.asset, files: r.files, installedAt: r.installed_at }));
+  }
+
+  /** Replaces a server's plugin records with the ones from a backup (its files are restored separately). */
+  restoreInstalls(serverId: number, rows: PluginInstallSnapshot[], actorId: number | null): void {
+    this.db.prepare("UPDATE plugin_installs SET removed_at = datetime('now') WHERE server_id = ? AND removed_at IS NULL").run(serverId);
+    for (const r of rows) {
+      this.db
+        .prepare("INSERT INTO plugin_installs (server_id, plugin_id, name, version, asset, files, installed_at, installed_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(serverId, r.pluginId, r.name, r.version, r.asset, r.files, r.installedAt, actorId);
+    }
+  }
+
   copyInstalls(fromServerId: number, toServerId: number): void {
     for (const r of this.current(fromServerId)) {
       this.db

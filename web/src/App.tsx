@@ -13,6 +13,7 @@ import { PreferencesPage } from "./pages/Preferences";
 import { PresetsPage } from "./pages/Presets";
 import { MonitorPage } from "./pages/Monitor";
 import { NotificationsPage } from "./pages/Notifications";
+import { BackupsPage } from "./pages/Backups";
 
 export function App() {
   const [me, setMe] = useState<Me | null | "loading">("loading");
@@ -45,6 +46,7 @@ export function App() {
             <Route path="presets" element={<PresetsPage />} />
             <Route path="monitor" element={<MonitorPage />} />
             <Route path="notifications" element={<NotificationsPage />} />
+            <Route path="backups" element={<BackupsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         ) : (
@@ -87,6 +89,9 @@ function Shell() {
         </NavLink>
         <NavLink to="/presets" className="nav-link">
           Presets
+        </NavLink>
+        <NavLink to="/backups" className="nav-link">
+          Backups
         </NavLink>
         {can("server.manage") && (
           <NavLink to="/notifications" className="nav-link">

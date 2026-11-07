@@ -25,6 +25,10 @@ export interface Host {
   cs2ctl(verb: Cs2ctlVerb, slug: string): Promise<string>;
   /** Updates the shared CS2 install. Each output line is passed to onLine. */
   steamUpdate(validate: boolean, onLine: (line: string) => void): Promise<void>;
+  /** Packs a server's own files into the backup folder; returns the archive's file name. */
+  backupServer(slug: string): Promise<string>;
+  /** Replaces a server's own files with a backup archive (overlay must be unmounted). */
+  restoreServer(slug: string, file: string): Promise<void>;
   /** SteamCMD's current app info for CS2 (raw VDF text), to compare build IDs. */
   steamAppInfo(): Promise<string>;
   serviceStatus(slug: string): Promise<ServiceStatus>;

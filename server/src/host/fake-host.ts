@@ -1,6 +1,7 @@
 import type { MachineStats, ServiceStats } from "./stats.js";
 import { mkdirSync, writeFileSync, existsSync, rmSync, renameSync, symlinkSync, lstatSync } from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import type { Cs2ctlVerb, Host, LogStream, ServiceStatus } from "./host.js";
 
 /**
@@ -168,6 +169,33 @@ export class FakeHost implements Host {
       /* instance already gone */
     }
     this.mounted.delete(slug);
+  }
+
+  /** Same layout as the real helper: cs2Root/backups/servers/<slug>/<slug>-YYYYmmdd-HHMMSS.tar.gz */
+  async backupServer(slug: string): Promise<string> {
+    this.calls.push(`backup ${slug}`);
+    const upper = path.join(this.cs2Root, "instances", slug, "upper");
+    if (!existsSync(upper)) throw new Error(`no files for ${slug}`);
+    const dir = path.join(this.cs2Root, "backups", "servers", slug);
+    mkdirSync(dir, { recursive: true });
+    const d = new Date(this.clock());
+    const p2 = (n: number) => String(n).padStart(2, "0");
+    let name = `${slug}-${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}.tar.gz`;
+    // Two backups within one second would clash; real backups never do that.
+    while (existsSync(path.join(dir, name))) name = name.replace(/(\d{6})\.tar\.gz$/, (_, t: string) => `${String(Number(t) + 1).padStart(6, "0")}.tar.gz`);
+    execFileSync("tar", ["--create", "--gzip", "--file", path.join(dir, name), "-C", upper, "--exclude=./game/csgo/maps/workshop", "."]);
+    return name;
+  }
+
+  async restoreServer(slug: string, file: string): Promise<void> {
+    this.calls.push(`restore ${slug} ${file}`);
+    if (this.mounted.has(slug)) throw new Error(`overlay for ${slug} is mounted; stop the server first`);
+    const src = path.join(this.cs2Root, "backups", "servers", slug, file);
+    if (!existsSync(src)) throw new Error(`backup ${file} not found`);
+    const upper = path.join(this.cs2Root, "instances", slug, "upper");
+    rmSync(upper, { recursive: true, force: true });
+    mkdirSync(upper, { recursive: true });
+    execFileSync("tar", ["--extract", "--gzip", "--file", src, "-C", upper]);
   }
 
   async serviceStatus(slug: string): Promise<ServiceStatus> {

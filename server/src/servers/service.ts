@@ -25,6 +25,17 @@ export class OperationGate {
   assertFree(): void {
     if (this.busy) throw conflict(`Not possible right now: ${this.busy} is in progress.`);
   }
+
+  /** Runs fn with the gate held, so no update or other long operation starts meanwhile. */
+  async run<T>(label: string, fn: () => Promise<T>): Promise<T> {
+    this.assertFree();
+    this.busy = label;
+    try {
+      return await fn();
+    } finally {
+      this.busy = null;
+    }
+  }
 }
 
 export interface Actor {

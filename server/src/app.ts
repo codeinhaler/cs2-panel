@@ -41,6 +41,7 @@ import { RestartScheduler } from "./automation/restarts.js";
 import { Monitor, MACHINE, RANGES, type Range } from "./monitor/monitor.js";
 import { queryInfo, type A2sInfo } from "./game/a2s.js";
 import { DiscordNotifier, EVENT_GROUPS, type EventGroup } from "./notify/discord.js";
+import { BackupService } from "./backups/service.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -79,6 +80,7 @@ export interface App {
     automation: Automation;
     monitor: Monitor;
     discord: DiscordNotifier;
+    backups: BackupService;
   };
 }
 
@@ -127,10 +129,24 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const discord = new DiscordNotifier(db, settings, box, fetchFn);
   audit.listeners.push(discord.onEvent);
   const monitor = new Monitor({ db, host, servers: () => servers.listRecords(), query: deps.a2sQuery ?? ((port) => queryInfo(port)), counts: (id) => players.recentCounts(id), audit });
+  const backups = new BackupService(
+    db,
+    settings,
+    host,
+    servers,
+    plugins,
+    execConfigs,
+    gate,
+    updater,
+    audit,
+    path.join(config.cs2Root, "backups"),
+    path.join(config.dataDir, "backups"),
+  );
   const automation = new Automation(
     new UpdateWatcher(settings, files, host, updater, gate, serverStore, humans, audit),
     new RestartScheduler(db, settings, servers, host, gate, updater, humans, rcon, audit, deps.automationSleep),
     monitor,
+    backups,
   );
   const mapMenus = new MapMenuService(configs, plugins, files.baseDir);
   const bans = new BanService(db, servers, plugins, files, host, rcon, audit);
@@ -983,6 +999,58 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     return { alerts: monitor.alerts(all === "1") };
   });
 
+  // ---------------------------------------------------------------- backups
+
+  app.get("/api/backups", async (req) => {
+    requirePerm(req, "view");
+    const list = await backups.list();
+    return { backups: list, settings: backups.config(), totalBytes: list.reduce((n, b) => n + b.sizeBytes, 0) };
+  });
+
+  app.post("/api/servers/:id/backups", async (req) => {
+    const user = requirePerm(req, "server.manage");
+    const { id } = idParam.parse(req.params);
+    return { backup: await backups.backupServer(servers.require(id), user.id, "manual") };
+  });
+
+  app.post("/api/backups/panel", async (req) => {
+    const user = requirePerm(req, "users.manage");
+    return { backup: await backups.backupPanel(user.id, "manual") };
+  });
+
+  /** Server backups: Admins and the Owner. The panel database holds everyone's data: Owner only. */
+  const backupPerm = (id: string) => (backups.resolve(id).kind === "panel" ? "users.manage" : "server.manage");
+
+  app.get("/api/backups/download", async (req, reply) => {
+    const { id } = z.object({ id: z.string().max(200) }).parse(req.query);
+    requirePerm(req, backupPerm(id));
+    const f = await backups.open(id);
+    return reply
+      .header("Content-Type", "application/octet-stream")
+      .header("Content-Length", String(f.size))
+      .header("Content-Disposition", `attachment; filename="${f.file}"`)
+      .send(f.stream);
+  });
+
+  app.delete("/api/backups", async (req) => {
+    const { id } = z.object({ id: z.string().max(200) }).parse(req.query);
+    const user = requirePerm(req, backupPerm(id));
+    await backups.delete(id, user.id);
+    return { ok: true };
+  });
+
+  app.post("/api/backups/restore", async (req) => {
+    const user = requirePerm(req, "server.manage");
+    const { id } = z.object({ id: z.string().max(200) }).parse(req.body);
+    return backups.restore(id, user.id);
+  });
+
+  app.put("/api/backups/settings", async (req) => {
+    const user = requirePerm(req, "server.manage");
+    const body = z.object({ enabled: z.boolean(), time: z.string().max(5), keep: z.number().int() }).parse(req.body);
+    return { settings: backups.setConfig(body, user.id) };
+  });
+
   // ---------------------------------------------------------- notifications
 
   app.get("/api/notifications", async (req) => {
@@ -1059,6 +1127,6 @@ export async function buildApp(deps: AppDeps): Promise<App> {
 
   return {
     fastify: app,
-    services: { users, sessions, audit, servers, configs, updater, presets, plugins, players, bans, automation, monitor, discord },
+    services: { users, sessions, audit, servers, configs, updater, presets, plugins, players, bans, automation, monitor, discord, backups },
   };
 }
