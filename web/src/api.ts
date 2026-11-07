@@ -137,6 +137,8 @@ export interface CatalogPlugin {
   description: string;
   requires: string[];
   library: boolean;
+  /** Installed automatically together with this plugin. */
+  companionOf: string | null;
 }
 
 export interface PluginHealth {

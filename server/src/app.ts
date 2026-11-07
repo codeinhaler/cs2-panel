@@ -765,7 +765,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   app.get("/api/plugins/catalog", async (req) => {
     requirePerm(req, "view");
     return {
-      plugins: CATALOG.map((e) => ({ id: e.id, name: e.name, description: e.description, requires: e.requires, library: !!e.library })),
+      plugins: CATALOG.map((e) => ({ id: e.id, name: e.name, description: e.description, requires: e.requires, library: !!e.library, companionOf: e.companionOf ?? null })),
     };
   });
 

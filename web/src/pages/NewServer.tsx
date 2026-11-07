@@ -196,18 +196,25 @@ export function NewServerPage() {
                     .filter((p) => !p.library)
                     .map((p) => {
                       const neededBy = catalog.filter((o) => picked.includes(o.id) && o.id !== p.id && needs(o.id, p.id)).map((o) => o.name);
-                      const on = picked.includes(p.id) || neededBy.length > 0;
+                      // A companion (the panel's bridge) comes along whenever its host plugin is installed.
+                      const host = p.companionOf ? catalog.find((o) => o.id === p.companionOf) : undefined;
+                      const hostOn = !!host && (picked.includes(host.id) || picked.some((x) => needs(x, host.id)));
+                      const on = picked.includes(p.id) || neededBy.length > 0 || hostOn;
+                      const locked = neededBy.length > 0 || (hostOn && !picked.includes(p.id));
                       return (
                         <label key={p.id} className="check">
                           <input
                             type="checkbox"
                             checked={on}
-                            disabled={neededBy.length > 0}
+                            disabled={locked}
                             onChange={(e) => setPicked((cur) => (e.target.checked ? [...cur, p.id] : cur.filter((x) => x !== p.id)))}
                           />
                           <span>
                             {p.name}
-                            <small className="hint"> — {neededBy.length ? `needed by ${neededBy.join(", ")}` : p.description}</small>
+                            <small className="hint">
+                              {" — "}
+                              {neededBy.length ? `needed by ${neededBy.join(", ")}` : hostOn && !picked.includes(p.id) ? `comes with ${host!.name}` : p.description}
+                            </small>
                           </span>
                         </label>
                       );

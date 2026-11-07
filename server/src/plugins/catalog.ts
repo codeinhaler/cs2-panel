@@ -94,7 +94,6 @@ export const CATALOG: CatalogEntry[] = [
     source: { type: "bundled", file: "cs2panel-bridge.zip" },
     requires: ["counterstrikesharp"],
     companionOf: "counterstrikesharp",
-    library: true,
   },
   {
     id: "anybaselib",
