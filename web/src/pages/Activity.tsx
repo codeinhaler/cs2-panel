@@ -52,6 +52,16 @@ function describe(e: AuditEntry): string {
       if (d.action === "bot-quota") return `set the bot count to ${str("count")}`;
       return names[str("action")] ?? `sent ${str("action")}`;
     }
+    case "preset.create":
+      return d.fromServer ? `saved ${str("fromServer")} as the preset "${str("name")}"` : `created the preset "${str("name")}"`;
+    case "preset.update":
+      return `edited the preset "${str("name")}"`;
+    case "preset.delete":
+      return `deleted the preset "${str("name")}"`;
+    case "server.exec_configs": {
+      const list = Array.isArray(d.configs) ? (d.configs as string[]) : [];
+      return list.length ? `set configs to run on every map start: ${list.join(", ")}` : "stopped running extra configs on map start";
+    }
     case "server.schedule":
       return d.restartAt ? `set a daily restart at ${str("restartAt")}${d.ifPlayers === "wait" ? `, waiting up to ${str("maxWaitMinutes")} min for players to leave` : ""}` : "turned off the daily restart";
     case "server.kill":

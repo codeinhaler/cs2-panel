@@ -1261,3 +1261,55 @@ details.inline-form[open] > summary {
 .field small.field-error {
   color: var(--fail);
 }
+
+/* Preset editor: one block per config file. */
+.preset-file {
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.preset-file-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  background: var(--panel-sunk);
+  border-bottom: 1px solid var(--line-soft);
+}
+.preset-file textarea {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  padding: 10px;
+  font-size: 0.85rem;
+  resize: vertical;
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.input-with-button {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.input-with-button input {
+  flex: 1;
+  min-width: 0;
+}
+.exec-list {
+  display: grid;
+  gap: 6px;
+}
+
+.time-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.time-select select {
+  width: auto;
+}

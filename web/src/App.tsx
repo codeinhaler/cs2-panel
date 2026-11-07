@@ -10,6 +10,7 @@ import { GameUpdatePage } from "./pages/GameUpdate";
 import { TeamPage } from "./pages/Team";
 import { ActivityPage } from "./pages/Activity";
 import { PreferencesPage } from "./pages/Preferences";
+import { PresetsPage } from "./pages/Presets";
 
 export function App() {
   const [me, setMe] = useState<Me | null | "loading">("loading");
@@ -39,6 +40,7 @@ export function App() {
             <Route path="team" element={<TeamPage />} />
             <Route path="activity" element={<ActivityPage />} />
             <Route path="preferences" element={<PreferencesPage />} />
+            <Route path="presets" element={<PresetsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         ) : (
@@ -75,6 +77,9 @@ function Shell() {
         </NavLink>
         <NavLink to="/game" className="nav-link">
           Game update
+        </NavLink>
+        <NavLink to="/presets" className="nav-link">
+          Presets
         </NavLink>
         {can("users.manage") && (
           <NavLink to="/team" className="nav-link">

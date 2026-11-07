@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, type HostInfo, type Preset, type Server } from "../../api";
+import { api, type HostInfo, type Preset, type Server, type ServerDetail } from "../../api";
 import { useAction, useApp } from "../../app-context";
 import { PortField } from "../../components/PortField";
 import { MapPicker } from "../../components/MapPicker";
 import { SchedulePanel } from "./Schedule";
+import { ConfigsToRunPanel, SaveAsPresetPanel } from "./SettingsExtras";
 
-export function SettingsTab({ server: s, onSaved }: { server: Server; onSaved: () => void }) {
+export function SettingsTab({ server: s, detail, onSaved }: { server: Server; detail: ServerDetail; onSaved: () => void }) {
   const { can, toast } = useApp();
   const { busy, run } = useAction();
   const [presets, setPresets] = useState<Preset[]>([]);
@@ -19,8 +20,9 @@ export function SettingsTab({ server: s, onSaved }: { server: Server; onSaved: (
   const [maxPlayers, setMaxPlayers] = useState(String(s.maxPlayers));
   const [port, setPort] = useState(String(s.port));
   const [cpu, setCpu] = useState(String(s.cpu));
-  const [gslt, setGslt] = useState("");
-  const [clearGslt, setClearGslt] = useState(false);
+  const savedGslt = detail.gslt ?? "";
+  const [gslt, setGslt] = useState(savedGslt);
+  const [showGslt, setShowGslt] = useState(false);
   const [password, setPassword] = useState(s.password);
   const [autostart, setAutostart] = useState(s.autostart);
   const [extraArgs, setExtraArgs] = useState(s.extraArgs);
@@ -45,8 +47,10 @@ export function SettingsTab({ server: s, onSaved }: { server: Server; onSaved: (
     if (Number(maxPlayers) !== s.maxPlayers) changes.maxPlayers = Number(maxPlayers);
     if (Number(port) !== s.port) changes.port = Number(port);
     if (Number(cpu) !== s.cpu) changes.cpu = Number(cpu);
-    if (gslt.trim()) changes.gsltToken = gslt.trim();
-    else if (clearGslt) changes.gsltToken = "";
+    if (gslt.trim() !== savedGslt) {
+      if (!gslt.trim() && !window.confirm("Remove the GSLT token from this server?")) return;
+      changes.gsltToken = gslt.trim();
+    }
     if (password !== s.password) changes.password = password;
     if (autostart !== s.autostart) changes.autostart = autostart;
     if (extraArgs !== s.extraArgs) changes.extraArgs = extraArgs;
@@ -57,8 +61,6 @@ export function SettingsTab({ server: s, onSaved }: { server: Server; onSaved: (
     const r = await run(() => api.updateServer(s.id, changes));
     if (r) {
       toast(r.restartRequired ? "Settings saved. Restart the server to apply them." : "Settings saved.", r.restartRequired ? "warn" : "ok");
-      setGslt("");
-      setClearGslt(false);
       setApplyConfigs(false);
       onSaved();
     }
@@ -93,7 +95,7 @@ export function SettingsTab({ server: s, onSaved }: { server: Server; onSaved: (
                 </span>
               </label>
             )}
-            <MapPicker value={map} onChange={setMap} gsltSet={clearGslt ? false : s.gsltSet || !!gslt.trim()} />
+            <MapPicker value={map} onChange={setMap} gsltSet={!!gslt.trim()} />
             <label className="field">
               <span>Max players</span>
               <input inputMode="numeric" value={maxPlayers} onChange={(e) => setMaxPlayers(e.target.value)} required />
@@ -118,19 +120,22 @@ export function SettingsTab({ server: s, onSaved }: { server: Server; onSaved: (
             </label>
             <label className="field">
               <span>Steam game server token (GSLT)</span>
-              <input
-                value={gslt}
-                onChange={(e) => setGslt(e.target.value)}
-                placeholder={s.gsltSet ? `Set (${s.gsltHint}). Type to replace.` : "Not set"}
-                autoComplete="off"
-                spellCheck={false}
-              />
-              {s.gsltSet && (
-                <label className="check" style={{ marginTop: 4 }}>
-                  <input type="checkbox" checked={clearGslt} onChange={(e) => setClearGslt(e.target.checked)} />
-                  <small>Remove the token</small>
-                </label>
-              )}
+              <span className="input-with-button">
+                <input
+                  type={showGslt ? "text" : "password"}
+                  value={gslt}
+                  onChange={(e) => setGslt(e.target.value)}
+                  placeholder="Not set"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                {gslt && (
+                  <button type="button" className="btn ghost small" onClick={() => setShowGslt((v) => !v)}>
+                    {showGslt ? "Hide" : "Show"}
+                  </button>
+                )}
+              </span>
+              <small>Empty the field and save to remove it.</small>
             </label>
             <label className="field">
               <span>Join password</span>
@@ -156,7 +161,9 @@ export function SettingsTab({ server: s, onSaved }: { server: Server; onSaved: (
         </div>
       </form>
 
+      <ConfigsToRunPanel server={s} current={detail.execConfigs} onSaved={onSaved} />
       <SchedulePanel server={s} />
+      <SaveAsPresetPanel server={s} />
       <DuplicatePanel server={s} host={host} />
       {can("server.delete") && <DeletePanel server={s} />}
     </>

@@ -14,6 +14,11 @@ export function setFormatPrefs(p: Prefs | undefined): void {
   prefs = { ...DEFAULT_PREFS, ...p };
 }
 
+/** The signed-in user's formatting preferences. */
+export function currentPrefs(): Prefs {
+  return prefs;
+}
+
 const pad = (n: number) => String(n).padStart(2, "0");
 
 export function formatDate(d: Date, p: Prefs = prefs): string {

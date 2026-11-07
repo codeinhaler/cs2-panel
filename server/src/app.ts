@@ -29,6 +29,7 @@ import { CATALOG, pluginPages } from "./plugins/catalog.js";
 import { PlayerService } from "./players/service.js";
 import { BanService, BRIDGE_ID } from "./players/bans.js";
 import { MapMenuService } from "./plugins/map-menu.js";
+import { ExecConfigService, withBlock } from "./servers/exec-configs.js";
 import { WorkshopLookup, workshopBlocks } from "./game/workshop.js";
 import { parseMapSpec } from "./servers/map-spec.js";
 import { CommandSchema, commandPermission, rconFor } from "./servers/commands.js";
@@ -105,6 +106,15 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const plugins = new PluginService(db, pluginSources, servers, files, audit, gate, rcon, path.join(config.dataDir, "tmp"), config.mysql);
   updater.afterStart = (started) => plugins.healthLines(started);
   const players = new PlayerService(db, servers, plugins, files, host, rcon, audit);
+  const execConfigs = new ExecConfigService(db, configs, audit);
+  // A new server from a preset runs the preset's configs; changing game mode moves the exec block.
+  servers.afterCreate.push(async (s, preset, actorId) => {
+    if (preset.execConfigs.length) await execConfigs.set(s, preset.execConfigs, actorId).catch(() => undefined);
+  });
+  servers.afterUpdate.push(async (s, info, actorId) => {
+    if (info.appliedPreset) await execConfigs.set(s, info.appliedPreset.execConfigs, actorId).catch(() => undefined);
+    else if (info.modeChanged) await execConfigs.apply(s, actorId);
+  });
   const settings = new Settings(db);
   const humans = humanCounter(players);
   const automation = new Automation(
@@ -329,6 +339,71 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     return { presets: presets.list() };
   });
 
+  app.post("/api/presets", async (req) => {
+    const user = requirePerm(req, "preset.manage");
+    await checkWorkshop((req.body as { defaultMap?: unknown } | null)?.defaultMap);
+    const preset = presets.create(req.body, user.id);
+    audit.record(user.id, "preset.create", null, { name: preset.name });
+    return { preset };
+  });
+
+  app.put("/api/presets/:id", async (req) => {
+    const user = requirePerm(req, "preset.manage");
+    const { id } = idParam.parse(req.params);
+    await checkWorkshop((req.body as { defaultMap?: unknown } | null)?.defaultMap);
+    const preset = presets.update(id, req.body);
+    audit.record(user.id, "preset.update", null, { name: preset.name });
+    return { preset };
+  });
+
+  app.delete("/api/presets/:id", async (req) => {
+    const user = requirePerm(req, "preset.manage");
+    const { id } = idParam.parse(req.params);
+    const name = presets.byId(id)?.name;
+    const r = presets.delete(id);
+    audit.record(user.id, "preset.delete", null, { name, serversUsing: r.serversUsing });
+    return r;
+  });
+
+  /** Makes a custom preset from a server: its game mode, map, player count, edited cfg files and configs to run. */
+  app.post("/api/servers/:id/save-preset", async (req) => {
+    const user = requirePerm(req, "preset.manage");
+    const { id } = idParam.parse(req.params);
+    const body = z.object({ name: z.string(), description: z.string().default("") }).parse(req.body);
+    const s = servers.require(id);
+    const configFiles: Record<string, string> = {};
+    for (const f of await configs.list(s)) {
+      if (!f.path.startsWith("cfg/") || f.source === "stock" || f.readOnly || !f.path.endsWith(".cfg")) continue;
+      const cur = await configs.readCurrent(s, f.path);
+      if (!cur) continue;
+      // The panel's exec block is saved as the preset's configs to run instead.
+      const content = withBlock(cur.content, []);
+      if (content.trim()) configFiles[f.path.slice("cfg/".length)] = content;
+    }
+    const preset = presets.create(
+      {
+        name: body.name,
+        description: body.description,
+        gameType: s.gameType,
+        gameMode: s.gameMode,
+        defaultMap: s.map,
+        maxPlayers: s.maxPlayers,
+        configFiles,
+        execConfigs: execConfigs.get(id),
+      },
+      user.id,
+    );
+    audit.record(user.id, "preset.create", id, { name: preset.name, fromServer: s.name });
+    return { preset };
+  });
+
+  app.put("/api/servers/:id/exec-configs", async (req) => {
+    const user = requirePerm(req, "config.edit");
+    const { id } = idParam.parse(req.params);
+    const { configs: list } = z.object({ configs: z.array(z.string().max(100)).max(20) }).parse(req.body);
+    return { execConfigs: await execConfigs.set(servers.require(id), list, user.id) };
+  });
+
   app.get("/api/ports/check", async (req) => {
     requirePerm(req, "view");
     const q = z.object({ port: z.coerce.number().int(), serverId: z.coerce.number().int().optional() }).parse(req.query);
@@ -349,7 +424,14 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     // Moderators don't need the join password.
     if (!can(user.role, "server.manage")) server.password = server.password ? "••••" : "";
     const installed = plugins.installedIds(id);
-    return { server, pluginPages: pluginPages(installed), bridge: installed.includes(BRIDGE_ID) };
+    return {
+      server,
+      pluginPages: pluginPages(installed),
+      bridge: installed.includes(BRIDGE_ID),
+      execConfigs: execConfigs.get(id),
+      // The token itself only for those who may change it; others see the last 4 characters (gsltHint).
+      ...(can(user.role, "server.manage") ? { gslt: servers.require(id).gsltToken ?? "" } : {}),
+    };
   });
 
   app.post("/api/servers", async (req) => {
@@ -370,6 +452,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     const { id } = idParam.parse(req.params);
     const server = await servers.duplicate(id, req.body, actorOf(user));
     plugins.copyInstalls(id, server.id);
+    execConfigs.copy(id, server.id);
     return { server };
   });
 

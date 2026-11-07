@@ -556,7 +556,9 @@ Downloads the latest (or a specified) panel release, swaps it in, runs database 
 - Workshop maps and collections. (done)
 - Update auto-detection and policies. (done)
 - Scheduled restarts, restart-when-empty. (done)
-- Custom presets, including "save this server as a preset".
+- Custom presets, including "save this server as a preset". (done)
+- Configs to run on every map start (managed exec block in gamemode_<mode>_server.cfg). (done)
+- Workshop items checked with Steam's public API before use. (done)
 - Global config layer.
 - Resource graphs, backups UI.
 - Optional Discord webhooks.

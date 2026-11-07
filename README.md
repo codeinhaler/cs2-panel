@@ -37,6 +37,11 @@ The design is in [docs/DESIGN.md](docs/DESIGN.md).
 - **Scheduled restarts** (server Settings tab). Restart a server every day at a set time. If players are on, either wait for them to leave (up to a limit, then warn and restart) or warn them and restart.
 - **Workshop maps and collections**. A server can start on a Steam Workshop map or collection instead of an installed map; paste the ID or the Workshop link. A collection's maps become the server's map rotation, optionally starting on a chosen map. Works best with a GSLT token.
 - **Commands tab** per server: change map (installed or Workshop), restart game, start/end warmup, pause/resume, swap/scramble teams, add/kick bots, bot count, and a message to all players. Only these fixed commands are sent, with checked values. Moderators can send messages; the rest needs Admin or Owner.
+- **Custom presets** (Presets page): your own game mode presets with start map (Workshop too), max players, config files and configs to run. Built-in presets can be copied. **Save as preset** on a server's Settings turns a server you've set up into a preset.
+- **Configs to run** (server Settings): extra cfg files that run on every map start, after server.cfg and the game mode's defaults. The panel keeps the `exec` lines in a marked block at the end of the game mode's `gamemode_<mode>_server.cfg`.
+- **Workshop check**: before a Workshop map or collection is saved or loaded, the panel asks Steam about it and refuses removed, missing, private or non-CS2 items. The map picker shows the item's name and size and warns when there's no GSLT.
+- **Honest status**: a server whose process runs but whose game doesn't answer shows "Starting" for 90 seconds, then "Not answering", with the likely cause.
+- The GSLT stays in its field (hidden, with Show) for Admins and the Owner; the restart time picker follows the 12h/24h preference.
 - Automatic actions show up in Activity as "System", with the reason.
 
 ## Installing on the server

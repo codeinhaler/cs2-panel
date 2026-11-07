@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, fullTime, type RestartSchedule, type ScheduleView, type Server } from "../../api";
 import { useAction } from "../../app-context";
+import { TimeSelect } from "../../components/TimeSelect";
 
 /** Daily restart for one server. */
 export function SchedulePanel({ server }: { server: Server }) {
@@ -48,11 +49,11 @@ export function SchedulePanel({ server }: { server: Server }) {
       </label>
       {enabled && (
         <div className="form-grid" style={{ maxWidth: 640, marginTop: 12 }}>
-          <label className="field">
+          <div className="field">
             <span>At</span>
-            <input type="time" value={form.restartAt ?? ""} onChange={(e) => setForm({ ...form, restartAt: e.target.value })} required />
+            <TimeSelect value={form.restartAt ?? "06:00"} onChange={(v) => setForm({ ...form, restartAt: v })} label="Restart time" />
             <small className="hint">The machine's time ({view.timezone})</small>
-          </label>
+          </div>
           <label className="field">
             <span>If players are on</span>
             <select value={form.ifPlayers} onChange={(e) => setForm({ ...form, ifPlayers: e.target.value as RestartSchedule["ifPlayers"] })}>

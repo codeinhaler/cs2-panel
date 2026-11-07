@@ -5,7 +5,7 @@ import type { Host, ServiceStatus } from "../host/host.js";
 import { queryInfo, type A2sInfo } from "../game/a2s.js";
 import type { ConfigService } from "./configs.js";
 import type { InstanceFiles } from "./instance-files.js";
-import type { PresetStore } from "./presets.js";
+import type { Preset, PresetStore } from "./presets.js";
 import type { ServerRecord, ServerStore } from "./store.js";
 import {
   CreateServerSchema,
@@ -63,6 +63,10 @@ export interface ServerView {
 export type ControlAction = "start" | "stop" | "restart" | "kill";
 
 export class ServerService {
+  /** Run after a server's settings are saved (e.g. to move the configs-to-run block when the game mode changed). */
+  readonly afterUpdate: ((s: ServerRecord, info: { modeChanged: boolean; appliedPreset: Preset | null }, actorId: number) => Promise<void>)[] = [];
+  /** Run after a server is created from a preset, once its files exist. */
+  readonly afterCreate: ((s: ServerRecord, preset: Preset, actorId: number) => Promise<void>)[] = [];
   constructor(
     private readonly store: ServerStore,
     private readonly presets: PresetStore,
@@ -211,6 +215,7 @@ export class ServerService {
     }
 
     this.audit.record(actor.id, "server.create", id, { slug, port: record.port, preset: preset.name, map: record.map });
+    for (const hook of this.afterCreate) await hook(this.require(id), preset, actor.id);
     return this.get(id);
   }
 
@@ -257,13 +262,17 @@ export class ServerService {
     this.store.update(s);
     await this.writeLaunchFiles(s);
 
+    let applied: Preset | null = null;
     if (input.applyPresetConfigs) {
       const p = preset ?? (s.presetId ? this.presets.byId(s.presetId) : null);
       if (!p) throw badRequest("This server has no preset to take config files from.");
       for (const [rel, content] of Object.entries(p.configFiles)) {
         await this.configs.save(s, `cfg/${rel}`, content, actor.id, `Applied preset "${p.name}"`);
       }
+      applied = p;
     }
+    const modeChanged = before.gameType !== s.gameType || before.gameMode !== s.gameMode;
+    for (const hook of this.afterUpdate) await hook(s, { modeChanged, appliedPreset: applied }, actor.id);
 
     const changed = Object.keys(input).filter(
       (k) => k !== "applyPresetConfigs" && (before as unknown as Record<string, unknown>)[k] !== (s as unknown as Record<string, unknown>)[k],

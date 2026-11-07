@@ -150,6 +150,12 @@ const MIGRATIONS: string[] = [
   /* 6: per-server automation (scheduled restarts) */ `
   ALTER TABLE servers ADD COLUMN schedule TEXT NOT NULL DEFAULT '{}';
   `,
+  /* 7: configs to run on every map start; custom presets */ `
+  ALTER TABLE servers ADD COLUMN exec_configs TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE presets ADD COLUMN exec_configs TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE presets ADD COLUMN created_by INTEGER REFERENCES users(id);
+  ALTER TABLE presets ADD COLUMN updated_at TEXT;
+  `,
 ];
 
 export function openDb(file: string): Db {

@@ -94,7 +94,7 @@ export function ServerPage() {
         {data.pluginPages.map((p) => (
           <Route key={p.pluginId} path={`plugin/${p.pluginId}`} element={<ModerationTab server={s} label={p.label} />} />
         ))}
-        <Route path="settings" element={<SettingsTab server={s} onSaved={() => void refresh()} />} />
+        <Route path="settings" element={<SettingsTab key={`${s.id}-${data.gslt ?? ""}`} server={s} detail={data} onSaved={() => void refresh()} />} />
       </Routes>
     </>
   );

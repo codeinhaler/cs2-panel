@@ -74,7 +74,13 @@ export interface Preset {
   gameMode: number;
   defaultMap: string;
   maxPlayers: number;
+  /** Relative to cfg/ → content. */
+  configFiles: Record<string, string>;
+  /** cfg files run on every map start. */
+  execConfigs: string[];
 }
+
+export type PresetInput = Omit<Preset, "id" | "key" | "builtin">;
 
 export interface HostInfo {
   cpuCount: number;
@@ -221,6 +227,9 @@ export interface ServerDetail {
   server: Server;
   pluginPages: PluginPage[];
   bridge: boolean;
+  execConfigs: string[];
+  /** The GSLT itself; only sent to roles that may change it. */
+  gslt?: string;
 }
 
 export interface GameAdmin {
@@ -343,6 +352,11 @@ export const api = {
   workshop: (id: string, kind: "map" | "collection") => request<WorkshopInfo>("GET", `/api/workshop/${id}?kind=${kind}`),
   installedMaps: () => request<{ maps: string[] }>("GET", "/api/maps"),
   presets: () => request<{ presets: Preset[] }>("GET", "/api/presets"),
+  createPreset: (p: PresetInput) => request<{ preset: Preset }>("POST", "/api/presets", p),
+  updatePreset: (id: number, p: PresetInput) => request<{ preset: Preset }>("PUT", `/api/presets/${id}`, p),
+  deletePreset: (id: number) => request<{ serversUsing: number }>("DELETE", `/api/presets/${id}`),
+  saveAsPreset: (serverId: number, name: string, description: string) => request<{ preset: Preset }>("POST", `/api/servers/${serverId}/save-preset`, { name, description }),
+  setExecConfigs: (serverId: number, configs: string[]) => request<{ execConfigs: string[] }>("PUT", `/api/servers/${serverId}/exec-configs`, { configs }),
   checkPort: (port: number, serverId?: number) =>
     request<{ problem: string | null }>("GET", `/api/ports/check?${q({ port, serverId })}`),
 
@@ -431,6 +445,7 @@ export const GAME_MODE_NAMES: Record<string, string> = {
   "0/1": "Competitive",
   "0/2": "Wingman",
   "1/0": "Arms Race",
+  "1/1": "Demolition",
   "1/2": "Deathmatch",
 };
 
