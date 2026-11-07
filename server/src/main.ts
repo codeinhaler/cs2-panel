@@ -22,10 +22,14 @@ if (config.dev) {
 const { fastify, services } = await buildApp({ config, db, host });
 services.players.startPolling();
 services.automation.start();
+await services.matchmaking.recover();
+services.matchmaking.start();
 
 const shutdown = async () => {
   services.players.stopPolling();
   services.automation.stop();
+  services.matchmaking.stop();
+  await services.publicSite.close();
   await fastify.close();
   db.close();
   process.exit(0);
@@ -35,3 +39,10 @@ process.on("SIGINT", shutdown);
 
 await fastify.listen({ host: config.host, port: config.port });
 console.log(`cs2-panel listening on http://${config.host}:${config.port}`);
+
+// The matchmaking site for players, on its own port, when it's switched on.
+services.publicSite.autoListen = true;
+await services.publicSite.sync();
+const site = services.publicSite.status();
+if (site.listening) console.log(`matchmaking site listening on http://${config.host}:${site.port}`);
+else if (site.error) console.warn(`matchmaking site: ${site.error}`);

@@ -565,6 +565,16 @@ Downloads the latest (or a specified) panel release, swaps it in, runs database 
 - Resource graphs, backups UI.
 - Optional Discord webhooks.
 
+**Phase 5 — Matchmaking site** (built, not yet tried on the real server)
+- A separate web server in the same process, on its own port (default 8090), with only the matchmaking routes and the `play.html` page. The panel itself stays LAN-only; only this port is meant to be forwarded.
+- Players sign in with Steam (same OpenID code, own `mm_sessions` table and `cs2mm_session` cookie). Anyone with Steam can sign in; panel-banned SteamIDs can't.
+- Ratings: admin override, then Leetify's Premier (public API, `/v3/profile?steam64_id=`, optional `_leetify_key`), then the player's own number. Leetify data is never written to the database (their guidelines); it's cached in memory for 5 minutes. The page shows "Data provided by Leetify" and "View on Leetify" links.
+- Lobby (in memory): join, ready, presence by polling (gone after 90 s). Anyone ready can make teams from up to 10 ready players (those who sat out most go first). All 2-from-n splits are tried (126 for 10) and ranked by total-rating gap; players on the proposed teams can reshuffle (next-best split), start, or cancel.
+- FACEIT-style BO1 veto: captains are each team's highest rated; random first turn; alternate bans with a timer (random ban on timeout) until one map is left; the team that didn't ban last picks its side.
+- A free server from the pool (bridge installed, nobody on it, running preferred) is started if needed, gets `match.json` (players, start side, team group), a random `sv_password`, `cs2panel_match_reload`, then `game_type 0; game_mode 1; map …`. The bridge (1.1.0) kicks anyone not in the match, puts each player on their team and blocks switching (following teammates after half time), holds warmup until all are in, then ends it after 10 s. Players can also start without waiting.
+- The panel polls `cs2panel_match_status` every 10 s. On game over the scoreboard stays 20 s, then the match file is cleared, the bridge reloads and the server's own password is restored. A server nobody joins for 10 minutes, or that stops answering for a minute, is given back. Matches open when the panel restarts are marked abandoned and their servers unlocked.
+- `mm_matches` keeps a history (teams by SteamID and name, map, score, result) shown on the panel's Matchmaking page, where admins also change settings, set a player's rating, remove someone from the lobby or cancel a match.
+
 ---
 
 ## 17. Decisions log
@@ -585,6 +595,7 @@ Downloads the latest (or a specified) panel release, swaps it in, runs database 
 | 2026-11-06 | Bans are native again: the panel owns them, and the bundled CS2 Panel Bridge plugin (files + RCON, no networking) enforces them and supplies SteamIDs. SimpleAdmin is fully optional and gets its own tab for its bans and in-game admins. Supersedes the entry above about not needing a Bridge plugin. |
 | 2026-11-06 | Nothing outside the catalog knows about specific plugins. A catalog entry can declare a database integration (config file + how to fill it in); the panel applies it to any such plugin when the optional shared MariaDB (127.0.0.1 only, `setup-mariadb.sh`) is set up. |
 | 2026-11-05 | While a server's overlay is mounted, the panel writes through merged/ and never deletes there; changes that remove or replace files happen with the overlay unmounted. |
+| 2026-11-07 | Matchmaking site for live events with people Sune knows: player-led (no organiser step), ratings from Leetify with players' own numbers as fallback, FACEIT-style captain veto, open to anyone with the link. It runs on its own port so the panel stays LAN-only. |
 
 ## 18. Open questions
 

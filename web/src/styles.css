@@ -1473,3 +1473,11 @@ details.inline-form[open] > summary {
 .meter > i.warn {
   background: var(--fail);
 }
+
+/* ---------------------------------------------------------------- matchmaking (admin) */
+
+.mm-maps {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 6px 16px;
+}

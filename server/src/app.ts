@@ -43,6 +43,9 @@ import { Monitor, MACHINE, RANGES, type Range } from "./monitor/monitor.js";
 import { queryInfo, type A2sInfo } from "./game/a2s.js";
 import { DiscordNotifier, EVENT_GROUPS, type EventGroup } from "./notify/discord.js";
 import { BackupService } from "./backups/service.js";
+import { MmPlayerStore } from "./matchmaking/players.js";
+import { Matchmaking } from "./matchmaking/service.js";
+import { PublicSite, buildPublicApp } from "./matchmaking/public-app.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -63,6 +66,8 @@ export interface AppDeps {
   a2sQuery?: (port: number) => Promise<A2sInfo | null>;
   /** Replaces the waits before scheduled restarts (tests). */
   automationSleep?: (ms: number) => Promise<void>;
+  /** Replaces the clock and waits matchmaking uses (tests). */
+  matchmakingClock?: { now: () => number; sleep: (ms: number) => Promise<void>; random?: (n: number) => number };
 }
 
 export interface App {
@@ -82,6 +87,8 @@ export interface App {
     monitor: Monitor;
     discord: DiscordNotifier;
     backups: BackupService;
+    matchmaking: Matchmaking;
+    publicSite: PublicSite;
   };
 }
 
@@ -161,6 +168,42 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   servers.beforeStart.push((s) => bans.writeFor(s));
   plugins.afterApply.push((s, ids) => (ids.includes(BRIDGE_ID) ? bans.writeFor(s) : Promise.resolve()));
   if (deps.pluginCheckDelayMs !== undefined) updater.pluginCheckDelayMs = deps.pluginCheckDelayMs;
+
+  const mmPlayers = new MmPlayerStore(db);
+  const isBanned = (steamId: string) => !!bans.activeBan(steamId);
+  const matchmaking = new Matchmaking({
+    db,
+    settings,
+    box,
+    players: mmPlayers,
+    servers,
+    hasBridge: (id) => bans.hasBridge(id),
+    files,
+    host,
+    rcon,
+    humans: (id) => players.recentCounts(id)?.humans ?? null,
+    isBanned,
+    audit,
+    fetchFn,
+    ...(deps.matchmakingClock ?? {}),
+  });
+  const publicSite = new PublicSite(
+    () =>
+      buildPublicApp({
+        mm: matchmaking,
+        players: mmPlayers,
+        isBanned,
+        fetchFn,
+        webDir: config.webDir,
+        dev: config.dev,
+        logLevel: deps.logLevel ?? (config.dev ? "info" : "warn"),
+      }),
+    matchmaking,
+    config.host,
+    config.port,
+  );
+  matchmaking.onSettingsChanged = () => publicSite.sync();
+  mmPlayers.purgeExpired();
 
   users.ensureOwner(config.ownerSteamId);
   presets.seed();
@@ -1131,6 +1174,51 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     return { ok: true };
   });
 
+  // ------------------------------------------------------------- matchmaking (admin side)
+
+  app.get("/api/matchmaking", async (req) => {
+    requirePerm(req, "view");
+    const config = matchmaking.config();
+    const pool = new Set(config.serverIds);
+    return {
+      settings: config,
+      leetifyKeyHint: matchmaking.leetifyKeyHint(),
+      site: publicSite.status(),
+      servers: servers.listRecords().map((s) => ({ id: s.id, name: s.name, port: s.port, inPool: pool.has(s.id), hasBridge: bans.hasBridge(s.id) })),
+      maps: await mapMenus.installedMaps(),
+      state: matchmaking.state(null),
+      history: matchmaking.history(),
+    };
+  });
+
+  app.put("/api/matchmaking", async (req) => {
+    const user = requirePerm(req, "server.manage");
+    const body = z.object({ settings: z.unknown(), leetifyKey: z.string().max(300).nullable().optional() }).parse(req.body ?? {});
+    const settings = await matchmaking.saveConfig(body.settings, body.leetifyKey, user.id);
+    return { settings, site: publicSite.status(), leetifyKeyHint: matchmaking.leetifyKeyHint() };
+  });
+
+  app.put("/api/matchmaking/players/:steamId/rating", async (req) => {
+    const user = requirePerm(req, "players.moderate");
+    const { steamId } = z.object({ steamId: z.string() }).parse(req.params);
+    const { rating } = z.object({ rating: z.number().int().nullable() }).parse(req.body ?? {});
+    matchmaking.setOverride(steamId, rating, user.id);
+    return { ok: true };
+  });
+
+  app.post("/api/matchmaking/players/:steamId/remove", async (req) => {
+    const user = requirePerm(req, "players.moderate");
+    const { steamId } = z.object({ steamId: z.string() }).parse(req.params);
+    matchmaking.kick(steamId, user.id);
+    return { ok: true };
+  });
+
+  app.post("/api/matchmaking/matches/:id/cancel", async (req) => {
+    const user = requirePerm(req, "players.moderate");
+    await matchmaking.cancelMatch(null, idParam.parse(req.params).id, user.id);
+    return { ok: true };
+  });
+
   // ------------------------------------------------------------- frontend
 
   if (existsSync(config.webDir)) {
@@ -1154,6 +1242,6 @@ export async function buildApp(deps: AppDeps): Promise<App> {
 
   return {
     fastify: app,
-    services: { users, sessions, audit, servers, configs, updater, presets, plugins, players, bans, automation, monitor, discord, backups },
+    services: { users, sessions, audit, servers, configs, updater, presets, plugins, players, bans, automation, monitor, discord, backups, matchmaking, publicSite },
   };
 }

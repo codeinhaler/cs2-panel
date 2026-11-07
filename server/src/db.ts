@@ -185,6 +185,39 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX alerts_open ON alerts(resolved_at);
   `,
+  /* 9: matchmaking site for players */ `
+  CREATE TABLE mm_players (
+    steam_id         TEXT PRIMARY KEY,
+    name             TEXT,
+    avatar_url       TEXT,
+    self_rating      INTEGER,   -- Premier rating the player typed in
+    override_rating  INTEGER,   -- set by a panel admin; wins over everything
+    created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    last_seen_at     TEXT
+  );
+
+  CREATE TABLE mm_sessions (
+    token_hash    TEXT PRIMARY KEY,
+    steam_id      TEXT NOT NULL REFERENCES mm_players(steam_id) ON DELETE CASCADE,
+    created_at    INTEGER NOT NULL,
+    last_seen_at  INTEGER NOT NULL
+  );
+
+  -- Ratings are deliberately not stored here: Leetify's rules say not to keep their data.
+  CREATE TABLE mm_matches (
+    id          INTEGER PRIMARY KEY,
+    server_id   INTEGER REFERENCES servers(id) ON DELETE SET NULL,
+    map         TEXT,
+    team_a      TEXT NOT NULL,           -- JSON [{steamId, name}]
+    team_b      TEXT NOT NULL,
+    score_a     INTEGER,
+    score_b     INTEGER,
+    status      TEXT NOT NULL,           -- veto, side, starting, live, over, cancelled, abandoned
+    note        TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    ended_at    TEXT
+  );
+  `,
 ];
 
 export function openDb(file: string): Db {

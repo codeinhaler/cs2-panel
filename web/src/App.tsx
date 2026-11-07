@@ -15,6 +15,7 @@ import { MonitorPage } from "./pages/Monitor";
 import { NotificationsPage } from "./pages/Notifications";
 import { BackupsPage } from "./pages/Backups";
 import { SharedPage } from "./pages/Shared";
+import { MatchmakingPage } from "./pages/Matchmaking";
 
 export function App() {
   const [me, setMe] = useState<Me | null | "loading">("loading");
@@ -49,6 +50,7 @@ export function App() {
             <Route path="notifications" element={<NotificationsPage />} />
             <Route path="backups" element={<BackupsPage />} />
             <Route path="shared" element={<SharedPage />} />
+            <Route path="matchmaking" element={<MatchmakingPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         ) : (
@@ -94,6 +96,9 @@ function Shell() {
         </NavLink>
         <NavLink to="/shared" className="nav-link">
           Shared settings
+        </NavLink>
+        <NavLink to="/matchmaking" className="nav-link">
+          Matchmaking
         </NavLink>
         <NavLink to="/backups" className="nav-link">
           Backups

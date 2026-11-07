@@ -50,6 +50,17 @@ The design is in [docs/DESIGN.md](docs/DESIGN.md).
 - **Shared settings** (Shared settings page): a hostname prefix, server-browser tags and any cvars for every server. The panel writes them into `cfg/cs2panel_shared.cfg` in each server and runs it at the top of `server.cfg`, so a server's own `server.cfg` can override any shared value; a server can also opt out completely. Saving applies to running servers right away. Passwords, hostname, game mode and map commands are refused there because the panel sets them.
 - Automatic actions show up in Activity as "System", with the reason.
 
+## Matchmaking site
+
+For CS evenings: players open one web page, sign in with Steam, and get put in even teams.
+
+- **Settings** are on the panel's **Matchmaking** page: switch the site on, pick its port (default 8090), the servers matches may use, and the map pool. The site is a separate web server with only the matchmaking page on it, so you can forward its port on your router while the panel itself stays on your network. Forward the port as **TCP**.
+- **Ratings**: each player's Premier rating comes from [Leetify](https://leetify.com) when Leetify knows them; otherwise they type in their own. You can set anyone's rating on the panel. A Leetify API key (optional, from leetify.com/app/developer) gives higher limits. Leetify's data isn't stored, as their rules ask.
+- **Teams**: players join the lobby and tick Ready. Anyone can press **Make teams**: up to 10 ready players are split the most even way (whoever sat out last time goes first). The players on those teams can ask for other teams, cancel, or go.
+- **Map veto like FACEIT**: the best-rated player on each team is captain. Captains take turns banning maps until one is left; a random map is banned if time runs out. The team that didn't ban last picks CT or T.
+- **The server**: a free server from the ones you picked is started if needed, loads the map in Competitive with a one-off password, and only lets the match's players in, each on their own team. Players get a **Join the server** button. Warmup lasts until everyone is in (or someone presses "Start without waiting"). When the match ends, the server is opened again with its own password.
+- Servers used for matches need CounterStrikeSharp installed (the CS2 Panel Bridge comes with it). After updating the panel, update the bridge on those servers from their Plugins tab so they have the match support.
+
 ## Installing on the server
 
 You need Debian 13 (x86_64), root access, and about 70 GB free disk space.

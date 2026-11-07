@@ -68,6 +68,21 @@ function describe(e: AuditEntry): string {
       return d.enabled ? `set nightly backups at ${str("time")}, keeping ${str("keep")}` : "turned off nightly backups";
     case "backup.failed":
       return `couldn't back up ${str("what")}: ${str("error")}`;
+    case "matchmaking.settings":
+      return d.enabled ? `changed the matchmaking settings (site open on port ${str("port")})` : "changed the matchmaking settings (site closed)";
+    case "matchmaking.rating":
+      return d.rating === null ? `cleared the matchmaking rating of ${str("name") || str("steamId")}` : `set the matchmaking rating of ${str("name") || str("steamId")} to ${str("rating")}`;
+    case "matchmaking.kick":
+      return `removed ${str("name") || str("steamId")} from the matchmaking lobby`;
+    case "matchmaking.cancel":
+      return `cancelled matchmaking match ${str("match")}`;
+    case "matchmaking.match":
+      return `reserved the server for matchmaking match ${str("match")} (${str("players")} players)`;
+    case "matchmaking.finished":
+      return `finished matchmaking match ${str("match")} on ${str("map")}${d.score ? ` (${str("score")})` : ""}`;
+    case "matchmaking.cancelled":
+    case "matchmaking.abandoned":
+      return `ended matchmaking match ${str("match")}: ${str("reason")}`;
     case "notifications.update":
       return d.webhookSet ? "changed the Discord notification settings" : "turned off Discord notifications";
     case "alert.raised":

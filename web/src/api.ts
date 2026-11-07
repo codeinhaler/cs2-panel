@@ -388,6 +388,72 @@ export class ApiError extends Error {
   }
 }
 
+// ------------------------------------------------------------- matchmaking
+
+export interface MatchmakingSettings {
+  enabled: boolean;
+  port: number;
+  title: string;
+  serverIds: number[];
+  maps: string[];
+  gameAddress: string;
+  vetoSeconds: number;
+}
+
+export interface MmRating {
+  value: number | null;
+  source: "admin" | "leetify" | "self" | "none";
+  note: string | null;
+  pending?: boolean;
+}
+
+export interface MmMember {
+  steamId: string;
+  name: string;
+  avatarUrl: string | null;
+  rating: MmRating;
+}
+
+export interface MmMatch {
+  id: number;
+  phase: "veto" | "side" | "starting" | "live" | "over" | "cancelled" | "abandoned";
+  teamA: MmMember[];
+  teamB: MmMember[];
+  map: string | null;
+  serverName: string | null;
+  status: string;
+  connected: number;
+  expected: number;
+  score: { a: number; b: number } | null;
+}
+
+export interface MatchmakingInfo {
+  settings: MatchmakingSettings;
+  leetifyKeyHint: string | null;
+  site: { listening: boolean; port: number | null; error: string | null };
+  servers: { id: number; name: string; port: number; inPool: boolean; hasBridge: boolean }[];
+  maps: string[];
+  state: {
+    lobby: (MmMember & { status: "ready" | "away" | "in-match"; leetifyUrl: string })[];
+    draft: { id: number; teamA: MmMember[]; teamB: MmMember[] } | null;
+    matches: MmMatch[];
+    freeServers: number;
+  };
+  history: {
+    id: number;
+    serverId: number | null;
+    map: string | null;
+    teamA: { steamId: string; name: string }[];
+    teamB: { steamId: string; name: string }[];
+    scoreA: number | null;
+    scoreB: number | null;
+    status: string;
+    note: string | null;
+    createdAt: string;
+    endedAt: string | null;
+  }[];
+}
+
 async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
     method,
@@ -432,6 +498,15 @@ export const api = {
   workshop: (id: string, kind: "map" | "collection") => request<WorkshopInfo>("GET", `/api/workshop/${id}?kind=${kind}`),
   shared: () => request<{ shared: SharedConfig; preview: { id: number; name: string; hostname: string; uses: boolean }[] }>("GET", "/api/shared"),
   saveShared: (c: SharedConfig) => request<{ shared: SharedConfig; liveOn: string[] }>("PUT", "/api/shared", c),
+  matchmaking: () => request<MatchmakingInfo>("GET", "/api/matchmaking"),
+  saveMatchmaking: (settings: MatchmakingSettings, leetifyKey?: string | null) =>
+    request<{ settings: MatchmakingSettings; site: MatchmakingInfo["site"]; leetifyKeyHint: string | null }>("PUT", "/api/matchmaking", {
+      settings,
+      ...(leetifyKey !== undefined ? { leetifyKey } : {}),
+    }),
+  mmSetRating: (steamId: string, rating: number | null) => request<{ ok: true }>("PUT", `/api/matchmaking/players/${steamId}/rating`, { rating }),
+  mmRemove: (steamId: string) => request<{ ok: true }>("POST", `/api/matchmaking/players/${steamId}/remove`, {}),
+  mmCancel: (id: number) => request<{ ok: true }>("POST", `/api/matchmaking/matches/${id}/cancel`, {}),
   backups: () => request<{ backups: BackupInfo[]; settings: BackupSettings; totalBytes: number }>("GET", "/api/backups"),
   backupServer: (id: number) => request<{ backup: BackupInfo }>("POST", `/api/servers/${id}/backups`, {}),
   backupPanel: () => request<{ backup: BackupInfo }>("POST", "/api/backups/panel", {}),
