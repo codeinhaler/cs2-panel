@@ -35,6 +35,7 @@ export interface Me {
   user: User;
   permissions: Permission[];
   dev: boolean;
+  version: string;
 }
 
 export type ServiceState = "active" | "activating" | "deactivating" | "inactive" | "failed" | "unknown";

@@ -74,11 +74,11 @@ describe("validation", () => {
     expect(slugify("a".repeat(40))).toHaveLength(32);
   });
 
-  it("checks ports against other servers with a margin", () => {
+  it("checks ports against other servers: only the exact port counts", () => {
     const others = [{ port: 27015, name: "One" }];
     expect(portProblem(27025, others)).toBeNull();
     expect(portProblem(27015, others)).toMatch(/already used by "One"/);
-    expect(portProblem(27019, others)).toMatch(/too close/);
+    expect(portProblem(27016, others)).toBeNull();
     expect(portProblem(27021, others)).toBeNull();
     expect(portProblem(80, [])).toMatch(/between 1024/);
     expect(portProblem(27015.5, [])).toMatch(/whole number/);

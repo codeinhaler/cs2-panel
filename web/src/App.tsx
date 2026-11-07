@@ -84,17 +84,20 @@ function Shell() {
         <NavLink to="/activity" className="nav-link">
           Activity
         </NavLink>
-        <NavLink to="/preferences" className="nav-link">
-          Preferences
-        </NavLink>
+        <div className="sidebar-version" title={me.version === "dev" ? "Running from source" : `Panel release ${me.version}`}>
+          CS2 Panel {me.version === "dev" ? "(development)" : me.version}
+        </div>
         <div className="sidebar-foot">
+          <NavLink to="/preferences" className="icon-btn" aria-label="Preferences" title="Preferences">
+            <GearIcon />
+          </NavLink>
           {me.user.avatarUrl ? <img src={me.user.avatarUrl} alt="" /> : <span className="avatar" aria-hidden="true" />}
           <div className="who">
             <div>{name}</div>
             <div className="role">{ROLE_NAMES[me.user.role]}</div>
           </div>
-          <button className="btn small ghost" onClick={logout} style={{ marginLeft: "auto" }}>
-            Sign out
+          <button className="icon-btn" onClick={logout} aria-label="Sign out" title="Sign out" style={{ marginLeft: "auto" }}>
+            <SignOutIcon />
           </button>
         </div>
       </nav>
@@ -107,5 +110,24 @@ function Shell() {
         <Outlet />
       </main>
     </div>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
+function SignOutIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <path d="M16 17l5-5-5-5" />
+      <path d="M21 12H9" />
+    </svg>
   );
 }

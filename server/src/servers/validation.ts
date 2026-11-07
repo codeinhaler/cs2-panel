@@ -4,8 +4,6 @@ import { z } from "zod";
 export const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 export const MIN_PORT = 1024;
 export const MAX_PORT = 65535;
-/** A CS2 server may open auxiliary ports right next to its game port. */
-export const PORT_MARGIN = 5;
 
 /** Derives a slug from a display name: "Retakes #1" → "retakes-1". */
 export function slugify(name: string): string {
@@ -29,14 +27,8 @@ export function portProblem(port: number, otherPorts: { port: number; name: stri
   if (!Number.isInteger(port) || port < MIN_PORT || port > MAX_PORT) {
     return `Port must be a whole number between ${MIN_PORT} and ${MAX_PORT}.`;
   }
-  for (const o of otherPorts) {
-    if (Math.abs(o.port - port) <= PORT_MARGIN) {
-      return o.port === port
-        ? `Port ${port} is already used by "${o.name}".`
-        : `Port ${port} is too close to "${o.name}" on ${o.port}. Keep at least ${PORT_MARGIN + 1} ports between servers.`;
-    }
-  }
-  return null;
+  const taken = otherPorts.find((o) => o.port === port);
+  return taken ? `Port ${port} is already used by "${taken.name}".` : null;
 }
 
 // Values that end up in launch arguments or cfg files are restricted to safe characters.

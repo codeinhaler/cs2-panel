@@ -210,7 +210,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
 
   app.get("/api/me", async (req) => {
     const user = requireUser(req);
-    return { user, permissions: permissionsFor(user.role), dev: config.dev };
+    return { user, permissions: permissionsFor(user.role), dev: config.dev, version: config.version ?? "dev" };
   });
 
   app.put("/api/me/prefs", async (req) => {

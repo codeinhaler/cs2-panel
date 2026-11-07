@@ -182,7 +182,7 @@ RestartSec=10
 Ports are **set manually** when a server is created. The panel validates the chosen port before saving:
 
 - It must be in the range 1024–65535.
-- It must not be used by another server in the database (including a ±5 margin, since a CS2 server may open auxiliary ports next to its game port).
+- It must not be used by another server in the database.
 - It must not be bound by any process on the host.
 
 The form lists the ports already in use, so picking a free one is easy. A port can be changed later while the server is stopped. The conventional layout is 27015, 27025, 27035, …

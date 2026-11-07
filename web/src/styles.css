@@ -181,8 +181,13 @@ code,
   color: var(--accent);
 }
 
-.sidebar-foot {
+.sidebar-version {
   margin-top: auto;
+  padding: 0 10px 8px;
+  color: var(--ink-faint);
+  font-size: 0.78rem;
+}
+.sidebar-foot {
   border-top: 1px solid var(--line-soft);
   padding: 14px 10px 0;
   display: flex;
@@ -200,6 +205,28 @@ code,
 }
 .sidebar-foot .who {
   min-width: 0;
+}
+.icon-btn {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: var(--r-sm);
+  color: var(--ink-soft);
+}
+.icon-btn:hover {
+  background: var(--panel-sunk);
+  color: var(--ink);
+}
+.icon-btn.active {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 .sidebar-foot .who div {
   overflow: hidden;

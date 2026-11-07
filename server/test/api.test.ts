@@ -194,12 +194,12 @@ describe("servers", () => {
     const pid = await presetId(c, "casual");
     expect((await call(c, "POST", "/api/servers", { name: "A", presetId: pid, port: 27015 })).status).toBe(200);
     expect((await call(c, "POST", "/api/servers", { name: "B", presetId: pid, port: 27015 })).body.error).toMatch(/already used by "A"/);
-    expect((await call(c, "POST", "/api/servers", { name: "B", presetId: pid, port: 27018 })).body.error).toMatch(/too close/);
+    expect((await call(c, "POST", "/api/servers", { name: "Next door", presetId: pid, port: 27016 })).status).toBe(200);
     host.busyPorts.add(27045);
     expect((await call(c, "POST", "/api/servers", { name: "B", presetId: pid, port: 27045 })).body.error).toMatch(/another program/);
     expect((await call(c, "GET", "/api/ports/check?port=27025")).body.problem).toBeNull();
     expect((await call(c, "POST", "/api/servers", { name: "B", presetId: pid, port: 27025 })).status).toBe(200);
-    expect((await call(c, "GET", "/api/host")).body.usedPorts.map((p: { port: number }) => p.port)).toEqual([27015, 27025]);
+    expect((await call(c, "GET", "/api/host")).body.usedPorts.map((p: { port: number }) => p.port)).toEqual([27015, 27016, 27025]);
   });
 
   it("rejects duplicate short names and unsafe input", async () => {

@@ -29,7 +29,12 @@ const ConfigSchema = z.object({
   dev: z.boolean().default(false),
 });
 
-export type Config = z.infer<typeof ConfigSchema> & { webDir: string; bridgeDir: string };
+export type Config = z.infer<typeof ConfigSchema> & {
+  webDir: string;
+  bridgeDir: string;
+  /** The release tag this panel was built from (from the VERSION file in the release), or "dev". */
+  version?: string;
+};
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -60,5 +65,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   // In a release, the frontend sits next to server.mjs in ./web.
   const webDir = parsed.webDir ?? path.resolve(here, "web");
   const bridgeDir = parsed.bridgeDir ?? path.resolve(here, "bridge");
-  return { ...parsed, webDir, bridgeDir };
+  let version = "dev";
+  try {
+    version = readFileSync(path.resolve(here, "VERSION"), "utf8").trim() || "dev";
+  } catch {
+    /* running from source */
+  }
+  return { ...parsed, webDir, bridgeDir, version };
 }
