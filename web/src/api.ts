@@ -217,6 +217,46 @@ export interface WorkshopInfo {
   message: string;
 }
 
+export type MetricRange = "1h" | "6h" | "24h" | "7d" | "30d" | "90d";
+
+export interface MetricPoint {
+  t: number;
+  cpu: number | null;
+  cpuMax: number | null;
+  mem: number | null;
+  memTotal: number | null;
+  players: number | null;
+  bots: number | null;
+  diskUsed: number | null;
+  diskTotal: number | null;
+  netRx: number | null;
+  netTx: number | null;
+}
+
+export interface MetricSeries {
+  from: number;
+  to: number;
+  bucketMs: number;
+  points: MetricPoint[];
+}
+
+export interface PanelAlert {
+  id: number;
+  kind: string;
+  serverId: number | null;
+  serverName: string | null;
+  message: string;
+  startedAt: string;
+  resolvedAt: string | null;
+}
+
+export interface MonitorOverview {
+  latest: Record<string, MetricPoint>;
+  alerts: PanelAlert[];
+  cpuCount: number;
+  servers: { id: number; name: string; cpu: number }[];
+}
+
 export interface PluginPage {
   pluginId: string;
   label: string;
@@ -350,6 +390,9 @@ export const api = {
   host: () => request<HostInfo>("GET", "/api/host"),
   command: (id: number, body: { action: string; [k: string]: unknown }) => request<{ output: string }>("POST", `/api/servers/${id}/commands`, body),
   workshop: (id: string, kind: "map" | "collection") => request<WorkshopInfo>("GET", `/api/workshop/${id}?kind=${kind}`),
+  monitor: () => request<MonitorOverview>("GET", "/api/monitor"),
+  metrics: (scope: "machine" | number, range: MetricRange) => request<MetricSeries>("GET", `/api/metrics?scope=${scope}&range=${range}`),
+  alerts: (all = false) => request<{ alerts: PanelAlert[] }>("GET", `/api/alerts${all ? "?all=1" : ""}`),
   installedMaps: () => request<{ maps: string[] }>("GET", "/api/maps"),
   presets: () => request<{ presets: Preset[] }>("GET", "/api/presets"),
   createPreset: (p: PresetInput) => request<{ preset: Preset }>("POST", "/api/presets", p),

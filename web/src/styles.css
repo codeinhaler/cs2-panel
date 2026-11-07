@@ -7,6 +7,15 @@
 @import "@fontsource/jetbrains-mono/400.css";
 
 :root {
+  /* Chart series, fixed order, validated for colour vision deficiency (dataviz reference palette). */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #6250d6;
+  --series-8: #e34948;
   --paper: #eef1f4;
   --panel: #ffffff;
   --panel-sunk: #f5f7f9;
@@ -41,6 +50,14 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
     --paper: #121820;
     --panel: #19212b;
     --panel-sunk: #151c25;
@@ -1312,4 +1329,147 @@ details.inline-form[open] > summary {
 }
 .time-select select {
   width: auto;
+}
+
+/* Charts */
+.chart-card h3 {
+  font-size: 0.95rem;
+  margin: 0 0 2px;
+}
+.chart-card .chart-sub {
+  color: var(--ink-faint);
+  font-size: 0.8rem;
+  margin: 0 0 8px;
+}
+.chart {
+  position: relative;
+  width: 100%;
+  touch-action: pan-y;
+}
+.chart svg {
+  display: block;
+  width: 100%;
+  overflow: visible;
+}
+.chart .grid {
+  stroke: var(--line-soft);
+  stroke-width: 1;
+}
+.chart .axis-label {
+  fill: var(--ink-faint);
+  font-size: 11px;
+}
+.chart .end-label {
+  fill: var(--ink-soft);
+  font-size: 11px;
+}
+.chart .crosshair {
+  stroke: var(--ink-faint);
+  stroke-width: 1;
+}
+.chart-tip {
+  position: absolute;
+  top: 0;
+  pointer-events: none;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 6px 8px;
+  font-size: 0.8rem;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+  white-space: nowrap;
+  z-index: 2;
+}
+.chart-tip .tip-time {
+  color: var(--ink-faint);
+  margin-bottom: 2px;
+}
+.chart-tip .tip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+}
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0 0 6px;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+.chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.swatch-line {
+  display: inline-block;
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+}
+.chart-empty {
+  color: var(--ink-faint);
+  font-size: 0.85rem;
+  padding: 24px 0;
+  text-align: center;
+}
+.chart-grid > .panel {
+  margin: 0;
+}
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 16px;
+}
+@media (max-width: 600px) {
+  .chart-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.range-picker {
+  display: inline-flex;
+}
+.stat-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.stat-tile {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md, 10px);
+  padding: 12px 14px;
+}
+.stat-tile .label {
+  color: var(--ink-faint);
+  font-size: 0.8rem;
+}
+.stat-tile .value {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.stat-tile .sub {
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+}
+.meter {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--panel-sunk);
+  margin-top: 8px;
+  overflow: hidden;
+}
+.meter > i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--series-1);
+}
+.meter > i.warn {
+  background: var(--fail);
 }

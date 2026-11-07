@@ -1,3 +1,4 @@
+import type { MachineStats, ServiceStats } from "./stats.js";
 import { mkdirSync, writeFileSync, existsSync, rmSync, renameSync, symlinkSync, lstatSync } from "node:fs";
 import path from "node:path";
 import type { Cs2ctlVerb, Host, LogStream, ServiceStatus } from "./host.js";
@@ -64,6 +65,53 @@ export class FakeHost implements Host {
       }
     }
     return "";
+  }
+
+  /** Simulated load: share of one core each server uses (0–1), memory, and crash restarts. Tests change these. */
+  readonly cpuShare = new Map<string, number>();
+  readonly memBytes = new Map<string, number>();
+  readonly crashRestarts = new Map<string, number>();
+  machine = { cpuBusyShare: 0.25, memUsedShare: 0.4, diskUsedShare: 0.3 };
+  private cpuNs = new Map<string, { at: number; ns: number }>();
+  private machineCounters = { at: Date.now(), busy: 0, total: 0, rx: 0, tx: 0 };
+  /** Lets tests move time forward for the counters. */
+  clock: () => number = Date.now;
+
+  async serviceStats(slug: string): Promise<ServiceStats> {
+    const running = (await this.serviceStatus(slug)).state === "active";
+    const now = this.clock();
+    const prev = this.cpuNs.get(slug) ?? { at: now, ns: 0 };
+    const ns = prev.ns + (running ? (now - prev.at) * 1e6 * (this.cpuShare.get(slug) ?? 0.3) : 0);
+    this.cpuNs.set(slug, { at: now, ns });
+    return {
+      cpuNs: ns,
+      memBytes: running ? (this.memBytes.get(slug) ?? 1.2 * 1024 ** 3) : null,
+      restarts: this.crashRestarts.get(slug) ?? 0,
+    };
+  }
+
+  async machineStats(): Promise<MachineStats> {
+    const now = this.clock();
+    const c = this.machineCounters;
+    const dt = Math.max(0, now - c.at);
+    c.total += dt;
+    c.busy += dt * this.machine.cpuBusyShare;
+    c.rx += dt * 50; // ~50 kB/s
+    c.tx += dt * 120;
+    c.at = now;
+    const memTotal = 16 * 1024 ** 3;
+    const diskTotal = 320 * 1000 ** 3;
+    return {
+      cpuBusy: c.busy,
+      cpuTotal: c.total,
+      cpuCount: 4,
+      memTotal,
+      memAvailable: memTotal * (1 - this.machine.memUsedShare),
+      diskTotal,
+      diskFree: diskTotal * (1 - this.machine.diskUsedShare),
+      netRx: c.rx,
+      netTx: c.tx,
+    };
   }
 
   /** What Steam reports as the newest public build (tests change it to simulate a CS2 update). */

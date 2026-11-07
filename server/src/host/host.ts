@@ -1,3 +1,4 @@
+import type { MachineStats, ServiceStats } from "./stats.js";
 /**
  * Everything that touches systemd, sudo or the network stack goes through this
  * interface, so the rest of the panel can run against a fake in development
@@ -27,6 +28,10 @@ export interface Host {
   /** SteamCMD's current app info for CS2 (raw VDF text), to compare build IDs. */
   steamAppInfo(): Promise<string>;
   serviceStatus(slug: string): Promise<ServiceStatus>;
+  /** CPU/memory/restart counters of a server's service, for the monitor. */
+  serviceStats(slug: string): Promise<ServiceStats>;
+  /** Whole-machine CPU, memory, disk and network counters. */
+  machineStats(): Promise<MachineStats>;
   /** True if the server's overlay is mounted on its merged/ dir. */
   isMounted(slug: string): Promise<boolean>;
   /** True if anything on the host is listening on this UDP or TCP port. */

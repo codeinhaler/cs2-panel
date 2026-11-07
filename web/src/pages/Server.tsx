@@ -9,6 +9,8 @@ import { PluginsTab } from "./server/Plugins";
 import { PlayersTab } from "./server/Players";
 import { ModerationTab } from "./server/Moderation";
 import { CommandsTab } from "./server/Commands";
+import { ServerCharts } from "../components/ServerCharts";
+import { ServerAlerts } from "../components/ServerAlerts";
 import { mapLabel } from "../components/MapPicker";
 import { ActivityList } from "./Activity";
 
@@ -105,6 +107,7 @@ function Overview({ server: s }: { server: Server }) {
   return (
     <>
       <NotAnsweringNotice server={s} consoleHref={`/servers/${s.id}/console`} />
+      <ServerAlerts serverId={s.id} />
       <div className="panel">
         <div className="unit-slots" style={{ border: 0, padding: 0, maxWidth: 420, marginBottom: 20 }}>
           <Slots server={s} />
@@ -156,6 +159,8 @@ function Overview({ server: s }: { server: Server }) {
           {s.password ? <> and the join password</> : null}.
         </p>
       </div>
+
+      <ServerCharts serverId={s.id} core={s.cpu} />
 
       <div className="panel">
         <h2 style={{ marginBottom: 12 }}>Recent activity</h2>

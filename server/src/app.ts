@@ -38,6 +38,8 @@ import { Automation } from "./automation/index.js";
 import { humanCounter } from "./automation/humans.js";
 import { UpdateWatcher, type UpdatePolicy } from "./automation/updates.js";
 import { RestartScheduler } from "./automation/restarts.js";
+import { Monitor, MACHINE, RANGES, type Range } from "./monitor/monitor.js";
+import { queryInfo, type A2sInfo } from "./game/a2s.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -54,6 +56,8 @@ export interface AppDeps {
   logLevel?: string;
   /** Seconds-long waits are skipped in tests. */
   pluginCheckDelayMs?: number;
+  /** Replaces the Steam server query the monitor uses (tests). */
+  a2sQuery?: (port: number) => Promise<A2sInfo | null>;
   /** Replaces the waits before scheduled restarts (tests). */
   automationSleep?: (ms: number) => Promise<void>;
 }
@@ -72,6 +76,7 @@ export interface App {
     players: PlayerService;
     bans: BanService;
     automation: Automation;
+    monitor: Monitor;
   };
 }
 
@@ -117,9 +122,11 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   });
   const settings = new Settings(db);
   const humans = humanCounter(players);
+  const monitor = new Monitor({ db, host, servers: () => servers.listRecords(), query: deps.a2sQuery ?? ((port) => queryInfo(port)), audit });
   const automation = new Automation(
     new UpdateWatcher(settings, files, host, updater, gate, serverStore, humans, audit),
     new RestartScheduler(db, settings, servers, host, gate, updater, humans, rcon, audit, deps.automationSleep),
+    monitor,
   );
   const mapMenus = new MapMenuService(configs, plugins, files.baseDir);
   const bans = new BanService(db, servers, plugins, files, host, rcon, audit);
@@ -877,6 +884,36 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     return { auto: await automation.updates.status() };
   });
 
+  // ---------------------------------------------------------------- monitor
+
+  app.get("/api/monitor", async (req) => {
+    requirePerm(req, "view");
+    return {
+      latest: monitor.latest(),
+      alerts: monitor.alerts(),
+      cpuCount: host.cpuCount(),
+      servers: servers.listRecords().map((s) => ({ id: s.id, name: s.name, cpu: s.cpu })),
+    };
+  });
+
+  app.get("/api/metrics", async (req) => {
+    requirePerm(req, "view");
+    const q = z
+      .object({
+        scope: z.union([z.literal("machine"), z.coerce.number().int().positive()]),
+        range: z.enum(Object.keys(RANGES) as [Range, ...Range[]]).default("24h"),
+      })
+      .parse(req.query);
+    if (q.scope !== "machine") servers.require(q.scope);
+    return monitor.series(q.scope === "machine" ? MACHINE : q.scope, q.range);
+  });
+
+  app.get("/api/alerts", async (req) => {
+    requirePerm(req, "view");
+    const { all } = z.object({ all: z.enum(["0", "1"]).default("0") }).parse(req.query);
+    return { alerts: monitor.alerts(all === "1") };
+  });
+
   app.get("/api/servers/:id/schedule", async (req) => {
     requirePerm(req, "view");
     const { id } = idParam.parse(req.params);
@@ -927,6 +964,6 @@ export async function buildApp(deps: AppDeps): Promise<App> {
 
   return {
     fastify: app,
-    services: { users, sessions, audit, servers, configs, updater, presets, plugins, players, bans, automation },
+    services: { users, sessions, audit, servers, configs, updater, presets, plugins, players, bans, automation, monitor },
   };
 }

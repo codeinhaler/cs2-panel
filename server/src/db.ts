@@ -156,6 +156,35 @@ const MIGRATIONS: string[] = [
   ALTER TABLE presets ADD COLUMN created_by INTEGER REFERENCES users(id);
   ALTER TABLE presets ADD COLUMN updated_at TEXT;
   `,
+  /* 8: performance monitor and warnings */ `
+  CREATE TABLE metrics (
+    ts          INTEGER NOT NULL,           -- ms since epoch
+    scope       INTEGER NOT NULL,           -- 0 = the machine, otherwise a server id
+    res         INTEGER NOT NULL DEFAULT 0, -- 0 = one sample a minute, 1 = hourly average
+    cpu         REAL,                       -- servers: % of one core; machine: % of all cores
+    cpu_max     REAL,
+    mem         INTEGER,
+    mem_total   INTEGER,
+    players     INTEGER,
+    bots        INTEGER,
+    disk_used   INTEGER,
+    disk_total  INTEGER,
+    net_rx      REAL,                       -- bytes per second
+    net_tx      REAL
+  );
+  CREATE INDEX metrics_scope ON metrics(scope, res, ts);
+
+  CREATE TABLE alerts (
+    id           INTEGER PRIMARY KEY,
+    kind         TEXT NOT NULL,
+    server_id    INTEGER REFERENCES servers(id),
+    message      TEXT NOT NULL,
+    details      TEXT NOT NULL DEFAULT '{}',
+    started_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_at  TEXT
+  );
+  CREATE INDEX alerts_open ON alerts(resolved_at);
+  `,
 ];
 
 export function openDb(file: string): Db {

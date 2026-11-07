@@ -1,3 +1,4 @@
+import type { Monitor } from "../monitor/monitor.js";
 import type { RestartScheduler } from "./restarts.js";
 import type { UpdateWatcher } from "./updates.js";
 
@@ -9,12 +10,14 @@ export class Automation {
   constructor(
     readonly updates: UpdateWatcher,
     readonly restarts: RestartScheduler,
+    readonly monitor: Monitor | null = null,
   ) {}
 
   async tick(now = new Date()): Promise<void> {
     if (this.running) return;
     this.running = true;
     try {
+      await this.monitor?.sample(now.getTime()).catch(() => undefined);
       // Updates first: an update restarts every server anyway.
       await this.updates.tick(now).catch(() => undefined);
       await this.restarts.tick(now).catch(() => undefined);

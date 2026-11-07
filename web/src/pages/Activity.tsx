@@ -52,6 +52,12 @@ function describe(e: AuditEntry): string {
       if (d.action === "bot-quota") return `set the bot count to ${str("count")}`;
       return names[str("action")] ?? `sent ${str("action")}`;
     }
+    case "alert.raised":
+      return `warned: ${str("message")}`;
+    case "alert.cleared":
+      return `cleared the warning: ${str("message")}`;
+    case "server.crashed":
+      return `noticed the server crashed; systemd restarted it`;
     case "preset.create":
       return d.fromServer ? `saved ${str("fromServer")} as the preset "${str("name")}"` : `created the preset "${str("name")}"`;
     case "preset.update":

@@ -1,3 +1,4 @@
+import { parseServiceStats, readMachineStats, type MachineStats, type ServiceStats } from "./stats.js";
 import { execFile, spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
@@ -77,6 +78,19 @@ export class SystemHost implements Host {
     } catch {
       return { state: "unknown", pid: null, since: null };
     }
+  }
+
+  async serviceStats(slug: string): Promise<ServiceStats> {
+    try {
+      const { stdout } = await execFileP("systemctl", ["show", `cs2@${slug}.service`, "--property=CPUUsageNSec,MemoryCurrent,NRestarts"]);
+      return parseServiceStats(stdout);
+    } catch {
+      return { cpuNs: null, memBytes: null, restarts: 0 };
+    }
+  }
+
+  machineStats(): Promise<MachineStats> {
+    return readMachineStats(this.cs2Root);
   }
 
   async isPortInUse(port: number): Promise<boolean> {
