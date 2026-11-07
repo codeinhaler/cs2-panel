@@ -177,7 +177,8 @@ describe("monitor", () => {
     expect(hourly.n).toBeGreaterThanOrEqual(2);
     const long = (await call(c, "GET", `/api/metrics?scope=${s.id}&range=30d`)).body;
     expect(long.bucketMs).toBeGreaterThanOrEqual(3_600_000);
-    expect(long.points[0].cpu).toBeCloseTo(40, 0);
+    // The very first sample has no CPU yet (it is measured between samples), so skip an hour holding only that one.
+    expect(long.points.find((p: { cpu: number | null }) => p.cpu !== null).cpu).toBeCloseTo(40, 0);
   });
 
   it("counts people and bots from the server's own status when Steam's query gets them wrong", async () => {
