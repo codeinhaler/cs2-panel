@@ -327,6 +327,7 @@ export const api = {
     request<{ entries: AuditEntry[] }>("GET", `/api/audit?${q(params)}`),
 
   host: () => request<HostInfo>("GET", "/api/host"),
+  command: (id: number, body: { action: string; [k: string]: unknown }) => request<{ output: string }>("POST", `/api/servers/${id}/commands`, body),
   installedMaps: () => request<{ maps: string[] }>("GET", "/api/maps"),
   presets: () => request<{ presets: Preset[] }>("GET", "/api/presets"),
   checkPort: (port: number, serverId?: number) =>

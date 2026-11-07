@@ -8,6 +8,7 @@ import { SettingsTab } from "./server/Settings";
 import { PluginsTab } from "./server/Plugins";
 import { PlayersTab } from "./server/Players";
 import { ModerationTab } from "./server/Moderation";
+import { CommandsTab } from "./server/Commands";
 import { mapLabel } from "../components/MapPicker";
 import { ActivityList } from "./Activity";
 
@@ -57,6 +58,9 @@ export function ServerPage() {
         <NavLink to={`/servers/${id}/console`} className="tab">
           Console
         </NavLink>
+        <NavLink to={`/servers/${id}/commands`} className="tab">
+          Commands
+        </NavLink>
         <NavLink to={`/servers/${id}/configs`} className="tab">
           Config files
         </NavLink>
@@ -85,6 +89,7 @@ export function ServerPage() {
           }
         />
         <Route path="plugins" element={<PluginsTab server={s} />} />
+        <Route path="commands" element={<CommandsTab server={s} />} />
         <Route path="players" element={<PlayersTab server={s} bridge={data.bridge} />} />
         {data.pluginPages.map((p) => (
           <Route key={p.pluginId} path={`plugin/${p.pluginId}`} element={<ModerationTab server={s} label={p.label} />} />

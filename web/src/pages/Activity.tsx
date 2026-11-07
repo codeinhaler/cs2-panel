@@ -35,6 +35,23 @@ function describe(e: AuditEntry): string {
       return d.trigger ? `restarted the server (${str("trigger")})` : "restarted the server";
     case "server.restart.failed":
       return `couldn't restart the server (${str("trigger")}): ${str("error")}`;
+    case "server.command": {
+      const names: Record<string, string> = {
+        "restart-game": "restarted the game",
+        "warmup-start": "started warmup",
+        "warmup-end": "ended warmup",
+        pause: "paused the match",
+        unpause: "resumed the match",
+        "swap-teams": "swapped teams",
+        "scramble-teams": "scrambled teams",
+        "bot-kick": "kicked all bots",
+      };
+      if (d.action === "changemap") return `changed the map to ${str("map")}`;
+      if (d.action === "say") return `sent a message: "${str("text")}"`;
+      if (d.action === "bot-add") return `added a bot${d.team === "any" ? "" : ` to ${str("team").toUpperCase()}`}`;
+      if (d.action === "bot-quota") return `set the bot count to ${str("count")}`;
+      return names[str("action")] ?? `sent ${str("action")}`;
+    }
     case "server.schedule":
       return d.restartAt ? `set a daily restart at ${str("restartAt")}${d.ifPlayers === "wait" ? `, waiting up to ${str("maxWaitMinutes")} min for players to leave` : ""}` : "turned off the daily restart";
     case "server.kill":

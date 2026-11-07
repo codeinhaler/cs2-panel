@@ -29,6 +29,7 @@ import { CATALOG, pluginPages } from "./plugins/catalog.js";
 import { PlayerService } from "./players/service.js";
 import { BanService, BRIDGE_ID } from "./players/bans.js";
 import { MapMenuService } from "./plugins/map-menu.js";
+import { CommandSchema, commandPermission, rconFor } from "./servers/commands.js";
 import { Settings } from "./settings.js";
 import { Automation } from "./automation/index.js";
 import { humanCounter } from "./automation/humans.js";
@@ -384,6 +385,29 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         );
       }
       throw badRequest(msg);
+    }
+  });
+
+  // Everyday commands as buttons (Commands tab).
+  app.post("/api/servers/:id/commands", async (req) => {
+    const user = requireUser(req);
+    const { id } = idParam.parse(req.params);
+    const cmd = CommandSchema.parse(req.body);
+    if (!can(user.role, commandPermission(cmd))) throw forbidden("Your role can't do that.");
+    const s = servers.require(id);
+    if ((await host.serviceStatus(s.slug)).state !== "active") throw badRequest("Start the server first.");
+    let line: string;
+    try {
+      line = rconFor(cmd);
+    } catch (e) {
+      throw badRequest((e as Error).message);
+    }
+    const { action, ...details } = cmd;
+    audit.record(user.id, "server.command", id, { action, ...details });
+    try {
+      return { output: await rcon({ port: s.port, password: s.rconPassword }, line) };
+    } catch (e) {
+      throw badRequest(`The server didn't take the command: ${(e as Error).message}`);
     }
   });
 

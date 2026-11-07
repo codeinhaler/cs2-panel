@@ -1217,3 +1217,37 @@ details.inline-form[open] > summary {
     grid-template-columns: 1fr;
   }
 }
+
+/* Commands tab: a grid of large, labelled buttons. */
+.command-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px;
+}
+.command-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+.command-btn small {
+  color: var(--ink-faint);
+  font-weight: 400;
+  font-size: 0.8rem;
+}
+.command-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.command-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

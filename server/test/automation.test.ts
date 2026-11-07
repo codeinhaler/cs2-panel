@@ -310,3 +310,43 @@ describe("scheduled restarts", () => {
     expect((await call(m, "GET", `/api/servers/${s.id}/schedule`)).status).toBe(200);
   });
 });
+
+describe("commands tab", () => {
+  it("turns buttons into fixed RCON commands and keeps typed text from adding commands", async () => {
+    const c = await login();
+    const s = await runningServer(c);
+    const send = async (body: object) => call(c, "POST", `/api/servers/${s.id}/commands`, body);
+    expect((await send({ action: "changemap", map: "de_nuke" })).status).toBe(200);
+    expect((await send({ action: "changemap", map: "workshop:3070288532" })).status).toBe(200);
+    expect((await send({ action: "changemap", map: "de_dust2; quit" })).status).toBe(400);
+    expect((await send({ action: "bot-quota", count: 99 })).status).toBe(400);
+    expect((await send({ action: "rcon_password", value: "x" })).status).toBe(400);
+    expect((await send({ action: "say", text: 'hi"; quit; say "' })).status).toBe(200);
+    expect(said.at(-1)).toBe("hi quit say");
+    expect((await send({ action: "say", text: " ;; " })).status).toBe(400);
+    const log = (await audit(c)).filter((e) => e.action === "server.command").map((e) => e.details.action);
+    expect(log).toEqual(["say", "changemap", "changemap"]);
+  });
+
+  it("lets moderators send chat messages only, and needs a running server", async () => {
+    const c = await login();
+    const s = await runningServer(c);
+    await call(c, "POST", "/api/users", { steam: MOD, role: "moderator" });
+    const m = await login(MOD);
+    expect((await call(m, "POST", `/api/servers/${s.id}/commands`, { action: "say", text: "Be nice" })).status).toBe(200);
+    expect((await call(m, "POST", `/api/servers/${s.id}/commands`, { action: "restart-game" })).status).toBe(403);
+    await call(c, "POST", `/api/servers/${s.id}/stop`, {});
+    expect((await call(c, "POST", `/api/servers/${s.id}/commands`, { action: "restart-game" })).body.error).toMatch(/Start the server/);
+  });
+});
+
+describe("rconFor", () => {
+  it("builds the command for every action", async () => {
+    const { rconFor } = await import("../src/servers/commands.js");
+    expect(rconFor({ action: "changemap", map: "collection:125499818" })).toBe("host_workshop_collection 125499818");
+    expect(rconFor({ action: "bot-add", team: "ct" })).toBe("bot_add_ct");
+    expect(rconFor({ action: "bot-quota", count: 4 })).toBe("bot_quota 4");
+    expect(rconFor({ action: "unpause" })).toBe("mp_unpause_match");
+  });
+});
+
