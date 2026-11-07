@@ -715,10 +715,13 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   app.get("/api/game", async (req) => {
     requirePerm(req, "view");
     const q = z.object({ since: z.coerce.number().int().default(0) }).parse(req.query);
+    // Job state first, then the log: if the state says finished, the log is complete.
+    // (Reading them the other way round, with awaits in between, could report "succeeded" with lines missing.)
+    const job = { ...updater.job, lines: undefined };
     const { lines, next } = updater.linesSince(q.since);
     return {
       cs2: { installed: await files.baseInstalled(), ...(await files.baseVersion()) },
-      job: { ...updater.job, lines: undefined },
+      job,
       lines,
       next,
       auto: await automation.updates.status(),
