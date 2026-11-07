@@ -1,5 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { API, formatRating, mapName, play, type LobbyPlayer, type Match, type Member, type Rating, type Side, type State, type TeamKey } from "./api";
+import {
+  API,
+  BOT_ID,
+  formatRating,
+  mapName,
+  play,
+  teamsLabel,
+  type Draft,
+  type LobbyPlayer,
+  type Match,
+  type Member,
+  type Rating,
+  type Side,
+  type State,
+  type TeamKey,
+} from "./api";
 
 const POLL_MS = 2000;
 
@@ -58,6 +73,7 @@ export function Play() {
   const me = state.me;
   const myMatch = me ? state.matches.find((m) => isActive(m) && inTeams(m, me.steamId)) : undefined;
   const otherMatches = state.matches.filter((m) => m !== myMatch);
+  const myDraft = me?.mode ? state.drafts.find((d) => d.mode === me.mode) : undefined;
 
   return (
     <div className="play">
@@ -95,8 +111,9 @@ export function Play() {
         <section className="panel play-signin">
           <h2>Play with even teams</h2>
           <p>
-            Sign in with Steam, join the lobby, and teams are made from everyone's Premier rating so both sides are about equal. The captains then ban maps
-            until one is left, and you get a button to join the server.
+            Sign in with Steam and pick a lobby: {state.lobbies.map((l) => `${l.label}`).join(", ") || "Competitive"}. Teams are made from everyone's Premier
+            rating so both sides are about equal, and a bot fills in when the numbers are odd. The captains then ban maps until one is left, and you get a
+            button to join the server.
           </p>
           <a className="btn primary play-steam" href={`${API}/auth/steam`}>
             Sign in through Steam
@@ -106,8 +123,8 @@ export function Play() {
       ) : (
         <>
           {myMatch && <MatchCard match={myMatch} meId={me.steamId} skew={skew.current} busy={busy} act={act} mine />}
-          {state.draft && <DraftCard state={state} busy={busy} act={act} />}
-          {state.enabled && <LobbyCard state={state} busy={busy} act={act} />}
+          {myDraft && <DraftCard draft={myDraft} state={state} busy={busy} act={act} />}
+          {state.enabled && (me.inLobby ? <LobbyCard state={state} busy={busy} act={act} /> : <LobbyPicker state={state} busy={busy} act={act} />)}
           <RatingCard state={state} busy={busy} act={act} />
         </>
       )}
@@ -184,7 +201,7 @@ function RatingCard({ state, busy, act }: { state: State; busy: boolean; act: Ac
 }
 
 function RatingBadge({ rating, big }: { rating: Rating; big?: boolean }) {
-  const label = { leetify: "Leetify", self: "self-set", admin: "set by organiser", none: "no rating" }[rating.source];
+  const label = { leetify: "Leetify", self: "self-set", admin: "set by organiser", none: "no rating", bot: "bot" }[rating.source];
   return (
     <span className={`rating ${tier(rating.value)} ${big ? "big" : ""}`} title={rating.note ?? label}>
       <b>{formatRating(rating.value)}</b>
@@ -207,14 +224,42 @@ function tier(v: number | null): string {
 
 // ------------------------------------------------------------- lobby
 
+/** First thing after signing in: which lobby to wait in. */
+function LobbyPicker({ state, busy, act }: { state: State; busy: boolean; act: Act }) {
+  return (
+    <section className="panel">
+      <h2 style={{ marginBottom: 12 }}>Pick a lobby</h2>
+      {state.lobbies.length === 0 ? (
+        <p className="hint">No lobbies are open right now.</p>
+      ) : (
+        <div className="play-lobbies">
+          {state.lobbies.map((l) => (
+            <button key={l.mode} className="play-lobby" disabled={busy} onClick={() => act(() => play.join(l.mode))}>
+              <span className="play-lobby-name">{l.label}</span>
+              {teamsLabel(l.teamSize) && <span className="play-lobby-size">{teamsLabel(l.teamSize)}</span>}
+              <span className="hint">{l.players === 0 ? "Nobody here yet" : `${l.players} here, ${l.ready} ready`}</span>
+              <span className="hint play-lobby-maps">{l.maps.map(mapName).join(" · ")}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function LobbyCard({ state, busy, act }: { state: State; busy: boolean; act: Act }) {
   const me = state.me!;
-  const available = state.lobby.filter((p) => p.status === "ready");
-  const myStatus = state.lobby.find((p) => p.steamId === me.steamId)?.status;
-  const canMake = me.inLobby && myStatus === "ready" && available.length >= 2 && !state.draft && state.freeServers > 0;
-  const reason = !me.inLobby
-    ? null
-    : myStatus === "in-match"
+  const lobby = state.lobbies.find((l) => l.mode === me.mode);
+  const members = state.lobby.filter((p) => p.mode === me.mode);
+  const available = members.filter((p) => p.status === "ready");
+  const myStatus = members.find((p) => p.steamId === me.steamId)?.status;
+  const draft = state.drafts.find((d) => d.mode === me.mode);
+  const size = lobby?.teamSize ?? 5;
+  const max = size * 2;
+  const canMake = myStatus === "ready" && available.length >= 2 && !draft && state.freeServers > 0;
+  const n = Math.min(available.length, max);
+  const reason =
+    myStatus === "in-match"
       ? null
       : !me.ready
         ? "Mark yourself ready to make teams."
@@ -224,55 +269,57 @@ function LobbyCard({ state, busy, act }: { state: State; busy: boolean; act: Act
             ? "No server is set up for matches yet. Ask the organiser."
             : state.freeServers === 0
               ? "All servers are busy. Teams can be made when a match finishes."
-              : state.draft
+              : draft
                 ? null
-                : available.length > 10
-                  ? `${available.length} ready: 10 play now, whoever sat out goes first next time.`
-                  : available.length % 2
-                    ? `${available.length} ready: one sits out this round.`
-                    : null;
+                : available.length > max
+                  ? `${available.length} ready: ${max} play now; the rest go first in the next match${size > 1 ? " (with a bot if needed)" : ""}.`
+                  : n % 2 && size > 1
+                    ? `${n} ready: a bot joins the smaller team so everyone plays.`
+                    : n % 2
+                      ? `${n} ready: two play now, the third goes first next time.`
+                      : null;
+  const others = state.lobbies.filter((l) => l.mode !== me.mode);
 
   return (
     <section className="panel">
       <div className="panel-head">
         <h2>
-          Lobby <span className="hint">({state.lobby.length})</span>
+          {lobby?.label ?? "Lobby"} <span className="hint">{[teamsLabel(size), `${members.length} here`].filter(Boolean).join(" · ")}</span>
         </h2>
-        {me.inLobby ? (
-          <div className="play-row">
-            {myStatus !== "in-match" && (
-              <label className="check play-ready">
-                <input type="checkbox" checked={me.ready} disabled={busy} onChange={(e) => act(() => play.ready(e.target.checked))} />
-                <span>Ready</span>
-              </label>
-            )}
-            <button className="btn small ghost" disabled={busy} onClick={() => act(play.leave)}>
-              Leave
-            </button>
-          </div>
-        ) : (
-          <button className="btn primary" disabled={busy} onClick={() => act(play.join)}>
-            Join the lobby
+        <div className="play-row">
+          {myStatus !== "in-match" && (
+            <label className="check play-ready">
+              <input type="checkbox" checked={me.ready} disabled={busy} onChange={(e) => act(() => play.ready(e.target.checked))} />
+              <span>Ready</span>
+            </label>
+          )}
+          <button className="btn small ghost" disabled={busy} onClick={() => act(play.leave)}>
+            Leave
           </button>
-        )}
+        </div>
       </div>
 
-      {state.lobby.length === 0 ? (
-        <p className="hint">Nobody's here yet.</p>
-      ) : (
-        <ul className="play-list">
-          {state.lobby.map((p) => (
-            <LobbyRow key={p.steamId} p={p} me={p.steamId === me.steamId} />
-          ))}
-        </ul>
-      )}
+      <ul className="play-list">
+        {members.map((p) => (
+          <LobbyRow key={p.steamId} p={p} me={p.steamId === me.steamId} />
+        ))}
+      </ul>
 
-      {me.inLobby && (
-        <div className="play-make">
-          <button className="btn primary play-big" disabled={busy || !canMake} onClick={() => act(play.makeTeams)}>
-            Make teams
-          </button>
-          {reason && <span className="hint">{reason}</span>}
+      <div className="play-make">
+        <button className="btn primary play-big" disabled={busy || !canMake} onClick={() => act(play.makeTeams)}>
+          Make teams
+        </button>
+        {reason && <span className="hint">{reason}</span>}
+      </div>
+
+      {others.length > 0 && myStatus !== "in-match" && (
+        <div className="play-switch">
+          <span className="hint">Switch to</span>
+          {others.map((l) => (
+            <button key={l.mode} className="btn small" disabled={busy} onClick={() => act(() => play.join(l.mode))}>
+              {l.label} <span className="hint">({l.players})</span>
+            </button>
+          ))}
         </div>
       )}
     </section>
@@ -306,8 +353,7 @@ function Avatar({ url }: { url: string | null }) {
 
 // ------------------------------------------------------------- proposed teams
 
-function DraftCard({ state, busy, act }: { state: State; busy: boolean; act: Act }) {
-  const d = state.draft!;
+function DraftCard({ draft: d, state, busy, act }: { draft: Draft; state: State; busy: boolean; act: Act }) {
   const mine = state.me ? inTeams(d, state.me.steamId) : false;
   return (
     <section className="panel play-draft">
@@ -320,6 +366,7 @@ function DraftCard({ state, busy, act }: { state: State; busy: boolean; act: Act
       <TeamsView teams={d} labels={["Team 1", "Team 2"]} />
       <p className="hint play-gap">
         Difference in average rating: <b>{formatRating(Math.abs(d.avgA - d.avgB))}</b>
+        {inTeams(d, BOT_ID) && <> · the bot counts as {formatRating([...d.teamA, ...d.teamB].find((p) => p.steamId === BOT_ID)!.effective)}</>}
       </p>
       {mine ? (
         <div className="row-actions play-actions">
@@ -409,7 +456,11 @@ function MatchCard({ match: m, meId, skew, busy, act, mine }: { match: Match; me
       <div className="panel-head">
         <h2>
           {m.map ? mapName(m.map) : "Map veto"}
-          {m.serverName && <span className="hint"> · {m.serverName}</span>}
+          <span className="hint">
+            {" "}
+            · {m.modeLabel}
+            {m.serverName && ` · ${m.serverName}`}
+          </span>
         </h2>
         <PhaseTag m={m} />
       </div>

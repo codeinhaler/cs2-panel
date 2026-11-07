@@ -4,7 +4,7 @@ import { api, type MatchmakingInfo, type MatchmakingSettings, type MmRating } fr
 import { useAction, useApp, usePolling } from "../app-context";
 import { formatDateTime } from "../format";
 
-const SOURCE = { leetify: "Leetify", self: "self-set", admin: "set by you", none: "no rating" } as const;
+const SOURCE = { leetify: "Leetify", self: "self-set", admin: "set by you", none: "no rating", bot: "bot" } as const;
 const PHASE = {
   veto: "Banning maps",
   side: "Picking sides",
@@ -26,7 +26,6 @@ export function MatchmakingPage() {
   const [form, setForm] = useState<MatchmakingSettings | null>(null);
   const [saved, setSaved] = useState<MatchmakingSettings | null>(null);
   const [key, setKey] = useState("");
-  const [workshop, setWorkshop] = useState("");
 
   useEffect(() => {
     if (data && !saved) {
@@ -40,7 +39,6 @@ export function MatchmakingPage() {
   const moderate = can("players.moderate");
   const dirty = JSON.stringify(form) !== JSON.stringify(saved);
   const set = <K extends keyof MatchmakingSettings>(k: K, v: MatchmakingSettings[K]) => setForm({ ...form, [k]: v });
-  const toggleIn = (list: (string | number)[], v: string | number, on: boolean) => (on ? [...list, v] : list.filter((x) => x !== v));
 
   const save = async (e: React.FormEvent, leetifyKey?: string | null) => {
     e.preventDefault();
@@ -54,9 +52,6 @@ export function MatchmakingPage() {
     void refresh();
   };
 
-  // Stock maps from the install, plus whatever is in the pool that isn't installed (Workshop maps).
-  const stock = data.maps.filter((m) => m.startsWith("de_"));
-  const mapChoices = [...stock, ...form.maps.filter((m) => !stock.includes(m))];
   const pageUrl = data.site.port ? `http://${window.location.hostname}:${data.site.port}` : null;
   const poolServers = data.servers.filter((s) => form.serverIds.includes(s.id));
   const missingBridge = poolServers.filter((s) => !s.hasBridge);
@@ -126,7 +121,7 @@ export function MatchmakingPage() {
                 <input
                   type="checkbox"
                   checked={form.serverIds.includes(s.id)}
-                  onChange={(e) => set("serverIds", toggleIn(form.serverIds, s.id, e.target.checked) as number[])}
+                  onChange={(e) => set("serverIds", e.target.checked ? [...form.serverIds, s.id] : form.serverIds.filter((x) => x !== s.id))}
                   disabled={!manage}
                 />
                 <span>
@@ -145,47 +140,34 @@ export function MatchmakingPage() {
         </div>
 
         <div className="panel">
-          <h2 style={{ marginBottom: 6 }}>Map pool</h2>
+          <h2 style={{ marginBottom: 6 }}>Lobbies</h2>
           <p className="hint" style={{ marginTop: 0 }}>
-            The captains take turns banning from these until one is left, like on FACEIT. The team that didn't make the last ban picks its side.
+            Players pick one of the open lobbies when they come to the page. Each has its own map pool: the captains take turns banning from it until one is
+            left, like on FACEIT, and the team that didn't make the last ban picks its side.
           </p>
-          <div className="mm-maps">
-            {mapChoices.map((m) => (
-              <label key={m} className="check">
-                <input
-                  type="checkbox"
-                  checked={form.maps.includes(m)}
-                  onChange={(e) => set("maps", toggleIn(form.maps, m, e.target.checked) as string[])}
-                  disabled={!manage}
-                />
-                <span>{mapLabel(m)}</span>
-              </label>
+          <div className="mm-lobbies">
+            {MODES.map((mode) => (
+              <LobbySettings
+                key={mode}
+                mode={mode}
+                value={form.modes[mode]}
+                stock={data.maps}
+                manage={manage}
+                onChange={(v) => set("modes", { ...form.modes, [mode]: v })}
+              />
             ))}
           </div>
-          {manage && (
-            <div className="row-actions" style={{ marginTop: 12 }}>
-              <input
-                value={workshop}
-                onChange={(e) => setWorkshop(e.target.value)}
-                placeholder="Workshop map ID or link"
-                style={{ maxWidth: 280 }}
-                aria-label="Workshop map ID or link"
-              />
-              <button
-                type="button"
-                className="btn"
-                disabled={!/\d{5,20}/.test(workshop)}
-                onClick={() => {
-                  const id = /(\d{5,20})/.exec(workshop)![1];
-                  if (!form.maps.includes(`workshop:${id}`)) set("maps", [...form.maps, `workshop:${id}`]);
-                  setWorkshop("");
-                }}
-              >
-                Add Workshop map
-              </button>
-            </div>
-          )}
-          <p className="hint">{form.maps.length} maps in the pool.</p>
+          <label className="field" style={{ marginTop: 16, maxWidth: 320 }}>
+            <span>Bot for odd numbers</span>
+            <select value={form.botDifficulty} onChange={(e) => set("botDifficulty", Number(e.target.value))} disabled={!manage}>
+              {BOT_LEVELS.map((b, i) => (
+                <option key={b.label} value={i}>
+                  {b.label} (counts as {b.rating.toLocaleString("en")})
+                </option>
+              ))}
+            </select>
+            <small>With an odd number of players in Competitive or Wingman, a bot joins the smaller team so nobody sits out.</small>
+          </label>
         </div>
 
         {manage && (
@@ -238,6 +220,90 @@ export function MatchmakingPage() {
 
       <LiveSection info={data} moderate={moderate} refresh={refresh} />
       <HistorySection info={data} />
+    </div>
+  );
+}
+
+const MODES = ["competitive", "wingman", "duel"] as const;
+const MODE_TEXT = {
+  competitive: { label: "Competitive", size: "up to 5v5", hint: "Classic maps." },
+  wingman: { label: "Wingman", size: "2v2", hint: "Wingman maps; short halves." },
+  duel: { label: "1v1", size: "1v1", hint: "Runs in Wingman mode. Aim maps from the Workshop work well." },
+} as const;
+const BOT_LEVELS = [
+  { label: "Easy", rating: 3000 },
+  { label: "Normal", rating: 6000 },
+  { label: "Hard", rating: 9000 },
+  { label: "Expert", rating: 12000 },
+];
+
+function LobbySettings({
+  mode,
+  value,
+  stock,
+  manage,
+  onChange,
+}: {
+  mode: (typeof MODES)[number];
+  value: { enabled: boolean; maps: string[] };
+  stock: string[];
+  manage: boolean;
+  onChange: (v: { enabled: boolean; maps: string[] }) => void;
+}) {
+  const [workshop, setWorkshop] = useState("");
+  const text = MODE_TEXT[mode];
+  // Maps from the install, plus whatever is in the pool that isn't installed (Workshop maps).
+  const installed = stock.filter((m) => /^(de|cs|ar|aim)_/.test(m));
+  const choices = [...installed, ...value.maps.filter((m) => !installed.includes(m))];
+  const toggle = (m: string, on: boolean) => onChange({ ...value, maps: on ? [...value.maps, m] : value.maps.filter((x) => x !== m) });
+  return (
+    <div className={`mm-lobby ${value.enabled ? "" : "off"}`}>
+      <label className="check">
+        <input type="checkbox" checked={value.enabled} onChange={(e) => onChange({ ...value, enabled: e.target.checked })} disabled={!manage} />
+        <span>
+          <b>{text.label}</b> <span className="hint">{text.size}</span>
+          <br />
+          <span className="hint">{text.hint}</span>
+        </span>
+      </label>
+      {value.enabled && (
+        <>
+          <div className="mm-maps">
+            {choices.map((m) => (
+              <label key={m} className="check">
+                <input type="checkbox" checked={value.maps.includes(m)} onChange={(e) => toggle(m, e.target.checked)} disabled={!manage} />
+                <span>{mapLabel(m)}</span>
+              </label>
+            ))}
+          </div>
+          {manage && (
+            <div className="row-actions" style={{ marginTop: 10 }}>
+              <input
+                value={workshop}
+                onChange={(e) => setWorkshop(e.target.value)}
+                placeholder="Workshop map ID or link"
+                style={{ maxWidth: 240 }}
+                aria-label={`Workshop map for ${text.label}`}
+              />
+              <button
+                type="button"
+                className="btn small"
+                disabled={!/\d{5,20}/.test(workshop)}
+                onClick={() => {
+                  const id = /(\d{5,20})/.exec(workshop)![1];
+                  if (!value.maps.includes(`workshop:${id}`)) onChange({ ...value, maps: [...value.maps, `workshop:${id}`] });
+                  setWorkshop("");
+                }}
+              >
+                Add Workshop map
+              </button>
+            </div>
+          )}
+          <p className="hint" style={{ margin: "8px 0 0" }}>
+            {value.maps.length} map{value.maps.length === 1 ? "" : "s"} in the pool.
+          </p>
+        </>
+      )}
     </div>
   );
 }
@@ -314,6 +380,7 @@ function LiveSection({ info, moderate, refresh }: { info: MatchmakingInfo; moder
               <tr>
                 <th>Player</th>
                 <th>Rating</th>
+                <th>Lobby</th>
                 <th>Status</th>
                 {moderate && <th />}
               </tr>
@@ -329,6 +396,7 @@ function LiveSection({ info, moderate, refresh }: { info: MatchmakingInfo; moder
                   <td>
                     <RatingText r={p.rating} />
                   </td>
+                  <td>{MODE_TEXT[p.mode].label}</td>
                   <td>{{ ready: "Ready", away: "Not ready", "in-match": "In a match" }[p.status]}</td>
                   {moderate && (
                     <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
@@ -367,7 +435,10 @@ function LiveSection({ info, moderate, refresh }: { info: MatchmakingInfo; moder
             <tbody>
               {matches.map((m) => (
                 <tr key={m.id}>
-                  <td>{m.map ? mapLabel(m.map) : "—"}</td>
+                  <td>
+                    {m.map ? mapLabel(m.map) : "—"}
+                    <div className="hint">{m.modeLabel}</div>
+                  </td>
                   <td>
                     {m.teamA.map((p) => p.name).join(", ")} <span className="hint">vs</span> {m.teamB.map((p) => p.name).join(", ")}
                     {m.score && (
@@ -422,7 +493,10 @@ function HistorySection({ info }: { info: MatchmakingInfo }) {
           {done.map((h) => (
             <tr key={h.id}>
               <td>{formatDateTime(utc(h.createdAt))}</td>
-              <td>{h.map ? mapLabel(h.map) : "—"}</td>
+              <td>
+                {h.map ? mapLabel(h.map) : "—"}
+                <div className="hint">{MODE_TEXT[h.mode as keyof typeof MODE_TEXT]?.label ?? h.mode}</div>
+              </td>
               <td>
                 {h.teamA.map((p) => p.name).join(", ")} <span className="hint">vs</span> {h.teamB.map((p) => p.name).join(", ")}
               </td>

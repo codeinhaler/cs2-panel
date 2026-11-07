@@ -218,6 +218,9 @@ const MIGRATIONS: string[] = [
     ended_at    TEXT
   );
   `,
+  /* 10: matchmaking lobbies (Competitive, Wingman, 1v1) */ `
+  ALTER TABLE mm_matches ADD COLUMN mode TEXT NOT NULL DEFAULT 'competitive';
+  `,
 ];
 
 export function openDb(file: string): Db {

@@ -1,6 +1,7 @@
 // Client for the matchmaking site's API (the public site, not the panel).
 
-export type RatingSource = "admin" | "leetify" | "self" | "none";
+export type RatingSource = "admin" | "leetify" | "self" | "none" | "bot";
+export type Mode = "competitive" | "wingman" | "duel";
 
 export interface Rating {
   value: number | null;
@@ -25,6 +26,7 @@ export interface LobbyPlayer {
   leetifyUrl: string;
   status: "ready" | "away" | "in-match";
   sitOuts: number;
+  mode: Mode;
 }
 
 export interface Teams {
@@ -39,6 +41,7 @@ export interface Teams {
 
 export interface Draft extends Teams {
   id: number;
+  mode: Mode;
   option: number;
   options: number;
 }
@@ -48,6 +51,8 @@ export type Side = "ct" | "t";
 
 export interface Match extends Teams {
   id: number;
+  mode: Mode;
+  modeLabel: string;
   phase: "veto" | "side" | "starting" | "live" | "over" | "cancelled" | "abandoned";
   captainA: string;
   captainB: string;
@@ -81,13 +86,14 @@ export interface State {
     rating: Rating;
     selfRating: number | null;
     inLobby: boolean;
+    mode: Mode | null;
     ready: boolean;
     leetifyUrl: string;
   } | null;
+  lobbies: { mode: Mode; label: string; teamSize: number; maps: string[]; players: number; ready: number }[];
   lobby: LobbyPlayer[];
-  draft: Draft | null;
+  drafts: Draft[];
   matches: Match[];
-  maps: string[];
   freeServers: number;
   matchServers: number;
   now: number;
@@ -111,7 +117,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 export const play = {
   state: () => request<State>("GET", "/state"),
   logout: () => request<{ ok: true }>("POST", "/auth/logout", {}),
-  join: () => request<{ ok: true }>("POST", "/lobby/join", {}),
+  join: (mode: Mode) => request<{ ok: true }>("POST", "/lobby/join", { mode }),
   leave: () => request<{ ok: true }>("POST", "/lobby/leave", {}),
   ready: (ready: boolean) => request<{ ok: true }>("POST", "/lobby/ready", { ready }),
   setRating: (rating: number | null) => request<{ ok: true }>("PUT", "/me/rating", { rating }),
@@ -133,3 +139,7 @@ export function mapName(map: string): string {
 }
 
 export const formatRating = (v: number | null) => (v === null ? "—" : v.toLocaleString("en"));
+
+export const BOT_ID = "BOT";
+/** "Up to 5v5", "2v2", or nothing for 1v1 (its name says it already). */
+export const teamsLabel = (teamSize: number) => (teamSize === 1 ? "" : teamSize > 2 ? `up to ${teamSize}v${teamSize}` : `${teamSize}v${teamSize}`);

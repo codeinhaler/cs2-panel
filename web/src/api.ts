@@ -395,14 +395,15 @@ export interface MatchmakingSettings {
   port: number;
   title: string;
   serverIds: number[];
-  maps: string[];
+  modes: Record<"competitive" | "wingman" | "duel", { enabled: boolean; maps: string[] }>;
+  botDifficulty: number;
   gameAddress: string;
   vetoSeconds: number;
 }
 
 export interface MmRating {
   value: number | null;
-  source: "admin" | "leetify" | "self" | "none";
+  source: "admin" | "leetify" | "self" | "none" | "bot";
   note: string | null;
   pending?: boolean;
 }
@@ -416,6 +417,8 @@ export interface MmMember {
 
 export interface MmMatch {
   id: number;
+  mode: "competitive" | "wingman" | "duel";
+  modeLabel: string;
   phase: "veto" | "side" | "starting" | "live" | "over" | "cancelled" | "abandoned";
   teamA: MmMember[];
   teamB: MmMember[];
@@ -434,14 +437,15 @@ export interface MatchmakingInfo {
   servers: { id: number; name: string; port: number; inPool: boolean; hasBridge: boolean }[];
   maps: string[];
   state: {
-    lobby: (MmMember & { status: "ready" | "away" | "in-match"; leetifyUrl: string })[];
-    draft: { id: number; teamA: MmMember[]; teamB: MmMember[] } | null;
+    lobby: (MmMember & { status: "ready" | "away" | "in-match"; leetifyUrl: string; mode: "competitive" | "wingman" | "duel" })[];
+    drafts: { id: number; teamA: MmMember[]; teamB: MmMember[] }[];
     matches: MmMatch[];
     freeServers: number;
   };
   history: {
     id: number;
     serverId: number | null;
+    mode: string;
     map: string | null;
     teamA: { steamId: string; name: string }[];
     teamB: { steamId: string; name: string }[];

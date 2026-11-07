@@ -476,3 +476,49 @@
 .play-leetify {
   font-weight: 600;
 }
+
+/* ---------------------------------------------------------------- lobbies */
+
+.play-lobbies {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+.play-lobby {
+  font: inherit;
+  color: var(--ink);
+  text-align: left;
+  display: grid;
+  gap: 4px;
+  padding: 16px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  border-top: 4px solid var(--accent);
+  background: var(--panel-sunk);
+  cursor: pointer;
+}
+.play-lobby:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.play-lobby-name {
+  font-family: var(--f-label);
+  font-weight: 700;
+  font-size: 1.3rem;
+}
+.play-lobby-size {
+  font-family: var(--f-mono);
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.play-lobby-maps {
+  font-size: 0.78rem;
+}
+.play-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+}

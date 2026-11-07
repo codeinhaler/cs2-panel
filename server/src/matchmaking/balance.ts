@@ -57,10 +57,12 @@ export function rankSplits(players: Rated[]): Split[] {
 
 /**
  * Who plays when more people are ready than fit: whoever sat out most often
- * goes first, then whoever has waited longest.
+ * goes first, then whoever has waited longest. With allowOdd, an odd number of
+ * players is kept (a bot fills the gap); otherwise the last one sits out.
  */
-export function choosePlayers<T extends { sitOuts: number; readySince: number }>(ready: T[], max = 10): T[] {
+export function choosePlayers<T extends { sitOuts: number; readySince: number }>(ready: T[], max = 10, allowOdd = false): T[] {
   const sorted = ready.slice().sort((x, y) => y.sitOuts - x.sitOuts || x.readySince - y.readySince);
-  const count = Math.min(max, sorted.length - (sorted.length % 2));
+  const take = Math.min(max, sorted.length);
+  const count = allowOdd ? take : take - (take % 2);
   return sorted.slice(0, count);
 }

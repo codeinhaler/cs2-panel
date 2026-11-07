@@ -77,7 +77,7 @@ function describe(e: AuditEntry): string {
     case "matchmaking.cancel":
       return `cancelled matchmaking match ${str("match")}`;
     case "matchmaking.match":
-      return `reserved the server for matchmaking match ${str("match")} (${str("players")} players)`;
+      return `reserved the server for matchmaking match ${str("match")} (${[str("mode"), `${str("players")} players`, d.bot ? "with a bot" : ""].filter(Boolean).join(", ")})`;
     case "matchmaking.finished":
       return `finished matchmaking match ${str("match")} on ${str("map")}${d.score ? ` (${str("score")})` : ""}`;
     case "matchmaking.cancelled":

@@ -39,19 +39,43 @@ const POLL_MS = 10_000;
 
 export const DEFAULT_MAPS = ["de_ancient", "de_anubis", "de_dust2", "de_inferno", "de_mirage", "de_nuke", "de_overpass", "de_train"];
 
+/** The lobbies players can pick. 1v1 runs in Wingman mode (short halves, small maps). */
+export const MODES = ["competitive", "wingman", "duel"] as const;
+export type Mode = (typeof MODES)[number];
+export const MODE_INFO: Record<Mode, { label: string; teamSize: number; gameType: number; gameMode: number }> = {
+  competitive: { label: "Competitive", teamSize: 5, gameType: 0, gameMode: 1 },
+  wingman: { label: "Wingman", teamSize: 2, gameType: 0, gameMode: 2 },
+  duel: { label: "1v1", teamSize: 1, gameType: 0, gameMode: 2 },
+};
+
+/** Bot difficulty (bot_difficulty 0–3) and the rating it counts as when balancing. */
+export const BOT_LEVELS = [
+  { label: "Easy", rating: 3000 },
+  { label: "Normal", rating: 6000 },
+  { label: "Hard", rating: 9000 },
+  { label: "Expert", rating: 12000 },
+] as const;
+export const BOT_ID = "BOT";
+
+const MapList = z
+  .array(z.string().trim().min(1).max(80))
+  .max(20)
+  .refine(
+    (maps) => maps.every((m) => ["stock", "workshop"].includes(parseMapSpec(m)?.kind ?? "")),
+    "Each map must be a map name like de_mirage or a Workshop map (workshop:ID). Collections can't be voted on.",
+  );
+const ModeSettings = z.object({ enabled: z.boolean(), maps: MapList });
+
 export const MatchmakingSettingsSchema = z.object({
   enabled: z.boolean(),
   port: z.number().int().min(1024).max(65535),
   title: z.string().trim().min(1).max(60),
   serverIds: z.array(z.number().int().positive()).max(20),
-  maps: z
-    .array(z.string().trim().min(1).max(80))
-    .min(1, "Pick at least one map.")
-    .max(20)
-    .refine(
-      (maps) => maps.every((m) => ["stock", "workshop"].includes(parseMapSpec(m)?.kind ?? "")),
-      "Each map must be a map name like de_mirage or a Workshop map (workshop:ID). Collections can't be voted on.",
-    ),
+  modes: z
+    .object({ competitive: ModeSettings, wingman: ModeSettings, duel: ModeSettings })
+    .refine((m) => MODES.some((k) => m[k].enabled), "Open at least one lobby.")
+    .refine((m) => MODES.every((k) => !m[k].enabled || m[k].maps.length > 0), "Every open lobby needs at least one map."),
+  botDifficulty: z.number().int().min(0).max(3),
   /** Address players connect to; empty means the same address they opened the site with. */
   gameAddress: z
     .string()
@@ -67,12 +91,17 @@ export const DEFAULT_SETTINGS: MatchmakingSettings = {
   port: 8090,
   title: "CS night",
   serverIds: [],
-  maps: DEFAULT_MAPS,
+  modes: {
+    competitive: { enabled: true, maps: DEFAULT_MAPS },
+    wingman: { enabled: true, maps: ["de_inferno", "de_nuke", "de_overpass", "de_vertigo"] },
+    duel: { enabled: true, maps: ["de_inferno", "de_nuke", "de_vertigo"] },
+  },
+  botDifficulty: 1,
   gameAddress: "",
   vetoSeconds: 30,
 };
 
-export type RatingSource = "admin" | "leetify" | "self" | "none";
+export type RatingSource = "admin" | "leetify" | "self" | "none" | "bot";
 export interface RatingView {
   value: number | null;
   source: RatingSource;
@@ -103,6 +132,9 @@ interface Ban {
 
 interface Match {
   id: number;
+  mode: Mode;
+  /** The bot filling in for a missing player, and which team it's on. */
+  bot: TeamKey | null;
   teamA: Member[];
   teamB: Member[];
   captainA: string;
@@ -135,6 +167,7 @@ interface Match {
 
 interface LobbyEntry {
   steamId: string;
+  mode: Mode;
   ready: boolean;
   readySince: number;
   joinedAt: number;
@@ -144,6 +177,8 @@ interface LobbyEntry {
 
 interface Draft {
   id: number;
+  mode: Mode;
+  /** Includes the bot, when there is one. */
   players: Member[];
   splits: Split[];
   index: number;
@@ -160,6 +195,7 @@ export interface LobbyView {
   leetifyUrl: string;
   status: "ready" | "away" | "in-match";
   sitOuts: number;
+  mode: Mode;
 }
 
 export interface TeamsView {
@@ -174,12 +210,15 @@ export interface TeamsView {
 
 export interface DraftView extends TeamsView {
   id: number;
+  mode: Mode;
   option: number;
   options: number;
 }
 
 export interface MatchView extends TeamsView {
   id: number;
+  mode: Mode;
+  modeLabel: string;
   phase: MatchPhase;
   captainA: string;
   captainB: string;
@@ -214,13 +253,15 @@ export interface StateView {
     rating: RatingView;
     selfRating: number | null;
     inLobby: boolean;
+    /** Which lobby they're in. */
+    mode: Mode | null;
     ready: boolean;
     leetifyUrl: string;
   } | null;
+  lobbies: { mode: Mode; label: string; teamSize: number; maps: string[]; players: number; ready: number }[];
   lobby: LobbyView[];
-  draft: DraftView | null;
+  drafts: DraftView[];
   matches: MatchView[];
-  maps: string[];
   freeServers: number;
   /** Servers set up for matches (in the pool, with the bridge), busy or not. */
   matchServers: number;
@@ -249,13 +290,16 @@ export interface MatchmakingDeps {
 }
 
 const ACTIVE: MatchPhase[] = ["veto", "side", "starting", "live"];
+const humans = (team: Member[]) => team.filter((p) => p.steamId !== BOT_ID);
+/** People who should be on the server (the bot doesn't count). */
+const expected = (m: { teamA: Member[]; teamB: Member[] }) => humans(m.teamA).length + humans(m.teamB).length;
 const isActive = (m: Match) => ACTIVE.includes(m.phase);
 const MATCH_MARKER = "CS2PANEL_MATCH ";
 
 export class Matchmaking {
   readonly leetify: LeetifyClient;
   private lobby = new Map<string, LobbyEntry>();
-  private draft: Draft | null = null;
+  private drafts = new Map<Mode, Draft>();
   private matches: Match[] = [];
   private nextDraftId = 1;
   private timer: NodeJS.Timeout | null = null;
@@ -277,7 +321,17 @@ export class Matchmaking {
   // ------------------------------------------------------------- settings
 
   config(): MatchmakingSettings {
-    return { ...DEFAULT_SETTINGS, ...this.d.settings.get<Partial<MatchmakingSettings>>("matchmaking", {}) };
+    const stored = this.d.settings.get<Partial<MatchmakingSettings> & { maps?: string[] }>("matchmaking", {});
+    const { maps: legacyMaps, ...rest } = stored;
+    const modes = { ...DEFAULT_SETTINGS.modes, ...(stored.modes ?? {}) };
+    // Before lobbies there was one map pool, for Competitive.
+    if (!stored.modes && legacyMaps?.length) modes.competitive = { enabled: true, maps: legacyMaps };
+    return { ...DEFAULT_SETTINGS, ...rest, modes };
+  }
+
+  /** Lobbies that are open, in display order. */
+  openModes(c: MatchmakingSettings = this.config()): Mode[] {
+    return MODES.filter((m) => c.modes[m].enabled && c.modes[m].maps.length > 0);
   }
 
   private leetifyKey(): string | null {
@@ -297,7 +351,7 @@ export class Matchmaking {
     const next = MatchmakingSettingsSchema.parse(raw);
     const known = new Set(this.d.servers.listRecords().map((s) => s.id));
     next.serverIds = [...new Set(next.serverIds)].filter((id) => known.has(id));
-    next.maps = [...new Set(next.maps)];
+    for (const m of MODES) next.modes[m].maps = [...new Set(next.modes[m].maps)];
     const before = this.config();
     this.d.settings.set("matchmaking", next);
     if (leetifyKey !== undefined) {
@@ -310,14 +364,16 @@ export class Matchmaking {
       enabled: next.enabled,
       port: next.port,
       servers: next.serverIds.length,
-      maps: next.maps.length,
+      lobbies: this.openModes(next).map((m) => MODE_INFO[m].label),
       ...(leetifyKey !== undefined ? { leetifyKey: leetifyKey ? "changed" : "removed" } : {}),
     });
     if (!next.enabled && before.enabled) {
       // Nobody can reach the site any more; take down the waiting room, but let running matches finish.
       this.lobby.clear();
-      this.draft = null;
+      this.drafts.clear();
     }
+    // People in a lobby that just closed go back to choosing.
+    for (const e of [...this.lobby.values()]) if (!this.openModes(next).includes(e.mode)) this.removeFromLobby(e.steamId);
     await this.onSettingsChanged();
     return next;
   }
@@ -353,7 +409,7 @@ export class Matchmaking {
     for (const [id, e] of this.lobby) {
       if (t - e.lastSeen > PRESENCE_MS && !this.activeMatchOf(id)) this.removeFromLobby(id);
     }
-    if (this.draft && t - this.draft.createdAt > DRAFT_MS) this.draft = null;
+    for (const [mode, d] of this.drafts) if (t - d.createdAt > DRAFT_MS) this.drafts.delete(mode);
 
     for (const m of this.matches) {
       if (m.phase === "veto" && m.deadline !== null && t >= m.deadline) {
@@ -434,17 +490,22 @@ export class Matchmaking {
     if (e) e.lastSeen = this.now();
   }
 
-  join(steamId: string): void {
-    this.requireEnabled();
+  join(steamId: string, mode: Mode): void {
+    const c = this.requireEnabled();
+    if (!this.openModes(c).includes(mode)) throw badRequest(`The ${MODE_INFO[mode].label} lobby isn't open.`);
     if (this.d.isBanned(steamId)) throw forbidden("You're banned from these servers.");
     this.d.players.ensure(steamId);
     const t = this.now();
     const e = this.lobby.get(steamId);
-    if (e) {
+    if (e && e.mode === mode) {
       e.lastSeen = t;
       return;
     }
-    this.lobby.set(steamId, { steamId, ready: true, readySince: t, joinedAt: t, lastSeen: t, sitOuts: 0 });
+    if (e) {
+      if (this.activeMatchOf(steamId)) throw badRequest("Finish your match before changing lobby.");
+      this.dropDraftsWith(steamId);
+    }
+    this.lobby.set(steamId, { steamId, mode, ready: true, readySince: t, joinedAt: t, lastSeen: t, sitOuts: 0 });
   }
 
   leave(steamId: string): void {
@@ -458,12 +519,16 @@ export class Matchmaking {
       e.ready = ready;
       e.readySince = this.now();
     }
-    if (!ready && this.draft?.players.some((p) => p.steamId === steamId)) this.draft = null;
+    if (!ready) this.dropDraftsWith(steamId);
+  }
+
+  private dropDraftsWith(steamId: string): void {
+    for (const [mode, d] of this.drafts) if (d.players.some((p) => p.steamId === steamId)) this.drafts.delete(mode);
   }
 
   private removeFromLobby(steamId: string): void {
     this.lobby.delete(steamId);
-    if (this.draft?.players.some((p) => p.steamId === steamId)) this.draft = null;
+    this.dropDraftsWith(steamId);
   }
 
   /** Removed by a panel admin. They can join again unless they're banned. */
@@ -477,9 +542,9 @@ export class Matchmaking {
     return this.matches.find((m) => isActive(m) && [...m.teamA, ...m.teamB].some((p) => p.steamId === steamId));
   }
 
-  /** Lobby members who can be put in a match now. */
-  private available(): LobbyEntry[] {
-    return [...this.lobby.values()].filter((e) => e.ready && !this.activeMatchOf(e.steamId));
+  /** Lobby members of one lobby who can be put in a match now. */
+  private available(mode: Mode): LobbyEntry[] {
+    return [...this.lobby.values()].filter((e) => e.mode === mode && e.ready && !this.activeMatchOf(e.steamId));
   }
 
   // ------------------------------------------------------------- servers
@@ -517,13 +582,22 @@ export class Matchmaking {
     return { steamId, name: this.displayName(p), avatarUrl: p.avatarUrl, rating, effective: rating.value ?? 0 };
   }
 
+  private botMember(): Member {
+    const level = BOT_LEVELS[this.config().botDifficulty] ?? BOT_LEVELS[1];
+    const rating: RatingView = { value: level.rating, source: "bot", note: null };
+    return { steamId: BOT_ID, name: `Bot (${level.label})`, avatarUrl: null, rating, effective: level.rating };
+  }
+
   async makeTeams(by: string): Promise<void> {
     this.requireEnabled();
     const me = this.lobby.get(by);
-    if (!me) throw badRequest("Join the lobby first.");
+    if (!me) throw badRequest("Join a lobby first.");
     if (this.activeMatchOf(by)) throw badRequest("You're already in a match.");
-    if (this.draft) return;
-    const chosen = choosePlayers(this.available());
+    const mode = me.mode;
+    if (this.drafts.has(mode)) return;
+    const size = MODE_INFO[mode].teamSize;
+    // An odd number of players plays with a bot on the short team, so nobody waits.
+    const chosen = choosePlayers(this.available(mode), size * 2, size > 1);
     if (chosen.length < 2) throw badRequest("At least 2 ready players are needed to make teams.");
     if ((await this.freeServers()).length === 0) {
       if (!this.poolRecords().some((s) => this.d.hasBridge(s.id))) throw badRequest("No server is set up for matches yet. Ask the organiser.");
@@ -538,20 +612,22 @@ export class Matchmaking {
       .sort((x, y) => x - y);
     const stand = known.length ? known[Math.floor(known.length / 2)]! : FALLBACK_RATING;
     for (const p of players) p.effective = p.rating.value ?? stand;
+    if (players.length % 2) players.push(this.botMember());
 
-    if (this.draft) return; // someone else was quicker while Leetify answered
-    this.draft = {
+    if (this.drafts.has(mode)) return; // someone else was quicker while Leetify answered
+    this.drafts.set(mode, {
       id: this.nextDraftId++,
+      mode,
       players,
       splits: rankSplits(players.map((p) => ({ steamId: p.steamId, rating: p.effective }))).slice(0, 10),
       index: 0,
       createdAt: this.now(),
-    };
+    });
   }
 
   private requireDraft(by: string, draftId: number): Draft {
-    const d = this.draft;
-    if (!d || d.id !== draftId) throw badRequest("Those teams aren't up any more.");
+    const d = [...this.drafts.values()].find((x) => x.id === draftId);
+    if (!d) throw badRequest("Those teams aren't up any more.");
     if (!d.players.some((p) => p.steamId === by)) throw forbidden("Only players on these teams can do that.");
     return d;
   }
@@ -563,8 +639,8 @@ export class Matchmaking {
   }
 
   cancelDraft(by: string, draftId: number): void {
-    this.requireDraft(by, draftId);
-    this.draft = null;
+    const d = this.requireDraft(by, draftId);
+    this.drafts.delete(d.mode);
   }
 
   async startDraft(by: string, draftId: number): Promise<number> {
@@ -573,25 +649,30 @@ export class Matchmaking {
     const split = d.splits[d.index]!;
     const server = (await this.freeServers())[0];
     if (!server) throw badRequest("Every matchmaking server is busy. Wait for a match to finish.");
-    if (this.draft !== d) throw badRequest("Those teams aren't up any more.");
-    this.draft = null;
+    if (this.drafts.get(d.mode) !== d) throw badRequest("Those teams aren't up any more.");
+    this.drafts.delete(d.mode);
 
     const teamA = split.a.map((i) => d.players[i]!);
     const teamB = split.b.map((i) => d.players[i]!);
-    const captain = (team: Member[]) => team.slice().sort((x, y) => y.effective - x.effective)[0]!.steamId;
+    // The best-rated person on each team is captain; never the bot.
+    const captain = (team: Member[]) => team.filter((p) => p.steamId !== BOT_ID).sort((x, y) => y.effective - x.effective)[0]!.steamId;
     const t = this.now();
-    const pool = c.maps.slice();
+    const pool = c.modes[d.mode].maps.slice();
+    const bot: TeamKey | null = teamA.some((p) => p.steamId === BOT_ID) ? "a" : teamB.some((p) => p.steamId === BOT_ID) ? "b" : null;
 
     const row = this.d.db
-      .prepare("INSERT INTO mm_matches (server_id, team_a, team_b, status) VALUES (?, ?, ?, 'veto')")
+      .prepare("INSERT INTO mm_matches (server_id, mode, team_a, team_b, status) VALUES (?, ?, ?, ?, 'veto')")
       .run(
         server.id,
+        d.mode,
         JSON.stringify(teamA.map(({ steamId, name }) => ({ steamId, name }))),
         JSON.stringify(teamB.map(({ steamId, name }) => ({ steamId, name }))),
       );
 
     const m: Match = {
       id: Number(row.lastInsertRowid),
+      mode: d.mode,
+      bot,
       teamA,
       teamB,
       captainA: captain(teamA),
@@ -624,7 +705,7 @@ export class Matchmaking {
 
     // Whoever was ready but didn't get a spot goes first next time.
     const picked = new Set(d.players.map((p) => p.steamId));
-    for (const e of this.available()) if (!picked.has(e.steamId)) e.sitOuts++;
+    for (const e of this.available(d.mode)) if (!picked.has(e.steamId)) e.sitOuts++;
     for (const id of picked) {
       const e = this.lobby.get(id);
       if (e) e.sitOuts = 0;
@@ -633,7 +714,9 @@ export class Matchmaking {
     this.d.audit.record(null, "matchmaking.match", server.id, {
       reason: "Teams made on the matchmaking site",
       match: m.id,
-      players: d.players.length,
+      mode: MODE_INFO[d.mode].label,
+      players: d.players.filter((p) => p.steamId !== BOT_ID).length,
+      ...(bot ? { bot: true } : {}),
     });
     if (pool.length === 1) this.toSidePick(m, pool[0]!, "b");
     return m.id;
@@ -723,9 +806,10 @@ export class Matchmaking {
         version: 1,
         active: true,
         matchId: String(m.id),
+        mode: m.mode,
         players: [
-          ...m.teamA.map((p) => ({ steamId: p.steamId, name: p.name, team: m.sideA, group: "a" })),
-          ...m.teamB.map((p) => ({ steamId: p.steamId, name: p.name, team: sideB, group: "b" })),
+          ...humans(m.teamA).map((p) => ({ steamId: p.steamId, name: p.name, team: m.sideA, group: "a" })),
+          ...humans(m.teamB).map((p) => ({ steamId: p.steamId, name: p.name, team: sideB, group: "b" })),
         ],
       });
 
@@ -740,8 +824,19 @@ export class Matchmaking {
       m.status = "Loading the map";
       await this.exec(s, `sv_password "${m.password}"`);
       await this.exec(s, "cs2panel_match_reload");
-      // A full map load in Competitive; the bridge keeps warmup going until everyone is in.
-      await this.exec(s, gameModeLine(0, 1, m.map!), 15_000).catch(() => undefined);
+      // Bot settings stick across the map load. A bot joins the short team; otherwise none.
+      if (m.bot) {
+        const botSide = m.bot === "a" ? m.sideA : sideB;
+        await this.exec(
+          s,
+          `bot_kick; bot_quota_mode normal; bot_difficulty ${this.config().botDifficulty}; bot_join_team ${botSide!.toUpperCase()}; bot_quota 1`,
+        );
+      } else {
+        await this.exec(s, "bot_kick; bot_quota 0");
+      }
+      // A full map load in the lobby's mode; the bridge keeps warmup going until everyone is in.
+      const info = MODE_INFO[m.mode];
+      await this.exec(s, gameModeLine(info.gameType, info.gameMode, m.map!), 15_000).catch(() => undefined);
       if (!isActive(m)) return;
 
       m.phase = "live";
@@ -796,7 +891,7 @@ export class Matchmaking {
         return;
       }
       if (st.phase === "live") m.status = "Match in progress";
-      else if (st.phase === "warmup") m.status = `Warmup: ${m.connected} of ${m.teamA.length + m.teamB.length} players in`;
+      else if (st.phase === "warmup") m.status = `Warmup: ${m.connected} of ${expected(m)} players in`;
       const quietSince = Math.max(m.readyAt ?? t, m.lastConnectedAt ?? 0);
       if (m.connected === 0 && t - quietSince > IDLE_MATCH_MS) await this.finish(m, "abandoned", "Nobody was on the server for 10 minutes.");
     } finally {
@@ -832,6 +927,7 @@ export class Matchmaking {
     await this.matchFile(s, { version: 1, active: false, players: [] });
     if ((await this.d.host.serviceStatus(s.slug)).state !== "active") return;
     await this.exec(s, "cs2panel_match_reload").catch(() => undefined);
+    await this.exec(s, "bot_quota 0; bot_kick; bot_join_team any").catch(() => undefined);
     await this.exec(s, `sv_password "${(s.password ?? "").replace(/["\\;\r\n]/g, "")}"`).catch(() => undefined);
   }
 
@@ -893,6 +989,8 @@ export class Matchmaking {
     return {
       ...this.teamsView(m.teamA, m.teamB),
       id: m.id,
+      mode: m.mode,
+      modeLabel: MODE_INFO[m.mode].label,
       phase: m.phase,
       captainA: m.captainA,
       captainB: m.captainB,
@@ -908,7 +1006,7 @@ export class Matchmaking {
       status: m.status,
       error: m.error,
       connected: m.connected,
-      expected: m.teamA.length + m.teamB.length,
+      expected: expected(m),
       warmup: m.bridgePhase !== "live" && m.bridgePhase !== "over",
       score: m.score,
       createdAt: m.createdAt,
@@ -930,6 +1028,7 @@ export class Matchmaking {
         rating: this.ratingNow(p),
         selfRating: p.selfRating,
         inLobby: !!e,
+        mode: e?.mode ?? null,
         ready: e?.ready ?? false,
         leetifyUrl: leetifyProfileUrl(viewer),
       };
@@ -946,33 +1045,41 @@ export class Matchmaking {
           leetifyUrl: leetifyProfileUrl(e.steamId),
           status: this.activeMatchOf(e.steamId) ? "in-match" : e.ready ? "ready" : "away",
           sitOuts: e.sitOuts,
+          mode: e.mode,
         };
       });
-    let draft: DraftView | null = null;
-    if (this.draft) {
-      const d = this.draft;
+    const drafts: DraftView[] = [...this.drafts.values()].map((d) => {
       const split = d.splits[d.index]!;
-      draft = {
+      return {
         ...this.teamsView(
           split.a.map((i) => d.players[i]!),
           split.b.map((i) => d.players[i]!),
         ),
         id: d.id,
+        mode: d.mode,
         option: d.index + 1,
         options: d.splits.length,
       };
-    }
+    });
+    const lobbies = this.openModes(c).map((mode) => ({
+      mode,
+      label: MODE_INFO[mode].label,
+      teamSize: MODE_INFO[mode].teamSize,
+      maps: c.modes[mode].maps,
+      players: lobby.filter((p) => p.mode === mode).length,
+      ready: lobby.filter((p) => p.mode === mode && p.status === "ready").length,
+    }));
     return {
       title: c.title,
       enabled: c.enabled,
       me,
+      lobbies,
       lobby,
-      draft,
+      drafts,
       matches: this.matches
         .slice()
         .reverse()
         .map((m) => this.matchView(m, viewer)),
-      maps: c.maps,
       freeServers: this.freeCountSync(),
       matchServers: this.poolRecords().filter((s) => this.d.hasBridge(s.id)).length,
       now: this.now(),
@@ -980,11 +1087,10 @@ export class Matchmaking {
   }
 
   /** Finished matches, newest first, for the panel. */
-  history(
-    limit = 30,
-  ): {
+  history(limit = 30): {
     id: number;
     serverId: number | null;
+    mode: string;
     map: string | null;
     teamA: { steamId: string; name: string }[];
     teamB: { steamId: string; name: string }[];
@@ -998,6 +1104,7 @@ export class Matchmaking {
     const rows = this.d.db.prepare("SELECT * FROM mm_matches ORDER BY id DESC LIMIT ?").all(limit) as {
       id: number;
       server_id: number | null;
+      mode: string;
       map: string | null;
       team_a: string;
       team_b: string;
@@ -1011,6 +1118,7 @@ export class Matchmaking {
     return rows.map((r) => ({
       id: r.id,
       serverId: r.server_id,
+      mode: r.mode,
       map: r.map,
       teamA: JSON.parse(r.team_a),
       teamB: JSON.parse(r.team_b),

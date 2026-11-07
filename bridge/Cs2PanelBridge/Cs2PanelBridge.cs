@@ -28,7 +28,7 @@ namespace Cs2PanelBridge;
 public class Cs2PanelBridge : BasePlugin
 {
     public override string ModuleName => "CS2 Panel Bridge";
-    public override string ModuleVersion => "1.1.0";
+    public override string ModuleVersion => "1.2.0";
     public override string ModuleAuthor => "cs2-panel";
     public override string ModuleDescription => "Enforces cs2-panel bans, locks matchmaking matches and reports players to the panel.";
 
@@ -77,6 +77,8 @@ public class Cs2PanelBridge : BasePlugin
 
     private void OnClientAuthorized(int playerSlot, SteamID steamId)
     {
+        // Bots have no SteamID; a match may have one filling in for a missing player.
+        if (steamId.SteamId64 == 0) return;
         var ban = ActiveBan(steamId.SteamId64);
         var outsider = ban == null && _match != null && !_matchPlayers.ContainsKey(steamId.SteamId64);
         if (ban == null && !outsider) return;
@@ -84,7 +86,7 @@ public class Cs2PanelBridge : BasePlugin
         Server.NextFrame(() =>
         {
             var player = Utilities.GetPlayerFromSlot(playerSlot);
-            if (player is not { IsValid: true }) return;
+            if (player is not { IsValid: true } || player.IsBot) return;
             if (ban != null) Kick(player, ban);
             else KickOutsider(player);
         });

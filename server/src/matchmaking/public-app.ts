@@ -8,7 +8,7 @@ import { HttpError, forbidden } from "../errors.js";
 import { buildLoginUrl, verifyCallback } from "../auth/steam-openid.js";
 import { fetchProfile } from "../auth/steam-profile.js";
 import { MM_MAX_AGE_MS, MM_SESSION_COOKIE, type MmPlayerStore } from "./players.js";
-import type { Matchmaking, MatchView } from "./service.js";
+import { MODES, type Matchmaking, type MatchView } from "./service.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -152,7 +152,8 @@ export async function buildPublicApp(d: PublicDeps): Promise<FastifyInstance> {
   // ------------------------------------------------------------- lobby
 
   app.post("/api/lobby/join", async (req) => {
-    mm.join(requirePlayer(req));
+    const { mode } = z.object({ mode: z.enum(MODES).default("competitive") }).parse(req.body ?? {});
+    mm.join(requirePlayer(req), mode);
     return { ok: true };
   });
   app.post("/api/lobby/leave", async (req) => {

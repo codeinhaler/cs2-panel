@@ -194,7 +194,17 @@ async function setupServer(cookie: string, opts: { bridge?: boolean } = {}): Pro
 async function enable(cookie: string, serverIds: number[], extra: Record<string, unknown> = {}) {
   const current = (await admin(cookie, "GET", "/api/matchmaking")).body.settings;
   const res = await admin(cookie, "PUT", "/api/matchmaking", {
-    settings: { ...current, enabled: true, serverIds, maps: ["de_mirage", "de_inferno", "de_nuke"], ...extra },
+    settings: {
+      ...current,
+      enabled: true,
+      serverIds,
+      modes: {
+        competitive: { enabled: true, maps: ["de_mirage", "de_inferno", "de_nuke"] },
+        wingman: { enabled: true, maps: ["de_vertigo", "de_nuke"] },
+        duel: { enabled: true, maps: ["de_vertigo"] },
+      },
+      ...extra,
+    },
   });
   expect(res.status, JSON.stringify(res.body)).toBe(200);
 }
@@ -220,16 +230,98 @@ describe("matchmaking site", () => {
     );
   });
 
-  it("only lets admins change the settings", async () => {
+  it("checks the settings", async () => {
     const owner = await adminCookie();
+    const base = { enabled: true, port: 8090, title: "x", serverIds: [], gameAddress: "", vetoSeconds: 30, botDifficulty: 1 };
+    const closed = { enabled: false, maps: [] };
     const res = await admin(owner, "PUT", "/api/matchmaking", {
-      settings: { enabled: true, port: 8080, title: "x", serverIds: [], maps: [], gameAddress: "", vetoSeconds: 30 },
+      settings: { ...base, modes: { competitive: { enabled: true, maps: [] }, wingman: closed, duel: closed } },
     });
-    expect(res.body.error).toMatch(/at least one map/);
+    expect(res.body.error).toMatch(/needs at least one map/);
+    const none = await admin(owner, "PUT", "/api/matchmaking", { settings: { ...base, modes: { competitive: closed, wingman: closed, duel: closed } } });
+    expect(none.body.error).toMatch(/at least one lobby/);
     const bad = await admin(owner, "PUT", "/api/matchmaking", {
-      settings: { enabled: true, port: 8090, title: "x", serverIds: [], maps: ["not a map!"], gameAddress: "", vetoSeconds: 30 },
+      settings: { ...base, modes: { competitive: { enabled: true, maps: ["not a map!"] }, wingman: closed, duel: closed } },
     });
     expect(bad.status).toBe(400);
+    // Settings saved before lobbies existed keep their map pool for Competitive.
+    (app.services.servers as any).store.db.prepare("INSERT INTO settings (key, value) VALUES ('matchmaking', ?)").run(JSON.stringify({ maps: ["de_cache"] }));
+    expect(app.services.matchmaking.config().modes.competitive.maps).toEqual(["de_cache"]);
+  });
+
+  it("has separate lobbies, and a bot fills in for an odd number of players", async () => {
+    const owner = await adminCookie();
+    const serverId = await setupServer(owner);
+    await enable(owner, [serverId], { botDifficulty: 2 });
+    const cookies = await Promise.all(P.slice(0, 4).map((id, i) => playerCookie(id, ["Alpha", "Bravo", "Charlie", "Delta"][i]!)));
+    // Three in Wingman, one in 1v1.
+    for (const c of cookies.slice(0, 3)) await play(c, "POST", "/api/lobby/join", { mode: "wingman" });
+    await play(cookies[3]!, "POST", "/api/lobby/join", { mode: "duel" });
+    let state = (await play(cookies[0]!, "GET", "/api/state")).body;
+    expect(state.me.mode).toBe("wingman");
+    expect(state.lobbies.map((l: any) => [l.mode, l.players])).toEqual([
+      ["competitive", 0],
+      ["wingman", 3],
+      ["duel", 1],
+    ]);
+
+    // Alone in 1v1: nobody to play.
+    expect((await play(cookies[3]!, "POST", "/api/teams")).body.error).toMatch(/At least 2/);
+
+    // Three in Wingman: 2v2 with a bot, captains are people.
+    expect((await play(cookies[0]!, "POST", "/api/teams")).status).toBe(200);
+    state = (await play(cookies[0]!, "GET", "/api/state")).body;
+    expect(state.drafts).toHaveLength(1);
+    const d = state.drafts[0];
+    expect(d.mode).toBe("wingman");
+    expect(d.teamA).toHaveLength(2);
+    expect(d.teamB).toHaveLength(2);
+    const bot = [...d.teamA, ...d.teamB].find((p: any) => p.steamId === "BOT");
+    expect(bot).toMatchObject({ name: "Bot (Hard)", rating: { value: 9000, source: "bot" } });
+
+    const { matchId } = (await play(cookies[0]!, "POST", `/api/teams/${d.id}/start`)).body;
+    state = (await play(cookies[0]!, "GET", "/api/state")).body;
+    const m = state.matches[0];
+    expect(m).toMatchObject({ mode: "wingman", modeLabel: "Wingman", pool: ["de_vertigo", "de_nuke"], expected: 3 });
+    expect([m.captainA, m.captainB]).not.toContain("BOT");
+
+    // Ban, pick a side, and the server loads Wingman with the bot on the short team.
+    const captainCookie = (id: string) => cookies[P.indexOf(id)]!;
+    const turnCaptain = m.turn === "a" ? m.captainA : m.captainB;
+    await play(captainCookie(turnCaptain), "POST", `/api/matches/${matchId}/ban`, { map: "de_nuke" });
+    state = (await play(cookies[0]!, "GET", "/api/state")).body;
+    const picker = state.matches[0].sidePicker === "a" ? state.matches[0].captainA : state.matches[0].captainB;
+    await play(captainCookie(picker), "POST", `/api/matches/${matchId}/side`, { side: "ct" });
+    await settle(async () => (await play(cookies[0]!, "GET", "/api/state")).body.matches[0].phase !== "starting");
+    state = (await play(cookies[0]!, "GET", "/api/state")).body;
+    expect(state.matches[0].phase).toBe("live");
+    expect(rconLog).toContain("game_type 0; game_mode 2; map de_vertigo");
+    const botTeam = state.matches[0].teamA.some((p: any) => p.steamId === "BOT") ? "a" : "b";
+    const botSide = botTeam === "a" ? state.matches[0].sideA : state.matches[0].sideA === "ct" ? "t" : "ct";
+    expect(rconLog).toContain(`bot_kick; bot_quota_mode normal; bot_difficulty 2; bot_join_team ${botSide.toUpperCase()}; bot_quota 1`);
+    // The bot isn't in the bridge's player list.
+    const [matchFile] = findFile(dir, "match.json");
+    const file = JSON.parse(readFileSync(matchFile!, "utf8"));
+    expect(file.players).toHaveLength(3);
+    expect(file.mode).toBe("wingman");
+
+    // Can't switch lobby during a match; afterwards the bot is removed again.
+    expect((await play(cookies[0]!, "POST", "/api/lobby/join", { mode: "duel" })).body.error).toMatch(/Finish your match/);
+    await play(cookies[0]!, "POST", `/api/matches/${matchId}/cancel`);
+    expect(rconLog).toContain("bot_quota 0; bot_kick; bot_join_team any");
+    expect((await play(cookies[0]!, "POST", "/api/lobby/join", { mode: "duel" })).status).toBe(200);
+  });
+
+  it("plays 1v1 in pairs", async () => {
+    const owner = await adminCookie();
+    await enable(owner, [await setupServer(owner)]);
+    const cookies = await Promise.all(P.slice(0, 3).map((id, i) => playerCookie(id, ["Alpha", "Bravo", "Charlie"][i]!)));
+    for (const c of cookies) await play(c, "POST", "/api/lobby/join", { mode: "duel" });
+    await play(cookies[0]!, "POST", "/api/teams");
+    const d = (await play(cookies[0]!, "GET", "/api/state")).body.drafts[0];
+    expect(d.teamA).toHaveLength(1);
+    expect(d.teamB).toHaveLength(1);
+    expect([...d.teamA, ...d.teamB].some((p: any) => p.steamId === "BOT")).toBe(false);
   });
 
   it("runs a match from teams to the end", async () => {
@@ -247,20 +339,20 @@ describe("matchmaking site", () => {
     // Make teams: the most even split of 20k, 15k, 10k, 12k is 20k+10k against 15k+12k.
     expect((await play(cookies[0]!, "POST", "/api/teams")).status).toBe(200);
     let state = (await play(cookies[0]!, "GET", "/api/state")).body;
-    expect(state.draft.teamA.length).toBe(2);
-    expect(state.draft.gap).toBe(3000);
-    expect(state.draft.options).toBe(3);
-    const delta = [...state.draft.teamA, ...state.draft.teamB].find((p: any) => p.steamId === P[3]);
+    expect(state.drafts[0].teamA.length).toBe(2);
+    expect(state.drafts[0].gap).toBe(3000);
+    expect(state.drafts[0].options).toBe(3);
+    const delta = [...state.drafts[0].teamA, ...state.drafts[0].teamB].find((p: any) => p.steamId === P[3]);
     expect(delta.rating).toMatchObject({ value: 12000, source: "self" });
-    const draftId = state.draft.id;
+    const draftId = state.drafts[0].id;
 
     // Echo isn't in the lobby or on these teams.
     expect((await play(cookies[4]!, "POST", `/api/teams/${draftId}/reshuffle`)).status).toBe(403);
     expect((await play(cookies[1]!, "POST", `/api/teams/${draftId}/reshuffle`)).status).toBe(200);
-    expect((await play(cookies[1]!, "GET", "/api/state")).body.draft.option).toBe(2);
+    expect((await play(cookies[1]!, "GET", "/api/state")).body.drafts[0].option).toBe(2);
     await play(cookies[1]!, "POST", `/api/teams/${draftId}/reshuffle`);
     await play(cookies[1]!, "POST", `/api/teams/${draftId}/reshuffle`);
-    expect((await play(cookies[1]!, "GET", "/api/state")).body.draft.option).toBe(1);
+    expect((await play(cookies[1]!, "GET", "/api/state")).body.drafts[0].option).toBe(1);
 
     const start = await play(cookies[2]!, "POST", `/api/teams/${draftId}/start`);
     expect(start.status, JSON.stringify(start.body)).toBe(200);
@@ -344,7 +436,7 @@ describe("matchmaking site", () => {
     await play(a, "POST", "/api/lobby/join");
     await play(b, "POST", "/api/lobby/join");
     await play(a, "POST", "/api/teams");
-    const draftId = (await play(a, "GET", "/api/state")).body.draft.id;
+    const draftId = (await play(a, "GET", "/api/state")).body.drafts[0].id;
     const { matchId } = (await play(a, "POST", `/api/teams/${draftId}/start`)).body;
 
     now += 16_000;
