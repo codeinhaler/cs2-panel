@@ -2,11 +2,12 @@ import { useEffect, useId, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type Server } from "../../api";
 import { useAction, useApp } from "../../app-context";
+import { GameModePanel } from "./GameModePanel";
 
 type Body = { action: string; [k: string]: unknown };
 
 /** Buttons for the everyday server commands, so nobody needs to remember console syntax. */
-export function CommandsTab({ server }: { server: Server }) {
+export function CommandsTab({ server, onChanged }: { server: Server; onChanged?: () => void }) {
   const { can } = useApp();
   const { busy, run } = useAction();
   const mapsId = useId();
@@ -52,6 +53,7 @@ export function CommandsTab({ server }: { server: Server }) {
     <>
       {control && (
         <>
+          <GameModePanel server={server} onKept={() => onChanged?.()} />
           <div className="panel">
             <h2 style={{ marginBottom: 6 }}>Map</h2>
             <p className="hint" style={{ marginTop: 0 }}>

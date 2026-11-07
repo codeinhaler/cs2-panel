@@ -32,7 +32,7 @@ import { MapMenuService } from "./plugins/map-menu.js";
 import { ExecConfigService, withBlock } from "./servers/exec-configs.js";
 import { WorkshopLookup, workshopBlocks } from "./game/workshop.js";
 import { parseMapSpec } from "./servers/map-spec.js";
-import { CommandSchema, commandPermission, rconFor } from "./servers/commands.js";
+import { CommandSchema, commandPermission, gameModeLine, rconFor } from "./servers/commands.js";
 import { Settings } from "./settings.js";
 import { Automation } from "./automation/index.js";
 import { humanCounter } from "./automation/humans.js";
@@ -525,6 +525,70 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     } catch (e) {
       throw badRequest(`The server didn't take the command: ${(e as Error).message}`);
     }
+  });
+
+  // Switching game mode from the Commands tab: right away, until the next restart or for good.
+  /** Modes switched "until the next restart", keyed by server, with the start time of the process they apply to. */
+  const liveModes = new Map<number, { presetName: string; map: string; processSince: string | null }>();
+
+  app.get("/api/servers/:id/gamemode", async (req) => {
+    requirePerm(req, "view");
+    const { id } = idParam.parse(req.params);
+    const s = servers.require(id);
+    const status = await host.serviceStatus(s.slug);
+    let live = liveModes.get(id) ?? null;
+    // A restart (or stop) loads the saved mode again.
+    if (live && (status.state !== "active" || live.processSince !== status.since)) {
+      liveModes.delete(id);
+      live = null;
+    }
+    const preset = s.presetId ? presets.byId(s.presetId) : null;
+    return { saved: { presetId: s.presetId, presetName: preset?.name ?? null, gameType: s.gameType, gameMode: s.gameMode, map: s.map }, live };
+  });
+
+  app.post("/api/servers/:id/gamemode", async (req) => {
+    const user = requirePerm(req, "server.control");
+    const { id } = idParam.parse(req.params);
+    const body = z
+      .object({ presetId: z.number().int(), map: z.string().trim().max(80).optional(), keep: z.boolean().default(false), applyConfigs: z.boolean().default(false) })
+      .parse(req.body);
+    if (body.keep && !can(user.role, "server.manage")) throw forbidden("Only Admins and the Owner can change a server's saved game mode.");
+    const s = servers.require(id);
+    const status = await host.serviceStatus(s.slug);
+    if (status.state !== "active") throw badRequest("Start the server first, or change the game mode in Settings.");
+    const preset = presets.byId(body.presetId);
+    if (!preset) throw badRequest("Unknown preset.");
+    const map = body.map || preset.defaultMap;
+    await checkWorkshop(map);
+    let line: string;
+    try {
+      line = gameModeLine(preset.gameType, preset.gameMode, map);
+    } catch (e) {
+      throw badRequest((e as Error).message);
+    }
+
+    // Keeping it: save it first (launch options, and the preset's files if asked), so the
+    // map change below already loads them.
+    let restartNote = false;
+    if (body.keep) {
+      await servers.update(
+        id,
+        { presetId: preset.id, map, maxPlayers: preset.maxPlayers, ...(body.applyConfigs ? { applyPresetConfigs: true } : {}) },
+        actorOf(user),
+      );
+      // The player limit is a launch option, so only a restart changes it.
+      restartNote = preset.maxPlayers !== s.maxPlayers;
+      liveModes.delete(id);
+    }
+    audit.record(user.id, "server.gamemode", id, { preset: preset.name, map, keep: body.keep, applyConfigs: body.keep && body.applyConfigs });
+    let output: string;
+    try {
+      output = await rcon({ port: s.port, password: s.rconPassword }, line);
+    } catch (e) {
+      throw badRequest(`The server didn't take the command: ${(e as Error).message}`);
+    }
+    if (!body.keep) liveModes.set(id, { presetName: preset.name, map, processSince: status.since });
+    return { output, maxPlayersNote: restartNote ? `Max players (${preset.maxPlayers}) changes at the next restart.` : null };
   });
 
   // Live console: journald output streamed over a WebSocket.

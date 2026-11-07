@@ -396,6 +396,13 @@ export const api = {
     request<{ entries: AuditEntry[] }>("GET", `/api/audit?${q(params)}`),
 
   host: () => request<HostInfo>("GET", "/api/host"),
+  gameMode: (id: number) =>
+    request<{
+      saved: { presetId: number | null; presetName: string | null; gameType: number; gameMode: number; map: string };
+      live: { presetName: string; map: string } | null;
+    }>("GET", `/api/servers/${id}/gamemode`),
+  switchGameMode: (id: number, body: { presetId: number; map?: string; keep: boolean; applyConfigs: boolean }) =>
+    request<{ output: string; maxPlayersNote: string | null }>("POST", `/api/servers/${id}/gamemode`, body),
   command: (id: number, body: { action: string; [k: string]: unknown }) => request<{ output: string }>("POST", `/api/servers/${id}/commands`, body),
   workshop: (id: string, kind: "map" | "collection") => request<WorkshopInfo>("GET", `/api/workshop/${id}?kind=${kind}`),
   notifications: () => request<{ discord: DiscordSettings; groups: Record<EventGroup, string> }>("GET", "/api/notifications"),

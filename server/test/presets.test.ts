@@ -30,6 +30,8 @@ describe("exec block", () => {
 
 let dir: string;
 let app: App;
+let host: FakeHost;
+const rconSent: string[] = [];
 
 beforeEach(async () => {
   dir = mkdtempSync(path.join(tmpdir(), "cs2panel-presets-"));
@@ -47,14 +49,19 @@ beforeEach(async () => {
     dev: true,
   };
   installFakeBase(config.cs2Root);
+  rconSent.length = 0;
+  host = new FakeHost(config.cs2Root, config.instanceEnvDir);
   app = await buildApp({
     config,
     db: openDb(path.join(dir, "panel.db")),
-    host: new FakeHost(config.cs2Root, config.instanceEnvDir),
+    host,
     logLevel: "silent",
     pluginCheckDelayMs: 0,
     fetchFn: (async (url: string | URL | Request, init?: RequestInit) => (await fakeSteamWorkshop(url, init)) ?? new Response("", { status: 404 })) as typeof fetch,
-    rcon: async () => "",
+    rcon: async (_o, cmd) => {
+      rconSent.push(cmd);
+      return "";
+    },
   });
 });
 
@@ -174,3 +181,62 @@ describe("custom presets", () => {
     expect((await call(m, "PUT", `/api/servers/${s.id}/exec-configs`, { configs: [] })).status).toBe(403);
   });
 });
+
+describe("switching game mode from the Commands tab", () => {
+  it("switches right away until the next restart, without touching the saved settings", async () => {
+    const c = await login();
+    const list = (await call(c, "GET", "/api/presets")).body.presets as { id: number; key: string }[];
+    const casual = list.find((p) => p.key === "casual")!;
+    const comp = list.find((p) => p.key === "competitive")!;
+    const s = (await call(c, "POST", "/api/servers", { name: "A", presetId: casual.id, port: 27015 })).body.server;
+    expect((await call(c, "POST", `/api/servers/${s.id}/gamemode`, { presetId: comp.id })).body.error).toMatch(/Start the server/);
+    await call(c, "POST", `/api/servers/${s.id}/start`, {});
+
+    const r = await call(c, "POST", `/api/servers/${s.id}/gamemode`, { presetId: comp.id });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(rconSent.at(-1)).toBe("game_type 0; game_mode 1; changelevel de_mirage");
+    let g = (await call(c, "GET", `/api/servers/${s.id}/gamemode`)).body;
+    expect(g.live).toMatchObject({ presetName: "Competitive", map: "de_mirage" });
+    expect(g.saved).toMatchObject({ presetName: "Casual", gameMode: 0 });
+
+    // A restart brings back the saved mode.
+    await call(c, "POST", `/api/servers/${s.id}/restart`, {});
+    host.since.set(s.slug, new Date(Date.now() + 1000).toISOString());
+    g = (await call(c, "GET", `/api/servers/${s.id}/gamemode`)).body;
+    expect(g.live).toBeNull();
+
+    expect((await call(c, "POST", `/api/servers/${s.id}/gamemode`, { presetId: comp.id, map: "workshop:3094994703" })).body.error).toMatch(/removed/);
+    await call(c, "POST", `/api/servers/${s.id}/gamemode`, { presetId: comp.id, map: "workshop:3070288532" });
+    expect(rconSent.at(-1)).toBe("game_type 0; game_mode 1; host_workshop_map 3070288532");
+  });
+
+  it("keeps it: saves the mode, map, max players and optionally the preset's files", async () => {
+    const c = await login();
+    const casual = (await call(c, "GET", "/api/presets")).body.presets.find((p: { key: string }) => p.key === "casual");
+    const prac = (await call(c, "POST", "/api/presets", PRACTICE)).body.preset;
+    const s = (await call(c, "POST", "/api/servers", { name: "A", presetId: casual.id, port: 27015 })).body.server;
+    await call(c, "POST", `/api/servers/${s.id}/start`, {});
+    const r = await call(c, "POST", `/api/servers/${s.id}/gamemode`, { presetId: prac.id, keep: true, applyConfigs: true });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body.maxPlayersNote).toMatch(/Max players \(10\)/);
+    const g = (await call(c, "GET", `/api/servers/${s.id}/gamemode`)).body;
+    expect(g.live).toBeNull();
+    expect(g.saved).toMatchObject({ presetName: "Practice", gameType: 0, gameMode: 1, map: "de_mirage" });
+    expect(await readCfg(c, s.id, "practice.cfg")).toContain("mp_maxmoney 60000");
+    expect(await readCfg(c, s.id, "gamemode_competitive_server.cfg")).toContain("exec practice");
+    expect(rconSent.at(-1)).toBe("game_type 0; game_mode 1; changelevel de_mirage");
+    const actions = (await call(c, "GET", "/api/audit")).body.entries.map((e: { action: string }) => e.action);
+    expect(actions).toContain("server.gamemode");
+  });
+
+  it("lets moderators do neither; admins can switch but only Admins/Owner keep", async () => {
+    const c = await login();
+    const casual = (await call(c, "GET", "/api/presets")).body.presets.find((p: { key: string }) => p.key === "casual");
+    const s = (await call(c, "POST", "/api/servers", { name: "A", presetId: casual.id, port: 27015 })).body.server;
+    await call(c, "POST", `/api/servers/${s.id}/start`, {});
+    await call(c, "POST", "/api/users", { steam: MOD, role: "moderator" });
+    const m = await login(MOD);
+    expect((await call(m, "POST", `/api/servers/${s.id}/gamemode`, { presetId: casual.id })).status).toBe(403);
+  });
+});
+

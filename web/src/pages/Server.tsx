@@ -91,7 +91,7 @@ export function ServerPage() {
           }
         />
         <Route path="plugins" element={<PluginsTab server={s} />} />
-        <Route path="commands" element={<CommandsTab server={s} />} />
+        <Route path="commands" element={<CommandsTab server={s} onChanged={() => void refresh()} />} />
         <Route path="players" element={<PlayersTab server={s} bridge={data.bridge} />} />
         {data.pluginPages.map((p) => (
           <Route key={p.pluginId} path={`plugin/${p.pluginId}`} element={<ModerationTab server={s} label={p.label} />} />

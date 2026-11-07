@@ -35,6 +35,8 @@ function describe(e: AuditEntry): string {
       return d.trigger ? `restarted the server (${str("trigger")})` : "restarted the server";
     case "server.restart.failed":
       return `couldn't restart the server (${str("trigger")}): ${str("error")}`;
+    case "server.gamemode":
+      return `switched the game mode to ${str("preset")} on ${str("map")}${d.keep ? (d.applyConfigs ? ", kept with the preset's config files" : ", kept") : " until the next restart"}`;
     case "server.command": {
       const names: Record<string, string> = {
         "restart-game": "restarted the game",
