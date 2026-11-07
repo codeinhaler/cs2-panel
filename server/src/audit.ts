@@ -12,13 +12,30 @@ export interface AuditEntry {
   createdAt: string;
 }
 
+export interface AuditEvent {
+  userId: number | null;
+  action: string;
+  serverId: number | null;
+  details: Record<string, unknown>;
+}
+
 export class AuditLog {
+  /** Called after every entry (e.g. Discord notifications). Errors in listeners are ignored. */
+  readonly listeners: ((e: AuditEvent) => void)[] = [];
+
   constructor(private readonly db: Db) {}
 
   record(userId: number | null, action: string, serverId: number | null = null, details: Record<string, unknown> = {}): void {
     this.db
       .prepare("INSERT INTO audit_log (user_id, action, server_id, details) VALUES (?, ?, ?, ?)")
       .run(userId, action, serverId, JSON.stringify(details));
+    for (const l of this.listeners) {
+      try {
+        l({ userId, action, serverId, details });
+      } catch {
+        /* never let a listener break the action that was logged */
+      }
+    }
   }
 
   list(opts: { limit?: number; before?: number; serverId?: number } = {}): AuditEntry[] {

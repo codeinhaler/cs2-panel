@@ -559,6 +559,8 @@ Downloads the latest (or a specified) panel release, swaps it in, runs database 
 - Custom presets, including "save this server as a preset". (done)
 - Configs to run on every map start (managed exec block in gamemode_<mode>_server.cfg). (done)
 - Workshop items checked with Steam's public API before use. (done)
+- Performance monitor (metrics table, warnings with hysteresis) and Discord webhook notifications driven by Activity events. (done)
+- Backups (download/restore a server's files).
 - Global config layer.
 - Resource graphs, backups UI.
 - Optional Discord webhooks.

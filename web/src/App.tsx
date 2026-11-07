@@ -12,6 +12,7 @@ import { ActivityPage } from "./pages/Activity";
 import { PreferencesPage } from "./pages/Preferences";
 import { PresetsPage } from "./pages/Presets";
 import { MonitorPage } from "./pages/Monitor";
+import { NotificationsPage } from "./pages/Notifications";
 
 export function App() {
   const [me, setMe] = useState<Me | null | "loading">("loading");
@@ -43,6 +44,7 @@ export function App() {
             <Route path="preferences" element={<PreferencesPage />} />
             <Route path="presets" element={<PresetsPage />} />
             <Route path="monitor" element={<MonitorPage />} />
+            <Route path="notifications" element={<NotificationsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         ) : (
@@ -86,6 +88,11 @@ function Shell() {
         <NavLink to="/presets" className="nav-link">
           Presets
         </NavLink>
+        {can("server.manage") && (
+          <NavLink to="/notifications" className="nav-link">
+            Notifications
+          </NavLink>
+        )}
         {can("users.manage") && (
           <NavLink to="/team" className="nav-link">
             Team

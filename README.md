@@ -42,6 +42,9 @@ The design is in [docs/DESIGN.md](docs/DESIGN.md).
 - **Workshop check**: before a Workshop map or collection is saved or loaded, the panel asks Steam about it and refuses removed, missing, private or non-CS2 items. The map picker shows the item's name and size and warns when there's no GSLT.
 - **Honest status**: a server whose process runs but whose game doesn't answer shows "Starting" for 90 seconds, then "Not answering", with the likely cause.
 - The GSLT stays in its field (hidden, with Show) for Admins and the Owner; the restart time picker follows the 12h/24h preference.
+- **Monitor** page: CPU (per server, as % of its core), memory, players, and the machine's CPU, memory, disk and network over time (1 hour to 90 days). Each server's Overview has its own charts. Sampled every minute from systemd and /proc; nothing extra to install. 7 days in one-minute detail, 90 days as hourly averages.
+- **Warnings**: a server using its whole core for 10 minutes, a server that runs but hasn't answered for 5 minutes, a server that crashed (or stopped after crashing), machine CPU above 95% or memory above 90%, and a disk more than 90% full. Shown on the Monitor page and the server's Overview, and logged in Activity.
+- **Discord notifications** (Notifications page): paste a channel webhook and pick what to send: problems, CS2 updates, scheduled restarts, kicks/bans, and servers started or stopped by someone. The webhook is stored encrypted. There's a test button.
 - Automatic actions show up in Activity as "System", with the reason.
 
 ## Installing on the server

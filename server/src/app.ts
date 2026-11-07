@@ -40,6 +40,7 @@ import { UpdateWatcher, type UpdatePolicy } from "./automation/updates.js";
 import { RestartScheduler } from "./automation/restarts.js";
 import { Monitor, MACHINE, RANGES, type Range } from "./monitor/monitor.js";
 import { queryInfo, type A2sInfo } from "./game/a2s.js";
+import { DiscordNotifier, EVENT_GROUPS, type EventGroup } from "./notify/discord.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -77,6 +78,7 @@ export interface App {
     bans: BanService;
     automation: Automation;
     monitor: Monitor;
+    discord: DiscordNotifier;
   };
 }
 
@@ -122,6 +124,8 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   });
   const settings = new Settings(db);
   const humans = humanCounter(players);
+  const discord = new DiscordNotifier(db, settings, box, fetchFn);
+  audit.listeners.push(discord.onEvent);
   const monitor = new Monitor({ db, host, servers: () => servers.listRecords(), query: deps.a2sQuery ?? ((port) => queryInfo(port)), audit });
   const automation = new Automation(
     new UpdateWatcher(settings, files, host, updater, gate, serverStore, humans, audit),
@@ -914,6 +918,32 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     return { alerts: monitor.alerts(all === "1") };
   });
 
+  // ---------------------------------------------------------- notifications
+
+  app.get("/api/notifications", async (req) => {
+    requirePerm(req, "server.manage");
+    return { discord: discord.view(), groups: EVENT_GROUPS };
+  });
+
+  app.put("/api/notifications", async (req) => {
+    const user = requirePerm(req, "server.manage");
+    const body = z
+      .object({
+        webhook: z.string().max(300).optional(),
+        events: z.partialRecord(z.enum(Object.keys(EVENT_GROUPS) as [EventGroup, ...EventGroup[]]), z.boolean()).default({}),
+      })
+      .parse(req.body);
+    const view = discord.set(body);
+    audit.record(user.id, "notifications.update", null, { webhookSet: view.webhookSet, events: view.events });
+    return { discord: view };
+  });
+
+  app.post("/api/notifications/test", async (req) => {
+    requirePerm(req, "server.manage");
+    await discord.test();
+    return { ok: true };
+  });
+
   app.get("/api/servers/:id/schedule", async (req) => {
     requirePerm(req, "view");
     const { id } = idParam.parse(req.params);
@@ -964,6 +994,6 @@ export async function buildApp(deps: AppDeps): Promise<App> {
 
   return {
     fastify: app,
-    services: { users, sessions, audit, servers, configs, updater, presets, plugins, players, bans, automation, monitor },
+    services: { users, sessions, audit, servers, configs, updater, presets, plugins, players, bans, automation, monitor, discord },
   };
 }

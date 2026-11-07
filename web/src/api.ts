@@ -257,6 +257,14 @@ export interface MonitorOverview {
   servers: { id: number; name: string; cpu: number }[];
 }
 
+export type EventGroup = "problems" | "updates" | "restarts" | "moderation" | "servers";
+
+export interface DiscordSettings {
+  webhookSet: boolean;
+  webhookHint: string | null;
+  events: Record<EventGroup, boolean>;
+}
+
 export interface PluginPage {
   pluginId: string;
   label: string;
@@ -390,6 +398,9 @@ export const api = {
   host: () => request<HostInfo>("GET", "/api/host"),
   command: (id: number, body: { action: string; [k: string]: unknown }) => request<{ output: string }>("POST", `/api/servers/${id}/commands`, body),
   workshop: (id: string, kind: "map" | "collection") => request<WorkshopInfo>("GET", `/api/workshop/${id}?kind=${kind}`),
+  notifications: () => request<{ discord: DiscordSettings; groups: Record<EventGroup, string> }>("GET", "/api/notifications"),
+  saveNotifications: (body: { webhook?: string; events: Partial<Record<EventGroup, boolean>> }) => request<{ discord: DiscordSettings }>("PUT", "/api/notifications", body),
+  testNotification: () => request<{ ok: true }>("POST", "/api/notifications/test", {}),
   monitor: () => request<MonitorOverview>("GET", "/api/monitor"),
   metrics: (scope: "machine" | number, range: MetricRange) => request<MetricSeries>("GET", `/api/metrics?scope=${scope}&range=${range}`),
   alerts: (all = false) => request<{ alerts: PanelAlert[] }>("GET", `/api/alerts${all ? "?all=1" : ""}`),

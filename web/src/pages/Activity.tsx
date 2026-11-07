@@ -52,6 +52,8 @@ function describe(e: AuditEntry): string {
       if (d.action === "bot-quota") return `set the bot count to ${str("count")}`;
       return names[str("action")] ?? `sent ${str("action")}`;
     }
+    case "notifications.update":
+      return d.webhookSet ? "changed the Discord notification settings" : "turned off Discord notifications";
     case "alert.raised":
       return `warned: ${str("message")}`;
     case "alert.cleared":
