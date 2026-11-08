@@ -449,7 +449,8 @@ export interface MmMatch {
 export interface MatchmakingInfo {
   settings: MatchmakingSettings;
   leetifyKeyHint: string | null;
-  site: { listening: boolean; port: number | null; error: string | null };
+  site: { listening: boolean; port: number | null; https?: boolean; error: string | null };
+  httpsDomain: string | null;
   servers: { id: number; name: string; port: number; inPool: boolean; hasBridge: boolean }[];
   maps: string[];
   state: {

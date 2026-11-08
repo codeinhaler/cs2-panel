@@ -47,6 +47,8 @@ import { MmPlayerStore } from "./matchmaking/players.js";
 import { Matchmaking } from "./matchmaking/service.js";
 import { PublicSite, buildPublicApp } from "./matchmaking/public-app.js";
 import { SiteImages, THEMES, type ImageKind } from "./matchmaking/look.js";
+import { CertStore } from "./tls/acme.js";
+import { TlsService } from "./tls/service.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -67,6 +69,8 @@ export interface AppDeps {
   a2sQuery?: (port: number) => Promise<A2sInfo | null>;
   /** Replaces the waits before scheduled restarts (tests). */
   automationSleep?: (ms: number) => Promise<void>;
+  /** Replaces Let's Encrypt and the firewall (tests). */
+  tls?: Partial<Pick<import("./tls/service.js").TlsDeps, "issue" | "panRequest" | "probe" | "sleep" | "now">>;
   /** Replaces the clock and waits matchmaking uses (tests). */
   matchmakingClock?: { now: () => number; sleep: (ms: number) => Promise<void>; random?: (n: number) => number };
 }
@@ -90,6 +94,7 @@ export interface App {
     backups: BackupService;
     matchmaking: Matchmaking;
     publicSite: PublicSite;
+    tls: TlsService;
   };
 }
 
@@ -190,9 +195,19 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     workshop: (id) => workshop.lookup(id, "map"),
     ...(deps.matchmakingClock ?? {}),
   });
+  const tls = new TlsService({
+    settings,
+    box,
+    audit,
+    store: new CertStore(path.join(config.dataDir, "tls")),
+    fetchFn,
+    ...(deps.tls ?? {}),
+  });
+  await tls.load();
   const publicSite = new PublicSite(
-    () =>
+    (https) =>
       buildPublicApp({
+        https,
         mm: matchmaking,
         players: mmPlayers,
         isBanned,
@@ -204,8 +219,11 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     matchmaking,
     config.host,
     config.port,
+    () => tls.active(),
+    () => tls.https().domain,
   );
   matchmaking.onSettingsChanged = () => publicSite.sync();
+  tls.onCertificate = (files) => publicSite.updateCertificate(files);
   mmPlayers.purgeExpired();
 
   users.ensureOwner(config.ownerSteamId);
@@ -1192,6 +1210,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       state: matchmaking.state(null),
       history: matchmaking.history(),
       mapNames: matchmaking.mapNames(),
+      httpsDomain: publicSite.status().https ? tls.https().domain : null,
       themes: THEMES,
       images: matchmaking.imageUrls(),
     };
@@ -1249,6 +1268,62 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     return { ok: true };
   });
 
+  // ------------------------------------------------------------- HTTPS for the matchmaking site
+
+  app.get("/api/tls", async (req) => {
+    requirePerm(req, "view");
+    return { ...tls.status(), site: publicSite.status() };
+  });
+
+  app.put("/api/tls/https", async (req) => {
+    const user = requirePerm(req, "server.manage");
+    const body = z.object({ settings: z.unknown(), cloudflareToken: z.string().max(300).nullable().optional() }).parse(req.body ?? {});
+    tls.saveHttps(body.settings, body.cloudflareToken, user.id);
+    await publicSite.sync();
+    return { ...tls.status(), site: publicSite.status() };
+  });
+
+  app.post("/api/tls/renew", async (req) => {
+    const user = requirePerm(req, "server.manage");
+    await tls.renew(user.id);
+    await publicSite.sync();
+    return { ...tls.status(), site: publicSite.status() };
+  });
+
+  app.put("/api/tls/firewall", async (req) => {
+    const user = requirePerm(req, "server.manage");
+    tls.saveFirewall((req.body as { settings?: unknown } | null)?.settings, user.id);
+    return tls.status();
+  });
+
+  app.post("/api/tls/firewall/probe", async (req) => {
+    requirePerm(req, "server.manage");
+    try {
+      return { fingerprint: await tls.probe() };
+    } catch (e) {
+      throw badRequest((e as Error).message);
+    }
+  });
+
+  app.post("/api/tls/firewall/connect", async (req) => {
+    const user = requirePerm(req, "server.manage");
+    const b = z.object({ fingerprint: z.string().max(200), user: z.string().min(1).max(64), password: z.string().min(1).max(256) }).parse(req.body ?? {});
+    const info = await tls.connect(b.fingerprint, b.user, b.password, user.id);
+    return { ...tls.status(), info };
+  });
+
+  app.post("/api/tls/firewall/forget", async (req) => {
+    const user = requirePerm(req, "server.manage");
+    tls.forgetFirewall(user.id);
+    return tls.status();
+  });
+
+  app.post("/api/tls/firewall/push", async (req) => {
+    const user = requirePerm(req, "server.manage");
+    await tls.push(user.id);
+    return tls.status();
+  });
+
   // ------------------------------------------------------------- frontend
 
   if (existsSync(config.webDir)) {
@@ -1272,6 +1347,6 @@ export async function buildApp(deps: AppDeps): Promise<App> {
 
   return {
     fastify: app,
-    services: { users, sessions, audit, servers, configs, updater, presets, plugins, players, bans, automation, monitor, discord, backups, matchmaking, publicSite },
+    services: { users, sessions, audit, servers, configs, updater, presets, plugins, players, bans, automation, monitor, discord, backups, matchmaking, publicSite, tls },
   };
 }

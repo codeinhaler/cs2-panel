@@ -25,6 +25,8 @@ export interface PublicDeps {
   webDir: string;
   dev: boolean;
   logLevel: string;
+  /** Certificate and key when the site runs on HTTPS. */
+  https?: { cert: string; key: string } | null;
 }
 
 /** What a player in the match needs to join. */
@@ -51,7 +53,11 @@ const idParam = z.object({ id: z.coerce.number().int().positive() });
  */
 export async function buildPublicApp(d: PublicDeps): Promise<FastifyInstance> {
   const { mm, players } = d;
-  const app = Fastify({ logger: { level: d.logLevel }, trustProxy: false, bodyLimit: 64 * 1024 });
+  const app = (
+    d.https
+      ? Fastify({ logger: { level: d.logLevel }, trustProxy: false, bodyLimit: 64 * 1024, https: { cert: d.https.cert, key: d.https.key } })
+      : Fastify({ logger: { level: d.logLevel }, trustProxy: false, bodyLimit: 64 * 1024 })
+  ) as FastifyInstance;
   await app.register(cookie);
   app.decorateRequest("mmPlayer", null);
 
@@ -84,6 +90,7 @@ export async function buildPublicApp(d: PublicDeps): Promise<FastifyInstance> {
       path: "/",
       httpOnly: true,
       sameSite: "lax",
+      secure: !!d.https,
       maxAge: Math.floor(MM_MAX_AGE_MS / 1000),
     });
     void fetchProfile(steamId, d.fetchFn).then((p) => players.setProfile(steamId, p));
@@ -284,57 +291,105 @@ export async function buildPublicApp(d: PublicDeps): Promise<FastifyInstance> {
 /** Starts, moves or stops the public site to match the settings. */
 export class PublicSite {
   private app: FastifyInstance | null = null;
+  private redirect: FastifyInstance | null = null;
+  /** What's running now, e.g. "http:8090" or "https:443". */
+  private running: string | null = null;
   private listeningOn: number | null = null;
+  private secure = false;
   private lastError: string | null = null;
   /** Off in tests; the panel turns it on when it runs for real. */
   autoListen = false;
 
   constructor(
-    private readonly build: () => Promise<FastifyInstance>,
+    private readonly build: (https: { cert: string; key: string } | null) => Promise<FastifyInstance>,
     private readonly mm: Matchmaking,
     private readonly host: string,
     private readonly panelPort: number,
+    /** The certificate to serve, when HTTPS is on and one exists. */
+    private readonly certificate: () => { cert: string; key: string } | null = () => null,
+    /** The domain the http → https redirect sends people to. */
+    private readonly domain: () => string = () => "",
   ) {}
 
-  status(): { listening: boolean; port: number | null; error: string | null } {
-    return { listening: this.listeningOn !== null, port: this.listeningOn, error: this.lastError };
+  status(): { listening: boolean; port: number | null; https: boolean; error: string | null } {
+    return { listening: this.listeningOn !== null, port: this.listeningOn, https: this.secure, error: this.lastError };
   }
 
   /** An instance for tests to send requests to without listening. */
   async instance(): Promise<FastifyInstance> {
     if (!this.app) {
-      this.app = await this.build();
+      this.app = await this.build(this.certificate());
       await this.app.ready();
     }
     return this.app;
   }
 
+  /** A renewed certificate takes effect without restarting the site. */
+  async updateCertificate(files: { cert: string; key: string }): Promise<void> {
+    if (this.secure && this.app) {
+      (this.app.server as unknown as import("node:https").Server).setSecureContext({ cert: files.cert, key: files.key });
+      return;
+    }
+    await this.sync();
+  }
+
   async sync(): Promise<void> {
     if (!this.autoListen) return;
     const c = this.mm.config();
-    const want = c.enabled ? c.port : null;
-    if (want === this.listeningOn && (want === null || this.app)) return;
+    const cert = c.enabled ? this.certificate() : null;
+    const want = !c.enabled ? null : cert ? "https:443" : `http:${c.port}`;
+    if (want === this.running && (want === null || this.app)) return;
     await this.close();
     if (want === null) return;
-    if (want === this.panelPort) {
+    const port = cert ? 443 : c.port;
+    if (port === this.panelPort) {
       this.lastError = "The matchmaking site can't use the panel's own port.";
       return;
     }
-    const app = await this.build();
+    const app = await this.build(cert);
     try {
-      await app.listen({ host: this.host, port: want });
+      await app.listen({ host: this.host, port });
       this.app = app;
-      this.listeningOn = want;
+      this.running = want;
+      this.listeningOn = port;
+      this.secure = !!cert;
       this.lastError = null;
     } catch (e) {
       await app.close().catch(() => undefined);
-      this.lastError = (e as NodeJS.ErrnoException).code === "EADDRINUSE" ? `Port ${want} is already used by something else.` : (e as Error).message;
+      this.lastError = listenError(e, port);
+      return;
+    }
+    if (cert) await this.startRedirect();
+  }
+
+  /** Port 80: sends everyone to the https address. */
+  private async startRedirect(): Promise<void> {
+    const r = Fastify({ logger: false });
+    r.all("/*", async (req, reply) => reply.redirect(`https://${this.domain() || hostOnly(req.headers.host)}${req.url}`, 301));
+    try {
+      await r.listen({ host: this.host, port: 80 });
+      this.redirect = r;
+    } catch (e) {
+      await r.close().catch(() => undefined);
+      // The https site still works; only plain http links don't forward.
+      this.lastError = `HTTPS is on, but the redirect from http didn't start: ${listenError(e, 80)}`;
     }
   }
 
   async close(): Promise<void> {
     if (this.app) await this.app.close().catch(() => undefined);
+    if (this.redirect) await this.redirect.close().catch(() => undefined);
     this.app = null;
+    this.redirect = null;
+    this.running = null;
     this.listeningOn = null;
+    this.secure = false;
   }
+}
+
+function listenError(e: unknown, port: number): string {
+  const code = (e as NodeJS.ErrnoException).code;
+  if (code === "EADDRINUSE") return `Port ${port} is already used by something else.`;
+  if (code === "EACCES") return `The panel isn't allowed to use port ${port}. Run update.sh again so its service gets permission for ports below 1024.`;
+  return (e as Error).message;
 }

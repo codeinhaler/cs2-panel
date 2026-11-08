@@ -82,6 +82,22 @@ function describe(e: AuditEntry): string {
       return `${str("name") || str("steamId")} joined matchmaking match ${str("match")} mid-match${d.replacedBot ? " in place of the bot" : ""}`;
     case "matchmaking.image":
       return d.removed ? `removed the matchmaking site's ${str("kind")}` : `uploaded a new ${str("kind")} for the matchmaking site`;
+    case "tls.settings":
+      return `changed the HTTPS settings${d.enabled ? ` (on, ${str("domain")})` : " (off)"}`;
+    case "tls.renewed":
+      return `got a new HTTPS certificate for ${str("domain")} (${str("why")})`;
+    case "tls.renew-failed":
+      return `couldn't renew the HTTPS certificate for ${str("domain")}: ${str("reason")}`;
+    case "tls.firewall":
+      return `changed the Palo Alto settings (${str("host")}, certificate "${str("certName")}")`;
+    case "tls.firewall.connect":
+      return `connected the panel to the Palo Alto ${str("hostname") || str("host")} as ${str("admin")}`;
+    case "tls.firewall.forget":
+      return "disconnected the panel from the Palo Alto";
+    case "tls.pushed":
+      return `sent the HTTPS certificate to the Palo Alto ${str("host")}${d.committed ? " and committed" : ""}`;
+    case "tls.push-failed":
+      return `couldn't send the HTTPS certificate to the Palo Alto: ${str("reason")}`;
     case "matchmaking.finished":
       return `finished matchmaking match ${str("match")} on ${str("map")}${d.score ? ` (${str("score")})` : ""}`;
     case "matchmaking.cancelled":

@@ -4,6 +4,7 @@ import { api, type MatchmakingInfo, type MatchmakingSettings, type MmRating } fr
 import { useAction, useApp, usePolling } from "../app-context";
 import { formatDateTime } from "../format";
 import { LookSettings } from "./MatchmakingLook";
+import { HttpsSettings } from "./MatchmakingHttps";
 import { WorkshopNote, useWorkshopInfo } from "../components/MapPicker";
 
 const SOURCE = { leetify: "Leetify", self: "self-set", admin: "set by you", none: "no rating", bot: "bot" } as const;
@@ -233,6 +234,8 @@ export function MatchmakingPage() {
         )}
       </form>
 
+      <HttpsSettings manage={manage} />
+
       <div className="panel">
         <h2 style={{ marginBottom: 6 }}>Leetify</h2>
         <p className="hint" style={{ marginTop: 0 }}>
@@ -389,6 +392,16 @@ function SiteStatus({ info, pageUrl }: { info: MatchmakingInfo; pageUrl: string 
     return (
       <div className="notice warn" style={{ marginBottom: 16 }}>
         The matchmaking site isn't running. Check the panel's log.
+      </div>
+    );
+  if (info.httpsDomain)
+    return (
+      <div className="notice ok" style={{ marginBottom: 16 }}>
+        Open on{" "}
+        <a href={`https://${info.httpsDomain}`} target="_blank" rel="noreferrer">
+          https://{info.httpsDomain}
+        </a>
+        . Forward TCP 443 (and 80, for the redirect) to this server. {info.state.freeServers} server{info.state.freeServers === 1 ? "" : "s"} free for a match.
       </div>
     );
   return (

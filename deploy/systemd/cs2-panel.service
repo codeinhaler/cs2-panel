@@ -13,6 +13,8 @@ Environment=NODE_ENV=production
 Environment=CS2PANEL_CONFIG=/etc/cs2-panel/panel.json
 WorkingDirectory=/opt/cs2-panel
 ExecStart=/opt/cs2-panel/node/bin/node --disable-warning=ExperimentalWarning /opt/cs2-panel/server.mjs
+# Lets the matchmaking site use ports 80 and 443 for HTTPS without running as root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 Restart=always
 RestartSec=5
 

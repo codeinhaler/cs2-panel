@@ -1690,3 +1690,12 @@ details.inline-form[open] > summary {
   gap: 4px;
   margin-top: 10px;
 }
+.mm-fingerprint {
+  display: block;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: var(--panel-sunk);
+  border: 1px solid var(--line);
+  word-break: break-all;
+  font-size: 0.85rem;
+}

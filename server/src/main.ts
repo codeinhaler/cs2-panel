@@ -23,12 +23,14 @@ const { fastify, services } = await buildApp({ config, db, host });
 services.players.startPolling();
 services.automation.start();
 await services.matchmaking.recover();
+services.tls.start();
 services.matchmaking.start();
 
 const shutdown = async () => {
   services.players.stopPolling();
   services.automation.stop();
   services.matchmaking.stop();
+  services.tls.stop();
   await services.publicSite.close();
   await fastify.close();
   db.close();
