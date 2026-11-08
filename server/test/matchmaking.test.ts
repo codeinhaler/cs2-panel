@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { FastifyInstance } from "fastify";
@@ -10,6 +10,7 @@ import type { Config } from "../src/config.js";
 import { choosePlayers, rankSplits } from "../src/matchmaking/balance.js";
 import { parseProfile } from "../src/matchmaking/leetify.js";
 import { hostOnly } from "../src/matchmaking/public-app.js";
+import { imageType, inkOn, themeCss } from "../src/matchmaking/look.js";
 import { parseMatchStatus } from "../src/matchmaking/service.js";
 
 describe("team balancing", () => {
@@ -41,6 +42,25 @@ describe("team balancing", () => {
     expect(choosePlayers(ready, 4).map((p) => p.id)).toEqual(["b", "a", "c", "d"]);
     // An odd number of ready players leaves the last one out.
     expect(choosePlayers(ready.slice(0, 3)).map((p) => p.id)).toEqual(["b", "a"]);
+  });
+});
+
+describe("site look", () => {
+  it("writes theme colours, with changes on top", () => {
+    expect(themeCss({ theme: "default", colors: {} })).toBe("");
+    const css = themeCss({ theme: "purple", colors: { accent: "#FF0000" } });
+    expect(css).toMatch(/^html:root\{color-scheme:dark;/);
+    expect(css).toContain("--accent:#ff0000;");
+    expect(css).toContain("--paper:#160a2a;");
+    expect(inkOn("#ffffff")).toBe("#111418");
+    expect(inkOn("#22113d")).toBe("#ffffff");
+  });
+
+  it("knows images by their bytes", () => {
+    expect(imageType(Buffer.from("89504e470d0a1a0a0000", "hex"))).toBe("png");
+    expect(imageType(Buffer.from("ffd8ffe000104a46", "hex"))).toBe("jpg");
+    expect(imageType(Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WEBPVP8 ")]))).toBe("webp");
+    expect(imageType(Buffer.from("<svg onload=alert(1)>"))).toBeNull();
   });
 });
 
@@ -95,6 +115,12 @@ async function setup() {
     dev: true,
   };
   installFakeBase(config.cs2Root);
+  // A stand-in for the built player page.
+  mkdirSync(path.join(config.webDir, "assets"), { recursive: true });
+  writeFileSync(
+    path.join(config.webDir, "play.html"),
+    `<!doctype html><html><head><link rel="icon" href="data:image/svg+xml,<svg><rect/></svg>" /><title>Matchmaking</title></head><body><div id="root"></div></body></html>`,
+  );
   now = 1_000_000;
   rconLog = [];
   leetifyCalls = 0;
@@ -493,5 +519,169 @@ describe("matchmaking site", () => {
     await settle();
     expect(leetifyCalls).toBe(1);
     expect((await play(a, "GET", "/api/state")).body.me.rating).toMatchObject({ value: 20000, source: "leetify" });
+  });
+
+  /** Bans and picks a side until the match is on the server. */
+  async function toLive(cookies: string[], ids: string[], matchId: number) {
+    const cookieOf = (id: string) => cookies[ids.indexOf(id)]!;
+    for (;;) {
+      const m = (await play(cookies[0]!, "GET", "/api/state")).body.matches.find((x: any) => x.id === matchId);
+      if (m.phase === "veto") {
+        await play(cookieOf(m.turn === "a" ? m.captainA : m.captainB), "POST", `/api/matches/${matchId}/ban`, { map: m.remaining[0] });
+      } else if (m.phase === "side") {
+        await play(cookieOf(m.sidePicker === "a" ? m.captainA : m.captainB), "POST", `/api/matches/${matchId}/side`, { side: "ct" });
+      } else if (m.phase === "starting") {
+        await settle();
+      } else return m;
+    }
+  }
+
+  it("lets a late player take the bot's place", async () => {
+    const owner = await adminCookie();
+    await enable(owner, [await setupServer(owner)]);
+    const names = ["Alpha", "Bravo", "Charlie", "Delta", "Echo"];
+    const cookies = await Promise.all(P.map((id, i) => playerCookie(id, names[i]!)));
+    for (const c of cookies.slice(0, 3)) await play(c, "POST", "/api/lobby/join", { mode: "wingman" });
+    await play(cookies[0]!, "POST", "/api/teams");
+    const draft = (await play(cookies[0]!, "GET", "/api/state")).body.drafts[0];
+    const { matchId } = (await play(cookies[0]!, "POST", `/api/teams/${draft.id}/start`)).body;
+    let m = await toLive(cookies, P, matchId);
+    expect(m.phase).toBe("live");
+    const botTeam = m.teamA.some((p: any) => p.steamId === "BOT") ? "a" : "b";
+
+    // Delta is in the Competitive lobby: can't join a Wingman match.
+    await play(cookies[3]!, "POST", "/api/lobby/join", { mode: "competitive" });
+    let view = (await play(cookies[3]!, "GET", "/api/state")).body.matches[0];
+    expect(view.canJoin).toEqual({ team: null, reason: "Join the Wingman lobby to join this match." });
+
+    await play(cookies[3]!, "POST", "/api/lobby/join", { mode: "wingman" });
+    view = (await play(cookies[3]!, "GET", "/api/state")).body.matches[0];
+    expect(view.canJoin).toEqual({ team: botTeam, reason: null });
+    // People in the match get no join option.
+    expect((await play(cookies[0]!, "GET", "/api/state")).body.matches[0].canJoin).toBeNull();
+
+    rconLog = [];
+    const res = await play(cookies[3]!, "POST", `/api/matches/${matchId}/join`);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.team).toBe(botTeam);
+    m = (await play(cookies[3]!, "GET", "/api/state")).body.matches[0];
+    const team = botTeam === "a" ? m.teamA : m.teamB;
+    expect(team.map((p: any) => p.steamId)).toContain(P[3]);
+    expect([...m.teamA, ...m.teamB].some((p: any) => p.steamId === "BOT")).toBe(false);
+    expect(m.joinInfo).not.toBeNull();
+    expect(rconLog).toContain("cs2panel_match_reload");
+    expect(rconLog).toContain("bot_quota 0; bot_kick");
+    const [matchFile] = findFile(dir, "match.json");
+    expect(JSON.parse(readFileSync(matchFile!, "utf8")).players).toHaveLength(4);
+    const panel = (await admin(owner, "GET", "/api/matchmaking")).body;
+    expect([...panel.history[0].teamA, ...panel.history[0].teamB].map((p: any) => p.steamId)).toContain(P[3]);
+
+    // Now 2v2 with no bot: full.
+    await play(cookies[4]!, "POST", "/api/lobby/join", { mode: "wingman" });
+    expect((await play(cookies[4]!, "GET", "/api/state")).body.matches[0].canJoin.reason).toBe("Both teams are full.");
+    expect((await play(cookies[4]!, "POST", `/api/matches/${matchId}/join`)).body.error).toBe("Both teams are full.");
+  });
+
+  it("puts late players on the losing team, and the captains can close the match", async () => {
+    const owner = await adminCookie();
+    await enable(owner, [await setupServer(owner)]);
+    const names = ["Alpha", "Bravo", "Charlie", "Delta", "Echo"];
+    const cookies = await Promise.all(P.map((id, i) => playerCookie(id, names[i]!)));
+    await play(cookies[3]!, "PUT", "/api/me/rating", { rating: 12000 });
+    for (const c of cookies.slice(0, 4)) await play(c, "POST", "/api/lobby/join", { mode: "competitive" });
+    await play(cookies[0]!, "POST", "/api/teams");
+    const draft = (await play(cookies[0]!, "GET", "/api/state")).body.drafts[0];
+    const { matchId } = (await play(cookies[0]!, "POST", `/api/teams/${draft.id}/start`)).body;
+    const m = await toLive(cookies, P, matchId);
+    // 2v2 in a 5v5 lobby: both teams have room. Before any score, the lower total rating gets the player.
+    const total = (t: any[]) => t.reduce((s, p) => s + p.effective, 0);
+    const lower = total(m.teamA) <= total(m.teamB) ? "a" : "b";
+    await play(cookies[4]!, "POST", "/api/lobby/join", { mode: "competitive" });
+    expect((await play(cookies[4]!, "GET", "/api/state")).body.matches[0].canJoin.team).toBe(lower);
+
+    // Team A is behind: it gets the player.
+    statusReply = `CS2PANEL_MATCH {"active":true,"phase":"live","connected":4,"scoreA":3,"scoreB":5}`;
+    now += 10_000;
+    await app.services.matchmaking.tick();
+    expect((await play(cookies[4]!, "GET", "/api/state")).body.matches[0].canJoin.team).toBe("a");
+
+    // Only captains vote; closed only when both say no.
+    const capA = cookies[P.indexOf(m.captainA)]!;
+    const capB = cookies[P.indexOf(m.captainB)]!;
+    const notCaptain = cookies[P.findIndex((id) => id !== m.captainA && id !== m.captainB && [...m.teamA, ...m.teamB].some((p: any) => p.steamId === id))]!;
+    expect((await play(notCaptain, "POST", `/api/matches/${matchId}/late-joins`, { allow: false })).status).toBe(403);
+    await play(capA, "POST", `/api/matches/${matchId}/late-joins`, { allow: false });
+    expect((await play(cookies[4]!, "GET", "/api/state")).body.matches[0].canJoin.team).toBe("a");
+    await play(capB, "POST", `/api/matches/${matchId}/late-joins`, { allow: false });
+    let view = (await play(cookies[4]!, "GET", "/api/state")).body.matches[0];
+    expect(view.lateJoins).toEqual({ open: false, votes: { a: false, b: false } });
+    expect(view.canJoin.reason).toMatch(/closed this match/);
+    expect((await play(cookies[4]!, "POST", `/api/matches/${matchId}/join`)).status).toBe(400);
+    await play(capB, "POST", `/api/matches/${matchId}/late-joins`, { allow: true });
+
+    // Too close to the end.
+    statusReply = `CS2PANEL_MATCH {"active":true,"phase":"live","connected":4,"scoreA":5,"scoreB":11}`;
+    now += 10_000;
+    await app.services.matchmaking.tick();
+    view = (await play(cookies[4]!, "GET", "/api/state")).body.matches[0];
+    expect(view.canJoin.reason).toMatch(/nearly over/);
+
+    statusReply = `CS2PANEL_MATCH {"active":true,"phase":"live","connected":4,"scoreA":6,"scoreB":9}`;
+    now += 10_000;
+    await app.services.matchmaking.tick();
+    expect((await play(cookies[4]!, "POST", `/api/matches/${matchId}/join`)).body.team).toBe("a");
+  });
+
+  it("serves the page with the theme, title and uploaded images", async () => {
+    const owner = await adminCookie();
+    await enable(owner, [], { title: "Fredags <CS>", look: { theme: "purple", colors: { teamB: "#00ff00" } } });
+    let html = (await site.inject({ method: "GET", url: "/", headers: { host: "play.example:8090" } })).body;
+    expect(html).toContain("<title>Fredags &lt;CS&gt;</title>");
+    expect(html).toContain('<style id="cs2mm-theme">html:root{color-scheme:dark;');
+    expect(html).toContain("--team-b:#00ff00;");
+
+    const bad = await app.fastify.inject({
+      method: "PUT",
+      url: "/api/matchmaking/images/icon",
+      headers: { cookie: owner, "content-type": "image/png" },
+      payload: Buffer.from("not a png"),
+    });
+    expect(bad.json().error).toMatch(/PNG, JPG or WebP/);
+    const png = Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), Buffer.alloc(64)]);
+    const up = await app.fastify.inject({
+      method: "PUT",
+      url: "/api/matchmaking/images/icon",
+      headers: { cookie: owner, "content-type": "image/png" },
+      payload: png,
+    });
+    expect(up.statusCode, up.body).toBe(200);
+    const iconUrl = up.json().images.icon as string;
+    expect(iconUrl).toMatch(/^\/branding\/icon\?v=\d+$/);
+
+    const icon = await site.inject({ method: "GET", url: iconUrl });
+    expect(icon.headers["content-type"]).toBe("image/png");
+    expect(icon.rawPayload.equals(png)).toBe(true);
+    expect((await site.inject({ method: "GET", url: "/branding/banner" })).statusCode).toBe(404);
+    html = (await site.inject({ method: "GET", url: "/", headers: { host: "play.example:8090" } })).body;
+    expect(html).toContain(`<link rel="icon" href="${iconUrl}" />`);
+    expect(html).not.toContain("<svg");
+    expect((await play(null, "GET", "/api/state")).body.look).toEqual({ icon: iconUrl, banner: null });
+
+    // Too big, and removing.
+    const huge = Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), Buffer.alloc(600 * 1024)]);
+    expect(
+      (
+        await app.fastify.inject({ method: "PUT", url: "/api/matchmaking/images/icon", headers: { cookie: owner, "content-type": "image/png" }, payload: huge })
+      ).json().error,
+    ).toMatch(/at most 512 KB/);
+    await app.fastify.inject({ method: "DELETE", url: "/api/matchmaking/images/icon", headers: { cookie: owner } });
+    expect((await play(null, "GET", "/api/state")).body.look.icon).toBeNull();
+    expect(
+      (
+        await admin(owner, "PUT", "/api/matchmaking", {
+          settings: { ...(await admin(owner, "GET", "/api/matchmaking")).body.settings, look: { theme: "nope", colors: {} } },
+        })
+      ).status,
+    ).toBe(400);
   });
 });

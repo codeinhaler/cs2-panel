@@ -1,5 +1,5 @@
 import path from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, promises as fs } from "node:fs";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import cookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
@@ -9,6 +9,7 @@ import { buildLoginUrl, verifyCallback } from "../auth/steam-openid.js";
 import { fetchProfile } from "../auth/steam-profile.js";
 import { MM_MAX_AGE_MS, MM_SESSION_COOKIE, type MmPlayerStore } from "./players.js";
 import { MODES, type Matchmaking, type MatchView } from "./service.js";
+import { themeCss } from "./look.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -202,6 +203,15 @@ export async function buildPublicApp(d: PublicDeps): Promise<FastifyInstance> {
     mm.pickSide(requirePlayer(req), idParam.parse(req.params).id, side);
     return { ok: true };
   });
+  app.post("/api/matches/:id/join", async (req) => {
+    const team = await mm.joinMatch(requirePlayer(req), idParam.parse(req.params).id);
+    return { team };
+  });
+  app.post("/api/matches/:id/late-joins", async (req) => {
+    const { allow } = z.object({ allow: z.boolean() }).parse(req.body ?? {});
+    mm.setLateJoins(requirePlayer(req), idParam.parse(req.params).id, allow);
+    return { ok: true };
+  });
   app.post("/api/matches/:id/start-now", async (req) => {
     await mm.startNow(requirePlayer(req), idParam.parse(req.params).id);
     return { ok: true };
@@ -213,6 +223,26 @@ export async function buildPublicApp(d: PublicDeps): Promise<FastifyInstance> {
 
   // ------------------------------------------------------------- the page
 
+  app.get("/branding/:kind", async (req, reply) => {
+    const { kind } = z.object({ kind: z.enum(["icon", "banner"]) }).parse(req.params);
+    const img = await mm.readImage(kind);
+    if (!img) return reply.status(404).send({ error: "Not found." });
+    return reply.type(img.type).header("Cache-Control", "public, max-age=86400").send(img.data);
+  });
+
+  /** The page with the theme, title and icon put in, so it shows right from the first paint. */
+  const page = async (): Promise<string> => {
+    let html = await fs.readFile(path.join(d.webDir, "play.html"), "utf8");
+    const c = mm.config();
+    const css = themeCss(c.look);
+    const urls = mm.imageUrls();
+    const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    html = html.replace(/<title>[^<]*<\/title>/, `<title>${esc(c.title)}</title>`);
+    if (urls.icon) html = html.replace(/<link rel="icon" href="[^"]*"\s*\/?>/, `<link rel="icon" href="${urls.icon}" />`);
+    if (css) html = html.replace("</head>", `<style id="cs2mm-theme">${css}</style></head>`);
+    return html;
+  };
+
   // Only the player page and its files are served here, never the panel's page.
   if (existsSync(path.join(d.webDir, "play.html"))) {
     await app.register(fastifyStatic, {
@@ -223,7 +253,7 @@ export async function buildPublicApp(d: PublicDeps): Promise<FastifyInstance> {
     });
     app.setNotFoundHandler((req, reply) => {
       if (req.url.startsWith("/api/") || path.extname(req.url.split("?")[0]!) !== "") return reply.status(404).send({ error: "Not found." });
-      return reply.header("Cache-Control", "no-cache").sendFile("play.html", d.webDir);
+      return page().then((html) => reply.header("Cache-Control", "no-cache").type("text/html; charset=utf-8").send(html));
     });
   } else {
     app.setNotFoundHandler((req, reply) => {

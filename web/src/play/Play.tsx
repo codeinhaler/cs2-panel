@@ -79,10 +79,14 @@ export function Play() {
     <div className="play">
       <header className="play-head">
         <div className="play-brand">
-          <span className="play-mark" aria-hidden="true">
-            <span />
-            <span />
-          </span>
+          {state.look.icon ? (
+            <img className="play-logo" src={state.look.icon} alt="" />
+          ) : (
+            <span className="play-mark" aria-hidden="true">
+              <span />
+              <span />
+            </span>
+          )}
           <h1>{state.title}</h1>
         </div>
         {me ? (
@@ -95,6 +99,8 @@ export function Play() {
           </div>
         ) : null}
       </header>
+
+      {state.look.banner && <img className="play-banner" src={state.look.banner} alt="" />}
 
       {offline && <div className="notice warn">Lost the connection. Retrying…</div>}
       {error && (
@@ -279,6 +285,7 @@ function LobbyCard({ state, busy, act }: { state: State; busy: boolean; act: Act
                       ? `${n} ready: two play now, the third goes first next time.`
                       : null;
   const others = state.lobbies.filter((l) => l.mode !== me.mode);
+  const joinable = myStatus === "in-match" ? undefined : state.matches.find((m) => m.mode === me.mode && m.canJoin?.team);
 
   return (
     <section className="panel">
@@ -304,6 +311,20 @@ function LobbyCard({ state, busy, act }: { state: State; busy: boolean; act: Act
           <LobbyRow key={p.steamId} p={p} me={p.steamId === me.steamId} />
         ))}
       </ul>
+
+      {joinable && (
+        <div className="play-latejoin">
+          <div>
+            <b>
+              A {lobby?.label ?? ""} match on {joinable.map ? mapName(joinable.map) : "the veto"} has room.
+            </b>
+            <div className="hint">Jump in now instead of waiting for the next one.</div>
+          </div>
+          <button className="btn primary" disabled={busy} onClick={() => act(() => play.joinMatch(joinable.id))}>
+            Join that match
+          </button>
+        </div>
+      )}
 
       <div className="play-make">
         <button className="btn primary play-big" disabled={busy || !canMake} onClick={() => act(play.makeTeams)}>
@@ -571,6 +592,46 @@ function MatchCard({ match: m, meId, skew, busy, act, mine }: { match: Match; me
         captains={[m.captainA, m.captainB]}
         highlight={m.phase === "veto" ? m.turn : m.phase === "side" ? m.sidePicker : myTeam}
       />
+
+      {m.canJoin?.team && (
+        <div className="play-latejoin">
+          <div>
+            <b>There's room in this match.</b>
+            <div className="hint">
+              You'd play for {label(m.canJoin.team)}
+              {(m.canJoin.team === "a" ? m.teamA : m.teamB).some((p) => p.steamId === BOT_ID) ? " in place of the bot" : ""}.
+            </div>
+          </div>
+          <button className="btn primary" disabled={busy} onClick={() => act(() => play.joinMatch(m.id))}>
+            Join this match
+          </button>
+        </div>
+      )}
+      {m.canJoin && !m.canJoin.team && m.canJoin.reason && !m.canJoin.reason.startsWith("Join the") && <p className="hint">{m.canJoin.reason}</p>}
+
+      {!ended && (iAmCaptainOf("a") || iAmCaptainOf("b")) && (
+        <div className="play-vote">
+          <label className="check">
+            <input
+              type="checkbox"
+              disabled={busy}
+              checked={m.lateJoins.votes[iAmCaptainOf("a") ? "a" : "b"]}
+              onChange={(e) => act(() => play.lateJoins(m.id, e.target.checked))}
+            />
+            <span>Let people join mid-match</span>
+          </label>
+          <span className="hint">
+            {m.lateJoins.open
+              ? m.lateJoins.votes.a && m.lateJoins.votes.b
+                ? "Open. It closes only if both captains untick this."
+                : "Still open: the other captain wants it open."
+              : "Closed: both captains said no."}
+          </span>
+        </div>
+      )}
+      {!ended && myTeam && !iAmCaptainOf(myTeam) && (
+        <p className="hint">{m.lateJoins.open ? "Others can join this match if a team has room." : "Closed to new players by the captains."}</p>
+      )}
 
       {myTeam && !ended && (
         <div className="row-actions">

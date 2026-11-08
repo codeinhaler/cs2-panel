@@ -399,8 +399,21 @@ export interface MatchmakingSettings {
   serverIds: number[];
   modes: Record<"competitive" | "wingman" | "duel", { enabled: boolean; maps: string[] }>;
   botDifficulty: number;
+  look: MmLook;
   gameAddress: string;
   vetoSeconds: number;
+}
+
+export type MmColorKey = "paper" | "panel" | "ink" | "accent" | "teamA" | "teamB";
+export interface MmLook {
+  theme: string;
+  colors: Partial<Record<MmColorKey, string>>;
+}
+export interface MmTheme {
+  id: string;
+  label: string;
+  mode: "auto" | "light" | "dark";
+  colors: Record<MmColorKey, string> | null;
 }
 
 export interface MmRating {
@@ -444,6 +457,8 @@ export interface MatchmakingInfo {
     matches: MmMatch[];
     freeServers: number;
   };
+  themes: MmTheme[];
+  images: { icon: string | null; banner: string | null };
   history: {
     id: number;
     serverId: number | null;
@@ -512,6 +527,13 @@ export const api = {
     }),
   mmSetRating: (steamId: string, rating: number | null) => request<{ ok: true }>("PUT", `/api/matchmaking/players/${steamId}/rating`, { rating }),
   mmRemove: (steamId: string) => request<{ ok: true }>("POST", `/api/matchmaking/players/${steamId}/remove`, {}),
+  mmUploadImage: async (kind: "icon" | "banner", file: File) => {
+    const res = await fetch(`/api/matchmaking/images/${kind}`, { method: "PUT", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file });
+    const data = (await res.json().catch(() => ({}))) as { error?: string; images?: MatchmakingInfo["images"] };
+    if (!res.ok) throw new Error(data.error ?? `Upload failed (${res.status})`);
+    return data as { images: MatchmakingInfo["images"] };
+  },
+  mmRemoveImage: (kind: "icon" | "banner") => request<{ images: MatchmakingInfo["images"] }>("DELETE", `/api/matchmaking/images/${kind}`),
   mmCancel: (id: number) => request<{ ok: true }>("POST", `/api/matchmaking/matches/${id}/cancel`, {}),
   backups: () => request<{ backups: BackupInfo[]; settings: BackupSettings; totalBytes: number }>("GET", "/api/backups"),
   backupServer: (id: number) => request<{ backup: BackupInfo }>("POST", `/api/servers/${id}/backups`, {}),

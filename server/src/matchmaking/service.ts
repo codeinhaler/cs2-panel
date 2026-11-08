@@ -16,6 +16,7 @@ import type { ServerRecord } from "../servers/store.js";
 import type { Settings } from "../settings.js";
 import { choosePlayers, rankSplits, type Split } from "./balance.js";
 import { LeetifyClient, leetifyProfileUrl } from "./leetify.js";
+import { DEFAULT_LOOK, LookSchema, type ImageKind, type SiteImages } from "./look.js";
 import type { MmPlayer, MmPlayerStore } from "./players.js";
 
 /** Where the bridge reads the current match, relative to game/csgo. */
@@ -57,6 +58,11 @@ export const BOT_LEVELS = [
 ] as const;
 export const BOT_ID = "BOT";
 
+/** Rounds a team needs to win, per mode (MR12 and MR8). */
+const WIN_ROUNDS: Record<Mode, number> = { competitive: 13, wingman: 9, duel: 9 };
+/** Nobody joins once a team is this close to winning. */
+const LATE_JOIN_CUTOFF = 2;
+
 const MapList = z
   .array(z.string().trim().min(1).max(80))
   .max(20)
@@ -76,6 +82,7 @@ export const MatchmakingSettingsSchema = z.object({
     .refine((m) => MODES.some((k) => m[k].enabled), "Open at least one lobby.")
     .refine((m) => MODES.every((k) => !m[k].enabled || m[k].maps.length > 0), "Every open lobby needs at least one map."),
   botDifficulty: z.number().int().min(0).max(3),
+  look: LookSchema.default(DEFAULT_LOOK),
   /** Address players connect to; empty means the same address they opened the site with. */
   gameAddress: z
     .string()
@@ -97,6 +104,7 @@ export const DEFAULT_SETTINGS: MatchmakingSettings = {
     duel: { enabled: true, maps: ["de_inferno", "de_nuke", "de_vertigo"] },
   },
   botDifficulty: 1,
+  look: DEFAULT_LOOK,
   gameAddress: "",
   vetoSeconds: 30,
 };
@@ -163,6 +171,8 @@ interface Match {
   endedAt: number | null;
   /** The server's lock and password have been taken off again. */
   released: boolean;
+  /** Each captain's vote on letting people join mid-match. Closed only when both say no. */
+  lateJoinVotes: { a: boolean; b: boolean };
 }
 
 interface LobbyEntry {
@@ -241,6 +251,10 @@ export interface MatchView extends TeamsView {
   endedAt: number | null;
   /** Only for players in the match. */
   join: { port: number; password: string } | null;
+  /** Mid-match joins: open unless both captains voted no. */
+  lateJoins: { open: boolean; votes: { a: boolean; b: boolean } };
+  /** For a viewer not in the match: the team they'd join, or why they can't. */
+  canJoin: { team: TeamKey | null; reason: string | null } | null;
 }
 
 export interface StateView {
@@ -262,6 +276,8 @@ export interface StateView {
   lobby: LobbyView[];
   drafts: DraftView[];
   matches: MatchView[];
+  /** Uploaded images, as URLs on the matchmaking site. */
+  look: { icon: string | null; banner: string | null };
   freeServers: number;
   /** Servers set up for matches (in the pool, with the bridge), busy or not. */
   matchServers: number;
@@ -282,6 +298,7 @@ export interface MatchmakingDeps {
   humans: (serverId: number) => number | null;
   isBanned: (steamId: string) => boolean;
   audit: AuditLog;
+  images: SiteImages;
   fetchFn: typeof fetch;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
@@ -304,6 +321,7 @@ export class Matchmaking {
   private nextDraftId = 1;
   private timer: NodeJS.Timeout | null = null;
   private lastPoll = 0;
+  private imageVersions: Record<ImageKind, number | null> = { icon: null, banner: null };
   /** Called after settings change, so the public site can start, stop or move. */
   onSettingsChanged: () => Promise<void> = async () => undefined;
 
@@ -326,7 +344,7 @@ export class Matchmaking {
     const modes = { ...DEFAULT_SETTINGS.modes, ...(stored.modes ?? {}) };
     // Before lobbies there was one map pool, for Competitive.
     if (!stored.modes && legacyMaps?.length) modes.competitive = { enabled: true, maps: legacyMaps };
-    return { ...DEFAULT_SETTINGS, ...rest, modes };
+    return { ...DEFAULT_SETTINGS, ...rest, modes, look: { ...DEFAULT_LOOK, ...(stored.look ?? {}) } };
   }
 
   /** Lobbies that are open, in display order. */
@@ -378,10 +396,34 @@ export class Matchmaking {
     return next;
   }
 
+  // ------------------------------------------------------------- images
+
+  async saveImage(kind: ImageKind, data: Buffer, actorId: number): Promise<void> {
+    await this.d.images.save(kind, data);
+    this.imageVersions = await this.d.images.versions();
+    this.d.audit.record(actorId, "matchmaking.image", null, { kind, removed: false });
+  }
+
+  async removeImage(kind: ImageKind, actorId: number): Promise<void> {
+    await this.d.images.remove(kind);
+    this.imageVersions = await this.d.images.versions();
+    this.d.audit.record(actorId, "matchmaking.image", null, { kind, removed: true });
+  }
+
+  readImage(kind: ImageKind): Promise<{ data: Buffer; type: string } | null> {
+    return this.d.images.read(kind);
+  }
+
+  imageUrls(): { icon: string | null; banner: string | null } {
+    const v = this.imageVersions;
+    return { icon: v.icon ? `/branding/icon?v=${v.icon}` : null, banner: v.banner ? `/branding/banner?v=${v.banner}` : null };
+  }
+
   // ------------------------------------------------------------- lifecycle
 
   /** Matches the panel was running when it stopped can't be resumed; give their servers back. */
   async recover(): Promise<void> {
+    this.imageVersions = await this.d.images.versions().catch(() => ({ icon: null, banner: null }));
     const open = this.d.db.prepare(`SELECT id, server_id FROM mm_matches WHERE status IN ('veto','side','starting','live')`).all() as {
       id: number;
       server_id: number | null;
@@ -700,6 +742,7 @@ export class Matchmaking {
       overAt: null,
       endedAt: null,
       released: true,
+      lateJoinVotes: { a: true, b: true },
     };
     this.matches.push(m);
 
@@ -796,22 +839,28 @@ export class Matchmaking {
     await writeAtomic(file, JSON.stringify(content, null, 2) + "\n", 0o664);
   }
 
+  /** What the bridge needs: who may join, on which team. The bot isn't listed. */
+  private matchFileContent(m: Match) {
+    const sideB: Side = m.sideA === "ct" ? "t" : "ct";
+    return {
+      version: 1,
+      active: true,
+      matchId: String(m.id),
+      mode: m.mode,
+      players: [
+        ...humans(m.teamA).map((p) => ({ steamId: p.steamId, name: p.name, team: m.sideA, group: "a" })),
+        ...humans(m.teamB).map((p) => ({ steamId: p.steamId, name: p.name, team: sideB, group: "b" })),
+      ],
+    };
+  }
+
   private async launch(m: Match): Promise<void> {
     try {
       const s = this.d.servers.require(m.serverId);
       if (!this.d.hasBridge(s.id)) throw new Error(`${s.name} doesn't have the CS2 Panel Bridge plugin.`);
       const sideB: Side = m.sideA === "ct" ? "t" : "ct";
       m.released = false;
-      await this.matchFile(s, {
-        version: 1,
-        active: true,
-        matchId: String(m.id),
-        mode: m.mode,
-        players: [
-          ...humans(m.teamA).map((p) => ({ steamId: p.steamId, name: p.name, team: m.sideA, group: "a" })),
-          ...humans(m.teamB).map((p) => ({ steamId: p.steamId, name: p.name, team: sideB, group: "b" })),
-        ],
-      });
+      await this.matchFile(s, this.matchFileContent(m));
 
       if ((await this.d.host.serviceStatus(s.slug)).state !== "active") {
         m.status = "Starting the server";
@@ -966,6 +1015,102 @@ export class Matchmaking {
     await this.exec(s, `say Match started early by ${this.displayName(this.player(by)).replace(/[";\r\n]/g, "")}`).catch(() => undefined);
   }
 
+  // ------------------------------------------------------------- joining a running match
+
+  private lateJoinsOpen(m: Match): boolean {
+    return m.lateJoinVotes.a || m.lateJoinVotes.b;
+  }
+
+  /**
+   * Which team someone would join, or why they can't. Null when there's nothing
+   * to show them (they're in the match, or it has ended).
+   */
+  private joinOption(m: Match, steamId: string): { team: TeamKey | null; reason: string | null } | null {
+    if (!isActive(m) || [...m.teamA, ...m.teamB].some((p) => p.steamId === steamId)) return null;
+    const no = (reason: string) => ({ team: null, reason });
+    const size = MODE_INFO[m.mode].teamSize;
+    const room = (["a", "b"] as const).filter((k) => humans(k === "a" ? m.teamA : m.teamB).length < size);
+    if (room.length === 0) return no("Both teams are full.");
+    const entry = this.lobby.get(steamId);
+    if (!entry || entry.mode !== m.mode) return no(`Join the ${MODE_INFO[m.mode].label} lobby to join this match.`);
+    if (this.activeMatchOf(steamId)) return no("You're in another match.");
+    if (!this.lateJoinsOpen(m)) return no("The captains have closed this match to new players.");
+    if (m.score && Math.max(m.score.a, m.score.b) >= WIN_ROUNDS[m.mode] - LATE_JOIN_CUTOFF) return no("Too late to join: the match is nearly over.");
+    if (room.length === 1) return { team: room[0]!, reason: null };
+    // Both have room: the losing team, or on a tie (or before the first round) the team with the lower total rating.
+    if (m.score && m.score.a !== m.score.b) return { team: m.score.a < m.score.b ? "a" : "b", reason: null };
+    const total = (t: Member[]) => t.reduce((sum, p) => sum + p.effective, 0);
+    return { team: total(m.teamA) <= total(m.teamB) ? "a" : "b", reason: null };
+  }
+
+  async joinMatch(by: string, matchId: number): Promise<TeamKey> {
+    this.requireEnabled();
+    if (this.d.isBanned(by)) throw forbidden("You're banned from these servers.");
+    const m = this.requireMatch(matchId);
+    const option = this.joinOption(m, by);
+    if (!option) throw badRequest(isActive(m) ? "You're already in this match." : "That match has already ended.");
+    if (!option.team) throw badRequest(option.reason!);
+    const teamKey = option.team;
+
+    const joiner = await this.member(by);
+    // No rating at all: count as the middle of the people already playing.
+    if (joiner.rating.value === null) {
+      const known = humans([...m.teamA, ...m.teamB])
+        .map((p) => p.effective)
+        .sort((x, y) => x - y);
+      joiner.effective = known.length ? known[Math.floor(known.length / 2)]! : FALLBACK_RATING;
+    }
+    // Things may have changed while Leetify answered.
+    const again = this.joinOption(m, by);
+    if (!again?.team) throw badRequest(again?.reason ?? "You're already in this match.");
+
+    const team = teamKey === "a" ? m.teamA : m.teamB;
+    const replacesBot = m.bot === teamKey;
+    if (replacesBot) {
+      team.splice(
+        team.findIndex((p) => p.steamId === BOT_ID),
+        1,
+      );
+      m.bot = null;
+    }
+    team.push(joiner);
+    const e = this.lobby.get(by);
+    if (e) e.sitOuts = 0;
+    this.d.db
+      .prepare("UPDATE mm_matches SET team_a = ?, team_b = ? WHERE id = ?")
+      .run(
+        JSON.stringify(m.teamA.map(({ steamId, name }) => ({ steamId, name }))),
+        JSON.stringify(m.teamB.map(({ steamId, name }) => ({ steamId, name }))),
+        m.id,
+      );
+    this.d.audit.record(null, "matchmaking.joined", m.serverId, {
+      match: m.id,
+      steamId: by,
+      name: joiner.name,
+      ...(replacesBot ? { replacedBot: true } : {}),
+    });
+
+    // Already on the server: let them in, and take the bot off if they replace it.
+    if (!m.released) {
+      const s = this.d.servers.require(m.serverId);
+      await this.matchFile(s, this.matchFileContent(m));
+      await this.exec(s, "cs2panel_match_reload").catch(() => undefined);
+      if (replacesBot) await this.exec(s, "bot_quota 0; bot_kick").catch(() => undefined);
+      const captain = this.displayName(this.player(teamKey === "a" ? m.captainA : m.captainB));
+      const line = `${joiner.name} is joining ${captain}'s team${replacesBot ? " in place of the bot" : ""}`.replace(/[";\r\n]/g, "");
+      await this.exec(s, `say ${line}`).catch(() => undefined);
+    }
+    return teamKey;
+  }
+
+  setLateJoins(by: string, matchId: number, allow: boolean): void {
+    const m = this.requireMatch(matchId);
+    if (!isActive(m)) throw badRequest("That match has already ended.");
+    const team: TeamKey | null = m.captainA === by ? "a" : m.captainB === by ? "b" : null;
+    if (!team) throw forbidden("Only the captains vote on this.");
+    m.lateJoinVotes[team] = allow;
+  }
+
   // ------------------------------------------------------------- views
 
   private teamsView(teamA: Member[], teamB: Member[]): TeamsView {
@@ -1012,6 +1157,8 @@ export class Matchmaking {
       createdAt: m.createdAt,
       endedAt: m.endedAt,
       join: member && m.phase === "live" && s ? { port: s.port, password: m.password } : null,
+      lateJoins: { open: this.lateJoinsOpen(m), votes: { ...m.lateJoinVotes } },
+      canJoin: viewer ? this.joinOption(m, viewer) : null,
     };
   }
 
@@ -1080,6 +1227,7 @@ export class Matchmaking {
         .slice()
         .reverse()
         .map((m) => this.matchView(m, viewer)),
+      look: this.imageUrls(),
       freeServers: this.freeCountSync(),
       matchServers: this.poolRecords().filter((s) => this.d.hasBridge(s.id)).length,
       now: this.now(),

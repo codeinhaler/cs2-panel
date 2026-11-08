@@ -46,6 +46,7 @@ import { BackupService } from "./backups/service.js";
 import { MmPlayerStore } from "./matchmaking/players.js";
 import { Matchmaking } from "./matchmaking/service.js";
 import { PublicSite, buildPublicApp } from "./matchmaking/public-app.js";
+import { SiteImages, THEMES, type ImageKind } from "./matchmaking/look.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -185,6 +186,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     isBanned,
     audit,
     fetchFn,
+    images: new SiteImages(path.join(config.dataDir, "matchmaking")),
     ...(deps.matchmakingClock ?? {}),
   });
   const publicSite = new PublicSite(
@@ -1188,7 +1190,33 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       maps: await mapMenus.installedMaps(),
       state: matchmaking.state(null),
       history: matchmaking.history(),
+      themes: THEMES,
+      images: matchmaking.imageUrls(),
     };
+  });
+
+  const imageKind = z.object({ kind: z.enum(["icon", "banner"]) });
+  app.addContentTypeParser(["image/png", "image/jpeg", "image/webp"], { parseAs: "buffer", bodyLimit: 4 * 1024 * 1024 }, (_req, body, done) =>
+    done(null, body),
+  );
+  app.put("/api/matchmaking/images/:kind", { bodyLimit: 4 * 1024 * 1024 }, async (req) => {
+    const user = requirePerm(req, "server.manage");
+    const { kind } = imageKind.parse(req.params);
+    if (!Buffer.isBuffer(req.body)) throw badRequest("Upload a PNG, JPG or WebP image.");
+    await matchmaking.saveImage(kind as ImageKind, req.body, user.id);
+    return { images: matchmaking.imageUrls() };
+  });
+  app.get("/api/matchmaking/images/:kind", async (req, reply) => {
+    requirePerm(req, "view");
+    const img = await matchmaking.readImage(imageKind.parse(req.params).kind as ImageKind);
+    if (!img) throw notFound("No image uploaded.");
+    return reply.type(img.type).header("Cache-Control", "no-cache").send(img.data);
+  });
+  app.delete("/api/matchmaking/images/:kind", async (req) => {
+    const user = requirePerm(req, "server.manage");
+    const { kind } = imageKind.parse(req.params);
+    await matchmaking.removeImage(kind as ImageKind, user.id);
+    return { images: matchmaking.imageUrls() };
   });
 
   app.put("/api/matchmaking", async (req) => {

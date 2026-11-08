@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api, type MatchmakingInfo, type MatchmakingSettings, type MmRating } from "../api";
 import { useAction, useApp, usePolling } from "../app-context";
 import { formatDateTime } from "../format";
+import { LookSettings } from "./MatchmakingLook";
 
 const SOURCE = { leetify: "Leetify", self: "self-set", admin: "set by you", none: "no rating", bot: "bot" } as const;
 const PHASE = {
@@ -169,6 +170,8 @@ export function MatchmakingPage() {
             <small>With an odd number of players in Competitive or Wingman, a bot joins the smaller team so nobody sits out.</small>
           </label>
         </div>
+
+        <LookSettings info={data} look={form.look} manage={manage} onChange={(look) => set("look", look)} onImages={() => void refresh()} />
 
         {manage && (
           <div className="row-actions" style={{ margin: "16px 0" }}>

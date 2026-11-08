@@ -1496,3 +1496,192 @@ details.inline-form[open] > summary {
 .mm-lobby.off {
   opacity: 0.75;
 }
+
+.mm-themes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.mm-theme {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel-sunk);
+  cursor: pointer;
+}
+.mm-theme.on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.mm-theme input {
+  margin: 0;
+}
+.mm-swatches {
+  display: flex;
+  flex: none;
+}
+.mm-swatches span {
+  width: 14px;
+  height: 22px;
+  border: 1px solid rgb(0 0 0 / 15%);
+}
+.mm-swatches span:first-child {
+  border-radius: 3px 0 0 3px;
+}
+.mm-swatches span:last-child {
+  border-radius: 0 3px 3px 0;
+}
+.mm-colors {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 8px 16px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.mm-color {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.mm-color input[type="color"] {
+  width: 40px;
+  height: 30px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  cursor: pointer;
+}
+
+/* Preview: a tiny copy of the player page, coloured with the theme being edited. */
+.mm-preview-wrap {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.mm-preview {
+  --team-a: #1f5fbf;
+  --team-b: #c76a1a;
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+  max-width: 560px;
+}
+.mm-preview-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--f-label);
+  font-size: 1.15rem;
+}
+.mm-preview-mark {
+  display: flex;
+  gap: 2px;
+}
+.mm-preview-mark span {
+  width: 6px;
+  height: 18px;
+  border-radius: 2px;
+  background: var(--team-a);
+}
+.mm-preview-mark span + span {
+  background: var(--team-b);
+}
+.mm-preview-icon {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  border-radius: 3px;
+}
+.mm-preview-banner {
+  width: 100%;
+  max-height: 90px;
+  object-fit: cover;
+  border-radius: var(--r-sm);
+}
+.mm-preview-box {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+}
+.mm-preview-teams {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.mm-preview-team {
+  display: grid;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  background: var(--panel-sunk);
+  border: 1px solid var(--line-soft);
+  border-top: 3px solid var(--team-a);
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+.mm-preview-team b {
+  color: var(--ink);
+}
+.mm-preview-team.b {
+  border-top-color: var(--team-b);
+}
+.mm-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+}
+.mm-preview-btn {
+  background: var(--accent);
+  color: var(--accent-ink);
+  padding: 5px 12px;
+  border-radius: var(--r-sm);
+  font-weight: 600;
+}
+.mm-preview-ok {
+  color: var(--run);
+  background: var(--run-soft);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.mm-preview-faint {
+  color: var(--ink-faint);
+}
+.mm-images {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+.mm-image {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+.mm-image-icon {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel-sunk);
+}
+.mm-image-banner {
+  width: 100%;
+  max-height: 120px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
