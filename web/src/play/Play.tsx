@@ -114,23 +114,37 @@ export function Play() {
       {!state.enabled && <div className="notice info">Matchmaking is closed right now. Check back when the event starts.</div>}
 
       {!me ? (
-        <section className="panel play-signin">
-          <h2>Play with even teams</h2>
-          <p>
-            Sign in with Steam and pick a lobby: {state.lobbies.map((l) => `${l.label}`).join(", ") || "Competitive"}. Teams are made from everyone's Premier
-            rating so both sides are about equal, and a bot fills in when the numbers are odd. The captains then ban maps until one is left, and you get a
-            button to join the server.
-          </p>
-          <a className="btn primary play-steam" href={`${API}/auth/steam`}>
-            Sign in through Steam
-          </a>
-          <p className="hint">Steam only tells this site your SteamID, name and avatar. Your password stays with Steam.</p>
-        </section>
+        <>
+          {state.casual.servers.length > 0 && <CasualCard state={state} />}
+          <section className="panel play-signin">
+            <h2>Play with even teams</h2>
+            {state.casual.servers.length > 0 && (
+              <p className="play-signin-note">
+                <b>{state.casual.name}</b> needs no sign-in: just press Join above. For{" "}
+                {state.lobbies
+                  .map((l) => l.label)
+                  .join(", ")
+                  .replace(/, ([^,]*)$/, " and $1") || "Competitive"}{" "}
+                matches, sign in through Steam.
+              </p>
+            )}
+            <p>
+              Sign in with Steam and pick a lobby: {state.lobbies.map((l) => `${l.label}`).join(", ") || "Competitive"}. Teams are made from everyone's Premier
+              rating so both sides are about equal, and a bot fills in when the numbers are odd. The captains then ban maps until one is left, and you get a
+              button to join the server.
+            </p>
+            <a className="btn primary play-steam" href={`${API}/auth/steam`}>
+              Sign in through Steam
+            </a>
+            <p className="hint">Steam only tells this site your SteamID, name and avatar. Your password stays with Steam.</p>
+          </section>
+        </>
       ) : (
         <>
           {myMatch && <MatchCard match={myMatch} meId={me.steamId} skew={skew.current} busy={busy} act={act} mine />}
           {myDraft && <DraftCard draft={myDraft} state={state} busy={busy} act={act} />}
           {state.enabled && (me.inLobby ? <LobbyCard state={state} busy={busy} act={act} /> : <LobbyPicker state={state} busy={busy} act={act} />)}
+          {state.casual.servers.length > 0 && <CasualCard state={state} />}
           <RatingCard state={state} busy={busy} act={act} />
         </>
       )}
@@ -143,13 +157,6 @@ export function Play() {
           ))}
         </section>
       )}
-
-      <footer className="play-foot">
-        <a href="https://leetify.com/" target="_blank" rel="noreferrer" className="play-leetify">
-          Data provided by Leetify
-        </a>
-        <span className="hint">Premier ratings come from Leetify when they have one; otherwise players enter their own.</span>
-      </footer>
     </div>
   );
 }
@@ -682,5 +689,43 @@ function CopyLine({ label, text }: { label: string; text: string }) {
         </button>
       </div>
     </div>
+  );
+}
+
+// ------------------------------------------------------------- casual servers
+
+function CasualCard({ state }: { state: State }) {
+  return (
+    <section className="panel play-casual">
+      <div className="panel-head">
+        <h2>{state.casual.name}</h2>
+        <span className="hint">Join any time · no sign-in</span>
+      </div>
+      <div className="play-casual-list">
+        {state.casual.servers.map((s) => (
+          <div key={s.id} className="play-casual-server">
+            <div className="play-casual-info">
+              <b>{s.name}</b>
+              <span className="hint">
+                {s.online ? (
+                  <>
+                    {s.map ? mapName(s.map) : "—"} · {s.players} / {s.maxPlayers} players
+                  </>
+                ) : (
+                  "Offline right now"
+                )}
+              </span>
+            </div>
+            <a className={`btn primary ${s.online ? "" : "disabled"}`} href={s.online ? s.joinInfo.steamUrl : undefined} aria-disabled={!s.online}>
+              Join the server
+            </a>
+            <CopyLine
+              label={s.joinInfo.password ? `Or paste in the CS2 console (password ${s.joinInfo.password})` : "Or paste in the CS2 console"}
+              text={s.joinInfo.console}
+            />
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }

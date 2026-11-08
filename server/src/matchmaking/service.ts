@@ -83,6 +83,13 @@ export const MatchmakingSettingsSchema = z.object({
     .refine((m) => MODES.every((k) => !m[k].enabled || m[k].maps.length > 0), "Every open lobby needs at least one map."),
   botDifficulty: z.number().int().min(0).max(3),
   look: LookSchema.default(DEFAULT_LOOK),
+  /** Servers anyone can just join from the site: no sign-in, no teams made, no veto. */
+  casual: z
+    .object({
+      name: z.string().trim().min(1, "Give the casual card a name.").max(40),
+      serverIds: z.array(z.number().int().positive()).max(5),
+    })
+    .default({ name: "Casual", serverIds: [] }),
   /** Address players connect to; empty means the same address they opened the site with. */
   gameAddress: z
     .string()
@@ -105,6 +112,7 @@ export const DEFAULT_SETTINGS: MatchmakingSettings = {
   },
   botDifficulty: 1,
   look: DEFAULT_LOOK,
+  casual: { name: "Casual", serverIds: [] },
   gameAddress: "",
   vetoSeconds: 30,
 };
@@ -257,6 +265,18 @@ export interface MatchView extends TeamsView {
   canJoin: { team: TeamKey | null; reason: string | null } | null;
 }
 
+export interface CasualView {
+  id: number;
+  name: string;
+  map: string | null;
+  players: number;
+  maxPlayers: number;
+  online: boolean;
+  port: number;
+  /** Shown to everyone on the site (Sune's choice). */
+  password: string;
+}
+
 export interface StateView {
   title: string;
   enabled: boolean;
@@ -278,6 +298,8 @@ export interface StateView {
   matches: MatchView[];
   /** Uploaded images, as URLs on the matchmaking site. */
   look: { icon: string | null; banner: string | null };
+  /** Servers anyone can join, shown even to people who aren't signed in. */
+  casual: { name: string; servers: CasualView[] };
   freeServers: number;
   /** Servers set up for matches (in the pool, with the bridge), busy or not. */
   matchServers: number;
@@ -344,7 +366,13 @@ export class Matchmaking {
     const modes = { ...DEFAULT_SETTINGS.modes, ...(stored.modes ?? {}) };
     // Before lobbies there was one map pool, for Competitive.
     if (!stored.modes && legacyMaps?.length) modes.competitive = { enabled: true, maps: legacyMaps };
-    return { ...DEFAULT_SETTINGS, ...rest, modes, look: { ...DEFAULT_LOOK, ...(stored.look ?? {}) } };
+    return {
+      ...DEFAULT_SETTINGS,
+      ...rest,
+      modes,
+      look: { ...DEFAULT_LOOK, ...(stored.look ?? {}) },
+      casual: { ...DEFAULT_SETTINGS.casual, ...(stored.casual ?? {}) },
+    };
   }
 
   /** Lobbies that are open, in display order. */
@@ -368,7 +396,14 @@ export class Matchmaking {
   async saveConfig(raw: unknown, leetifyKey: string | null | undefined, actorId: number): Promise<MatchmakingSettings> {
     const next = MatchmakingSettingsSchema.parse(raw);
     const known = new Set(this.d.servers.listRecords().map((s) => s.id));
-    next.serverIds = [...new Set(next.serverIds)].filter((id) => known.has(id));
+    next.casual.serverIds = [...new Set(next.casual.serverIds)].filter((id) => known.has(id));
+    // A casual server is never used for matches.
+    next.serverIds = [...new Set(next.serverIds)].filter((id) => known.has(id) && !next.casual.serverIds.includes(id));
+    for (const id of next.casual.serverIds) {
+      if (this.matches.some((m) => m.serverId === id && (isActive(m) || !m.released))) {
+        throw badRequest(`${this.d.servers.require(id).name} is running a match right now. Make it casual when the match is over.`);
+      }
+    }
     for (const m of MODES) next.modes[m].maps = [...new Set(next.modes[m].maps)];
     const before = this.config();
     this.d.settings.set("matchmaking", next);
@@ -392,6 +427,13 @@ export class Matchmaking {
     }
     // People in a lobby that just closed go back to choosing.
     for (const e of [...this.lobby.values()]) if (!this.openModes(next).includes(e.mode)) this.removeFromLobby(e.steamId);
+    // Tell the bridge on servers that became casual (or stopped being casual), so it balances teams on join.
+    const was = new Set(before.casual.serverIds);
+    const now = new Set(next.casual.serverIds);
+    for (const id of new Set([...was, ...now])) {
+      if (was.has(id) !== now.has(id)) await this.setCasualFlag(id, now.has(id)).catch(() => undefined);
+    }
+    void this.refreshCasual();
     await this.onSettingsChanged();
     return next;
   }
@@ -424,6 +466,7 @@ export class Matchmaking {
   /** Matches the panel was running when it stopped can't be resumed; give their servers back. */
   async recover(): Promise<void> {
     this.imageVersions = await this.d.images.versions().catch(() => ({ icon: null, banner: null }));
+    for (const id of this.config().casual.serverIds) await this.setCasualFlag(id, true).catch(() => undefined);
     const open = this.d.db.prepare(`SELECT id, server_id FROM mm_matches WHERE status IN ('veto','side','starting','live')`).all() as {
       id: number;
       server_id: number | null;
@@ -464,6 +507,7 @@ export class Matchmaking {
       }
     }
 
+    if (t - this.lastCasual >= POLL_MS && this.config().casual.serverIds.length) void this.refreshCasual();
     if (t - this.lastPoll >= POLL_MS) {
       this.lastPoll = t;
       await Promise.all(this.matches.filter((m) => m.phase === "live" && !m.polling).map((m) => this.poll(m)));
@@ -592,8 +636,47 @@ export class Matchmaking {
   // ------------------------------------------------------------- servers
 
   private poolRecords(): ServerRecord[] {
-    const ids = new Set(this.config().serverIds);
+    const c = this.config();
+    const ids = new Set(c.serverIds.filter((id) => !c.casual.serverIds.includes(id)));
     return this.d.servers.listRecords().filter((s) => ids.has(s.id));
+  }
+
+  // ------------------------------------------------------------- casual servers
+
+  private casualInfo = new Map<number, CasualView>();
+  private lastCasual = 0;
+
+  /** Marks a server casual (or not) for the bridge: casual servers put each newcomer on the smaller team. */
+  private async setCasualFlag(serverId: number, casual: boolean): Promise<void> {
+    const s = this.d.servers.listRecords().find((x) => x.id === serverId);
+    if (!s || !this.d.hasBridge(s.id)) return;
+    await this.matchFile(s, { version: 1, active: false, casual, players: [] });
+    if ((await this.d.host.serviceStatus(s.slug)).state === "active") await this.exec(s, "cs2panel_match_reload").catch(() => undefined);
+  }
+
+  /** Name, map and head count of the casual servers, for the site (asked every 10 seconds, not on every page refresh). */
+  async refreshCasual(): Promise<void> {
+    this.lastCasual = this.now();
+    const ids = this.config().casual.serverIds;
+    const next = new Map<number, CasualView>();
+    for (const id of ids) {
+      try {
+        const v = await this.d.servers.get(id);
+        next.set(id, {
+          id,
+          name: v.live?.name || v.name,
+          map: v.live?.map ?? null,
+          players: v.live ? v.live.players - (v.live.bots ?? 0) : 0,
+          maxPlayers: v.live?.maxPlayers ?? v.maxPlayers,
+          online: v.answering === "yes",
+          port: v.port,
+          password: v.password,
+        });
+      } catch {
+        /* server deleted */
+      }
+    }
+    this.casualInfo = next;
   }
 
   private reserved(serverId: number): boolean {
@@ -1228,6 +1311,10 @@ export class Matchmaking {
         .reverse()
         .map((m) => this.matchView(m, viewer)),
       look: this.imageUrls(),
+      casual: {
+        name: c.casual.name,
+        servers: c.casual.serverIds.map((id) => this.casualInfo.get(id)).filter((x): x is CasualView => !!x),
+      },
       freeServers: this.freeCountSync(),
       matchServers: this.poolRecords().filter((s) => this.d.hasBridge(s.id)).length,
       now: this.now(),

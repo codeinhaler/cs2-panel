@@ -97,6 +97,18 @@ export interface State {
   drafts: Draft[];
   matches: Match[];
   look: { icon: string | null; banner: string | null };
+  casual: {
+    name: string;
+    servers: {
+      id: number;
+      name: string;
+      map: string | null;
+      players: number;
+      maxPlayers: number;
+      online: boolean;
+      joinInfo: { address: string; password: string; steamUrl: string; console: string };
+    }[];
+  };
   freeServers: number;
   matchServers: number;
   now: number;

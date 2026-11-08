@@ -400,6 +400,7 @@ export interface MatchmakingSettings {
   modes: Record<"competitive" | "wingman" | "duel", { enabled: boolean; maps: string[] }>;
   botDifficulty: number;
   look: MmLook;
+  casual: { name: string; serverIds: number[] };
   gameAddress: string;
   vetoSeconds: number;
 }

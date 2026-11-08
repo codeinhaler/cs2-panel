@@ -684,4 +684,41 @@ describe("matchmaking site", () => {
       ).status,
     ).toBe(400);
   });
+
+  it("shows casual servers to everyone and keeps them out of matches", async () => {
+    const owner = await adminCookie();
+    const serverId = await setupServer(owner);
+    await enable(owner, [serverId], { casual: { name: "Fun", serverIds: [serverId] } });
+    const saved = (await admin(owner, "GET", "/api/matchmaking")).body.settings;
+    expect(saved.casual).toEqual({ name: "Fun", serverIds: [serverId] });
+    expect(saved.serverIds).toEqual([]); // a casual server is never a match server
+
+    await app.services.matchmaking.refreshCasual();
+    const anon = (await play(null, "GET", "/api/state")).body;
+    expect(anon.me).toBeNull();
+    expect(anon.casual.name).toBe("Fun");
+    expect(anon.casual.servers).toHaveLength(1);
+    expect(anon.casual.servers[0]).toMatchObject({
+      id: serverId,
+      name: "Match #1",
+      online: false,
+      joinInfo: { address: "play.example:27015", password: "", steamUrl: "steam://connect/play.example:27015", console: "connect play.example:27015" },
+    });
+
+    // The bridge is told the server is casual.
+    const [matchFile] = findFile(dir, "match.json");
+    expect(JSON.parse(readFileSync(matchFile!, "utf8"))).toMatchObject({ active: false, casual: true });
+
+    // No match server left: making teams says so.
+    const a = await playerCookie(P[0]!, "Alpha");
+    const b = await playerCookie(P[1]!, "Bravo");
+    await play(a, "POST", "/api/lobby/join", { mode: "competitive" });
+    await play(b, "POST", "/api/lobby/join", { mode: "competitive" });
+    expect((await play(a, "POST", "/api/teams")).body.error).toMatch(/No server is set up/);
+
+    // No longer casual: the flag is taken off again.
+    await enable(owner, [serverId], { casual: { name: "Fun", serverIds: [] } });
+    expect(JSON.parse(readFileSync(matchFile!, "utf8")).casual).toBe(false);
+    expect((await admin(owner, "PUT", "/api/matchmaking", { settings: { ...saved, casual: { name: "", serverIds: [] } } })).body.error).toMatch(/name/);
+  });
 });

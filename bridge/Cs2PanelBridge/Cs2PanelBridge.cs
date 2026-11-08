@@ -28,7 +28,7 @@ namespace Cs2PanelBridge;
 public class Cs2PanelBridge : BasePlugin
 {
     public override string ModuleName => "CS2 Panel Bridge";
-    public override string ModuleVersion => "1.2.0";
+    public override string ModuleVersion => "1.3.0";
     public override string ModuleAuthor => "cs2-panel";
     public override string ModuleDescription => "Enforces cs2-panel bans, locks matchmaking matches and reports players to the panel.";
 
@@ -52,13 +52,19 @@ public class Cs2PanelBridge : BasePlugin
     private Dictionary<ulong, MatchPlayer> _matchPlayers = new();
     private bool _matchOver;
     private bool _countdown;
+    /// <summary>A casual server: no match, but each newcomer goes on the smaller team.</summary>
+    private bool _casual;
 
     public override void Load(bool hotReload)
     {
         LoadBans();
         LoadMatch();
         RegisterListener<Listeners.OnClientAuthorized>(OnClientAuthorized);
-        RegisterListener<Listeners.OnMapStart>(_ => AddTimer(2.0f, HoldWarmup));
+        RegisterListener<Listeners.OnMapStart>(_ => AddTimer(2.0f, () =>
+        {
+            HoldWarmup();
+            ApplyCasual();
+        }));
         RegisterEventHandler<EventPlayerConnectFull>(OnPlayerConnectFull);
         RegisterEventHandler<EventPlayerTeam>(OnPlayerTeam);
         RegisterEventHandler<EventCsWinPanelMatch>(OnMatchOver);
@@ -130,6 +136,7 @@ public class Cs2PanelBridge : BasePlugin
         ApplyMatch();
         // The server is open again: let warmup run out normally.
         if (hadMatch && _match == null) Server.ExecuteCommand("mp_warmup_pausetimer 0");
+        ApplyCasual();
         command.ReplyToCommand(_match == null ? "cs2panel: no match, server open" : $"cs2panel: match {_match.MatchId} loaded, {_matchPlayers.Count} players");
     }
 
@@ -165,6 +172,7 @@ public class Cs2PanelBridge : BasePlugin
         {
             var file = File.Exists(MatchFilePath) ? JsonSerializer.Deserialize<MatchFile>(File.ReadAllText(MatchFilePath), Json) : null;
             var previous = _match?.MatchId;
+            _casual = file is { Active: false, Casual: true };
             if (file is not { Active: true } || file.Players.Count == 0)
             {
                 _match = null;
@@ -215,6 +223,14 @@ public class Cs2PanelBridge : BasePlugin
     private HookResult OnPlayerConnectFull(EventPlayerConnectFull @event, GameEventInfo info)
     {
         var player = @event.Userid;
+        if (_match == null && _casual && player is { IsValid: true, IsBot: false })
+        {
+            AddTimer(1.0f, () =>
+            {
+                if (player.IsValid) PlaceOnSmallerTeam(player);
+            });
+            return HookResult.Continue;
+        }
         if (_match == null || player is not { IsValid: true, IsBot: false }) return HookResult.Continue;
         // The team menu comes up first; move the player once they're properly in.
         AddTimer(1.0f, () =>
@@ -333,6 +349,26 @@ public class Cs2PanelBridge : BasePlugin
         Server.ExecuteCommand($"kickid {player.UserId.Value} \"This server is reserved for a match right now\"");
     }
 
+    // ------------------------------------------------------------- casual servers
+
+    /// <summary>Keeps casual teams even: automatic balancing, at most one player difference when switching.</summary>
+    private void ApplyCasual()
+    {
+        if (_match == null && _casual) Server.ExecuteCommand("mp_autoteambalance 1; mp_limitteams 1");
+    }
+
+    /// <summary>A newcomer goes on the team with fewer people (random on a tie). They can still switch afterwards.</summary>
+    private void PlaceOnSmallerTeam(CCSPlayerController player)
+    {
+        var team = (CsTeam)player.TeamNum;
+        if (team is CsTeam.Terrorist or CsTeam.CounterTerrorist) return;
+        var others = Utilities.GetPlayers().Where(p => p is { IsValid: true, IsHLTV: false } && p.SteamID != player.SteamID).ToList();
+        var t = others.Count(p => (CsTeam)p.TeamNum == CsTeam.Terrorist);
+        var ct = others.Count(p => (CsTeam)p.TeamNum == CsTeam.CounterTerrorist);
+        var pick = t < ct ? CsTeam.Terrorist : ct < t ? CsTeam.CounterTerrorist : (Random.Shared.Next(2) == 0 ? CsTeam.Terrorist : CsTeam.CounterTerrorist);
+        player.ChangeTeam(pick);
+    }
+
     // ------------------------------------------------------------- bans
 
     private int LoadBans()
@@ -404,6 +440,8 @@ public class MatchFile
 {
     public int Version { get; set; }
     public bool Active { get; set; }
+    /// <summary>No match; a casual server where newcomers are put on the smaller team.</summary>
+    public bool Casual { get; set; }
     public string MatchId { get; set; } = "";
     public List<MatchPlayer> Players { get; set; } = new();
 }

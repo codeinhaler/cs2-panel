@@ -121,13 +121,17 @@ export function MatchmakingPage() {
               <label key={s.id} className="check">
                 <input
                   type="checkbox"
-                  checked={form.serverIds.includes(s.id)}
+                  checked={form.serverIds.includes(s.id) && !form.casual.serverIds.includes(s.id)}
                   onChange={(e) => set("serverIds", e.target.checked ? [...form.serverIds, s.id] : form.serverIds.filter((x) => x !== s.id))}
-                  disabled={!manage}
+                  disabled={!manage || form.casual.serverIds.includes(s.id)}
                 />
                 <span>
                   <Link to={`/servers/${s.id}`}>{s.name}</Link> <span className="hint">port {s.port}</span>
-                  {!s.hasBridge && <span className="hint"> · needs CounterStrikeSharp (with CS2 Panel Bridge) installed</span>}
+                  {form.casual.serverIds.includes(s.id) ? (
+                    <span className="hint"> · casual server, not used for matches</span>
+                  ) : (
+                    !s.hasBridge && <span className="hint"> · needs CounterStrikeSharp (with CS2 Panel Bridge) installed</span>
+                  )}
                 </span>
               </label>
             ))}
@@ -138,6 +142,41 @@ export function MatchmakingPage() {
               with it and keeps strangers off the server during a match.
             </p>
           )}
+        </div>
+
+        <div className="panel">
+          <h2 style={{ marginBottom: 6 }}>Casual servers</h2>
+          <p className="hint" style={{ marginTop: 0 }}>
+            Shown on the site to everyone, signed in or not, with a button to join. No ratings, no teams made by the site and no map voting: people join any
+            time and are put on the smaller team, and can switch teams afterwards. The server's password (if it has one) is shown on the site.
+          </p>
+          <label className="field" style={{ maxWidth: 320 }}>
+            <span>Name on the site</span>
+            <input value={form.casual.name} onChange={(e) => set("casual", { ...form.casual, name: e.target.value })} maxLength={40} disabled={!manage} />
+          </label>
+          <div className="exec-list" style={{ marginTop: 12 }}>
+            {data.servers.map((s) => (
+              <label key={s.id} className="check">
+                <input
+                  type="checkbox"
+                  checked={form.casual.serverIds.includes(s.id)}
+                  onChange={(e) =>
+                    set("casual", {
+                      ...form.casual,
+                      serverIds: e.target.checked ? [...form.casual.serverIds, s.id] : form.casual.serverIds.filter((x) => x !== s.id),
+                    })
+                  }
+                  disabled={!manage}
+                />
+                <span>
+                  <Link to={`/servers/${s.id}`}>{s.name}</Link> <span className="hint">port {s.port}</span>
+                  {!s.hasBridge && form.casual.serverIds.includes(s.id) && (
+                    <span className="hint"> · without CounterStrikeSharp, CS2's own auto-balance picks teams instead</span>
+                  )}
+                </span>
+              </label>
+            ))}
+          </div>
         </div>
 
         <div className="panel">

@@ -147,7 +147,23 @@ export async function buildPublicApp(d: PublicDeps): Promise<FastifyInstance> {
     const me = req.mmPlayer;
     if (me) mm.touch(me);
     const s = mm.state(me);
-    return { ...s, matches: s.matches.map((m) => withJoin(req, m)) };
+    const host = mm.config().gameAddress || hostOnly(req.headers.host);
+    const casual = {
+      name: s.casual.name,
+      servers: s.casual.servers.map(({ port, password, ...rest }) => {
+        const address = `${host}:${port}`;
+        return {
+          ...rest,
+          joinInfo: {
+            address,
+            password,
+            steamUrl: password ? `steam://connect/${address}/${password}` : `steam://connect/${address}`,
+            console: password ? `connect ${address}; password ${password}` : `connect ${address}`,
+          },
+        };
+      }),
+    };
+    return { ...s, casual, matches: s.matches.map((m) => withJoin(req, m)) };
   });
 
   // ------------------------------------------------------------- lobby
