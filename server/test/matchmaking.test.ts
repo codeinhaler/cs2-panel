@@ -125,13 +125,25 @@ async function setup() {
   rconLog = [];
   leetifyCalls = 0;
   statusReply = `CS2PANEL_MATCH {"active":true,"phase":"warmup","connected":0,"scoreA":0,"scoreB":0}`;
-  const fetchFn = (async (url: string | URL | Request) => {
+  const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
     const u = new URL(String(url));
     if (u.hostname === "api-public.cs-prod.leetify.com") {
       leetifyCalls++;
       const id = u.searchParams.get("steam64_id")!;
       if (!(id in LEETIFY)) return new Response("{}", { status: 404 });
       return Response.json({ name: "x", privacy_mode: "public", ranks: { premier: LEETIFY[id], competitive: [] } });
+    }
+    if (u.hostname === "api.steampowered.com") {
+      // Workshop 111 is "Aim Botz", 222 has been removed; anything else Steam doesn't know.
+      if (u.pathname.includes("GetCollectionDetails")) return Response.json({ response: { collectiondetails: [{ result: 9 }] } });
+      const id = new URLSearchParams(String(init?.body ?? "")).get("publishedfileids[0]");
+      const d =
+        id === "111"
+          ? { result: 1, title: "Aim Botz", consumer_app_id: 730, visibility: 0, file_size: "1000" }
+          : id === "222"
+            ? { result: 1, title: "Old map", consumer_app_id: 730, visibility: 0, banned: 1 }
+            : { result: 9 };
+      return Response.json({ response: { publishedfiledetails: [d] } });
     }
     return new Response("<profile></profile>");
   }) as typeof fetch;
@@ -720,5 +732,20 @@ describe("matchmaking site", () => {
     await enable(owner, [serverId], { casual: { name: "Fun", serverIds: [] } });
     expect(JSON.parse(readFileSync(matchFile!, "utf8")).casual).toBe(false);
     expect((await admin(owner, "PUT", "/api/matchmaking", { settings: { ...saved, casual: { name: "", serverIds: [] } } })).body.error).toMatch(/name/);
+  });
+
+  it("checks Workshop maps with Steam and shows their names", async () => {
+    const owner = await adminCookie();
+    const current = (await admin(owner, "GET", "/api/matchmaking")).body.settings;
+    const withMaps = (maps: string[]) => ({
+      settings: { ...current, enabled: true, modes: { ...current.modes, duel: { enabled: true, maps } } },
+    });
+    const removed = await admin(owner, "PUT", "/api/matchmaking", withMaps(["workshop:222"]));
+    expect(removed.body.error).toMatch(/Workshop map 222: "Old map" has been removed/);
+    const missing = await admin(owner, "PUT", "/api/matchmaking", withMaps(["workshop:333"]));
+    expect(missing.body.error).toMatch(/Steam has no Workshop item 333/);
+    expect((await admin(owner, "PUT", "/api/matchmaking", withMaps(["workshop:111", "de_nuke"]))).status).toBe(200);
+    expect((await admin(owner, "GET", "/api/matchmaking")).body.mapNames).toEqual({ "workshop:111": "Aim Botz" });
+    expect((await play(null, "GET", "/api/state")).body.mapNames).toEqual({ "workshop:111": "Aim Botz" });
   });
 });

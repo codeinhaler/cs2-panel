@@ -187,6 +187,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     audit,
     fetchFn,
     images: new SiteImages(path.join(config.dataDir, "matchmaking")),
+    workshop: (id) => workshop.lookup(id, "map"),
     ...(deps.matchmakingClock ?? {}),
   });
   const publicSite = new PublicSite(
@@ -1190,6 +1191,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       maps: await mapMenus.installedMaps(),
       state: matchmaking.state(null),
       history: matchmaking.history(),
+      mapNames: matchmaking.mapNames(),
       themes: THEMES,
       images: matchmaking.imageUrls(),
     };

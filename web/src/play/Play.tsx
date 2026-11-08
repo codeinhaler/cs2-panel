@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   API,
   BOT_ID,
+  setMapNames,
   formatRating,
   mapName,
   play,
@@ -30,6 +31,7 @@ export function Play() {
     try {
       const s = await play.state();
       skew.current = s.now - Date.now();
+      setMapNames(s.mapNames);
       setState(s);
       setOffline(false);
     } catch {

@@ -40,7 +40,10 @@ export function MapPicker({
   const [installed, setInstalled] = useState<string[]>([]);
 
   useEffect(() => {
-    installedCache ??= api.installedMaps().then((r) => r.maps, () => []);
+    installedCache ??= api.installedMaps().then(
+      (r) => r.maps,
+      () => [],
+    );
     void installedCache.then(setInstalled);
   }, []);
 
@@ -70,7 +73,14 @@ export function MapPicker({
             ["collection", "Workshop collection"],
           ] as [Kind, string][]
         ).map(([k, label]) => (
-          <button key={k} type="button" role="radio" aria-checked={state.kind === k} className={state.kind === k ? "on" : ""} onClick={() => update({ kind: k })}>
+          <button
+            key={k}
+            type="button"
+            role="radio"
+            aria-checked={state.kind === k}
+            className={state.kind === k ? "on" : ""}
+            onClick={() => update({ kind: k })}
+          >
             {label}
           </button>
         ))}
@@ -135,7 +145,9 @@ export function MapPicker({
       )}
       {state.kind !== "stock" && <WorkshopNote info={info} />}
       {state.kind !== "stock" && gsltSet === false && (
-        <small className="field-warn">This server has no GSLT token. Steam often refuses Workshop downloads without one, and the server then never finishes starting.</small>
+        <small className="field-warn">
+          This server has no GSLT token. Steam often refuses Workshop downloads without one, and the server then never finishes starting.
+        </small>
       )}
     </div>
   );
@@ -156,7 +168,7 @@ export function mapLabel(value: string): string {
 }
 
 /** Asks the panel what Steam says about an item, shortly after typing stops. */
-function useWorkshopInfo(id: string, kind: "map" | "collection"): WorkshopInfo | "loading" | null {
+export function useWorkshopInfo(id: string, kind: "map" | "collection"): WorkshopInfo | "loading" | null {
   const [info, setInfo] = useState<WorkshopInfo | "loading" | null>(null);
   useEffect(() => {
     if (!/^\d{3,20}$/.test(id)) {
@@ -179,11 +191,18 @@ function useWorkshopInfo(id: string, kind: "map" | "collection"): WorkshopInfo |
   return info;
 }
 
-function WorkshopNote({ info }: { info: WorkshopInfo | "loading" | null }) {
+export function WorkshopNote({ info }: { info: WorkshopInfo | "loading" | null }) {
   if (info === null) return null;
   if (info === "loading") return <small className="hint">Asking Steam about this item…</small>;
   if (info.status === "ok") {
-    const extra = info.kind === "collection" ? (info.itemCount !== null ? `${info.itemCount} maps` : null) : info.sizeBytes ? `${(info.sizeBytes / 1024 / 1024).toFixed(0)} MB` : null;
+    const extra =
+      info.kind === "collection"
+        ? info.itemCount !== null
+          ? `${info.itemCount} maps`
+          : null
+        : info.sizeBytes
+          ? `${(info.sizeBytes / 1024 / 1024).toFixed(0)} MB`
+          : null;
     return (
       <small className="field-ok">
         ✓ {info.title ?? `Workshop item ${info.id}`}

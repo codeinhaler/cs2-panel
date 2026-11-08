@@ -16,6 +16,7 @@ import type { ServerRecord } from "../servers/store.js";
 import type { Settings } from "../settings.js";
 import { choosePlayers, rankSplits, type Split } from "./balance.js";
 import { LeetifyClient, leetifyProfileUrl } from "./leetify.js";
+import { workshopBlocks, type WorkshopInfo } from "../game/workshop.js";
 import { DEFAULT_LOOK, LookSchema, type ImageKind, type SiteImages } from "./look.js";
 import type { MmPlayer, MmPlayerStore } from "./players.js";
 
@@ -300,6 +301,8 @@ export interface StateView {
   look: { icon: string | null; banner: string | null };
   /** Servers anyone can join, shown even to people who aren't signed in. */
   casual: { name: string; servers: CasualView[] };
+  /** Steam's names for Workshop maps, by "workshop:ID". */
+  mapNames: Record<string, string>;
   freeServers: number;
   /** Servers set up for matches (in the pool, with the bridge), busy or not. */
   matchServers: number;
@@ -321,6 +324,8 @@ export interface MatchmakingDeps {
   isBanned: (steamId: string) => boolean;
   audit: AuditLog;
   images: SiteImages;
+  /** What Steam says about a Workshop map. */
+  workshop: (id: string) => Promise<WorkshopInfo>;
   fetchFn: typeof fetch;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
@@ -343,6 +348,8 @@ export class Matchmaking {
   private nextDraftId = 1;
   private timer: NodeJS.Timeout | null = null;
   private lastPoll = 0;
+  /** Workshop map titles from Steam, by "workshop:ID". */
+  private mapTitles = new Map<string, string>();
   private imageVersions: Record<ImageKind, number | null> = { icon: null, banner: null };
   /** Called after settings change, so the public site can start, stop or move. */
   onSettingsChanged: () => Promise<void> = async () => undefined;
@@ -405,6 +412,13 @@ export class Matchmaking {
       }
     }
     for (const m of MODES) next.modes[m].maps = [...new Set(next.modes[m].maps)];
+    // Same check as on a server's page: no removed, missing, private or non-CS2 Workshop maps.
+    const workshopIds = [...new Set(MODES.flatMap((m) => next.modes[m].maps))].map((x) => parseMapSpec(x)).filter((x) => x?.kind === "workshop");
+    for (const spec of workshopIds) {
+      const info = await this.d.workshop(spec!.id);
+      if (workshopBlocks(info.status)) throw badRequest(`Workshop map ${spec!.id}: ${info.message}`);
+      if (info.title) this.mapTitles.set(`workshop:${spec!.id}`, info.title);
+    }
     const before = this.config();
     this.d.settings.set("matchmaking", next);
     if (leetifyKey !== undefined) {
@@ -467,6 +481,7 @@ export class Matchmaking {
   async recover(): Promise<void> {
     this.imageVersions = await this.d.images.versions().catch(() => ({ icon: null, banner: null }));
     for (const id of this.config().casual.serverIds) await this.setCasualFlag(id, true).catch(() => undefined);
+    void this.loadMapTitles();
     const open = this.d.db.prepare(`SELECT id, server_id FROM mm_matches WHERE status IN ('veto','side','starting','live')`).all() as {
       id: number;
       server_id: number | null;
@@ -639,6 +654,22 @@ export class Matchmaking {
     const c = this.config();
     const ids = new Set(c.serverIds.filter((id) => !c.casual.serverIds.includes(id)));
     return this.d.servers.listRecords().filter((s) => ids.has(s.id));
+  }
+
+  /** Looks up the names of the Workshop maps in the pools, so players see "Aim Botz" instead of a number. */
+  async loadMapTitles(): Promise<void> {
+    const c = this.config();
+    for (const map of new Set(MODES.flatMap((m) => c.modes[m].maps))) {
+      const spec = parseMapSpec(map);
+      if (spec?.kind !== "workshop" || this.mapTitles.has(map)) continue;
+      const info = await this.d.workshop(spec.id).catch(() => null);
+      if (info?.title) this.mapTitles.set(map, info.title);
+    }
+  }
+
+  /** Names for Workshop maps, by "workshop:ID". */
+  mapNames(): Record<string, string> {
+    return Object.fromEntries(this.mapTitles);
   }
 
   // ------------------------------------------------------------- casual servers
@@ -1311,6 +1342,7 @@ export class Matchmaking {
         .reverse()
         .map((m) => this.matchView(m, viewer)),
       look: this.imageUrls(),
+      mapNames: this.mapNames(),
       casual: {
         name: c.casual.name,
         servers: c.casual.serverIds.map((id) => this.casualInfo.get(id)).filter((x): x is CasualView => !!x),

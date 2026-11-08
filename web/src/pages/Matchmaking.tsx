@@ -4,6 +4,7 @@ import { api, type MatchmakingInfo, type MatchmakingSettings, type MmRating } fr
 import { useAction, useApp, usePolling } from "../app-context";
 import { formatDateTime } from "../format";
 import { LookSettings } from "./MatchmakingLook";
+import { WorkshopNote, useWorkshopInfo } from "../components/MapPicker";
 
 const SOURCE = { leetify: "Leetify", self: "self-set", admin: "set by you", none: "no rating", bot: "bot" } as const;
 const PHASE = {
@@ -16,7 +17,8 @@ const PHASE = {
   abandoned: "Ended",
 } as const;
 
-const mapLabel = (m: string) => (m.startsWith("workshop:") ? `Workshop ${m.slice(9)}` : m);
+/** A map's name: Steam's title for Workshop maps when known. */
+const mapLabel = (m: string, names: Record<string, string> = {}) => (m.startsWith("workshop:") ? (names[m] ?? `Workshop ${m.slice(9)}`) : m);
 const utc = (t: string) => new Date(`${t.replace(" ", "T")}Z`);
 
 /** The matchmaking site for players: settings, who's in the lobby, matches. */
@@ -25,6 +27,8 @@ export function MatchmakingPage() {
   const { busy, run } = useAction();
   const { data, refresh } = usePolling(() => api.matchmaking(), 4000);
   const [form, setForm] = useState<MatchmakingSettings | null>(null);
+  /** Titles of Workshop maps just added, before the panel has them. */
+  const [titles, setTitles] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState<MatchmakingSettings | null>(null);
   const [key, setKey] = useState("");
 
@@ -37,6 +41,7 @@ export function MatchmakingPage() {
 
   if (!data || !form || !saved) return null;
   const manage = can("server.manage");
+  const names = { ...data.mapNames, ...titles };
   const moderate = can("players.moderate");
   const dirty = JSON.stringify(form) !== JSON.stringify(saved);
   const set = <K extends keyof MatchmakingSettings>(k: K, v: MatchmakingSettings[K]) => setForm({ ...form, [k]: v });
@@ -193,7 +198,9 @@ export function MatchmakingPage() {
                 value={form.modes[mode]}
                 stock={data.maps}
                 manage={manage}
+                names={names}
                 onChange={(v) => set("modes", { ...form.modes, [mode]: v })}
+                onTitle={(map, title) => setTitles((t) => ({ ...t, [map]: title }))}
               />
             ))}
           </div>
@@ -284,15 +291,23 @@ function LobbySettings({
   value,
   stock,
   manage,
+  names,
   onChange,
+  onTitle,
 }: {
   mode: (typeof MODES)[number];
   value: { enabled: boolean; maps: string[] };
   stock: string[];
   manage: boolean;
+  names: Record<string, string>;
   onChange: (v: { enabled: boolean; maps: string[] }) => void;
+  onTitle: (map: string, title: string) => void;
 }) {
   const [workshop, setWorkshop] = useState("");
+  // Same check as the map picker on a server's page: ask Steam about the item as it's typed.
+  const workshopId = /(\d{3,20})/.exec(workshop)?.[1] ?? "";
+  const info = useWorkshopInfo(workshopId, "map");
+  const canAdd = !!workshopId && info !== null && info !== "loading" && (info.status === "ok" || info.status === "unknown");
   const text = MODE_TEXT[mode];
   // Maps from the install, plus whatever is in the pool that isn't installed (Workshop maps).
   const installed = stock.filter((m) => /^(de|cs|ar|aim)_/.test(m));
@@ -314,31 +329,38 @@ function LobbySettings({
             {choices.map((m) => (
               <label key={m} className="check">
                 <input type="checkbox" checked={value.maps.includes(m)} onChange={(e) => toggle(m, e.target.checked)} disabled={!manage} />
-                <span>{mapLabel(m)}</span>
+                <span>
+                  {mapLabel(m, names)}
+                  {m.startsWith("workshop:") && <span className="hint"> · Workshop {m.slice(9)}</span>}
+                </span>
               </label>
             ))}
           </div>
           {manage && (
-            <div className="row-actions" style={{ marginTop: 10 }}>
-              <input
-                value={workshop}
-                onChange={(e) => setWorkshop(e.target.value)}
-                placeholder="Workshop map ID or link"
-                style={{ maxWidth: 240 }}
-                aria-label={`Workshop map for ${text.label}`}
-              />
-              <button
-                type="button"
-                className="btn small"
-                disabled={!/\d{5,20}/.test(workshop)}
-                onClick={() => {
-                  const id = /(\d{5,20})/.exec(workshop)![1];
-                  if (!value.maps.includes(`workshop:${id}`)) onChange({ ...value, maps: [...value.maps, `workshop:${id}`] });
-                  setWorkshop("");
-                }}
-              >
-                Add Workshop map
-              </button>
+            <div className="mm-workshop-add">
+              <div className="row-actions">
+                <input
+                  value={workshop}
+                  onChange={(e) => setWorkshop(e.target.value)}
+                  placeholder="Workshop map ID or link"
+                  style={{ maxWidth: 240 }}
+                  aria-label={`Workshop map for ${text.label}`}
+                />
+                <button
+                  type="button"
+                  className="btn small"
+                  disabled={!canAdd}
+                  onClick={() => {
+                    const map = `workshop:${workshopId}`;
+                    if (info && info !== "loading" && info.title) onTitle(map, info.title);
+                    if (!value.maps.includes(map)) onChange({ ...value, maps: [...value.maps, map] });
+                    setWorkshop("");
+                  }}
+                >
+                  Add Workshop map
+                </button>
+              </div>
+              <WorkshopNote info={info} />
             </div>
           )}
           <p className="hint" style={{ margin: "8px 0 0" }}>
@@ -478,7 +500,7 @@ function LiveSection({ info, moderate, refresh }: { info: MatchmakingInfo; moder
               {matches.map((m) => (
                 <tr key={m.id}>
                   <td>
-                    {m.map ? mapLabel(m.map) : "—"}
+                    {m.map ? mapLabel(m.map, info.mapNames) : "—"}
                     <div className="hint">{m.modeLabel}</div>
                   </td>
                   <td>
@@ -536,7 +558,7 @@ function HistorySection({ info }: { info: MatchmakingInfo }) {
             <tr key={h.id}>
               <td>{formatDateTime(utc(h.createdAt))}</td>
               <td>
-                {h.map ? mapLabel(h.map) : "—"}
+                {h.map ? mapLabel(h.map, info.mapNames) : "—"}
                 <div className="hint">{MODE_TEXT[h.mode as keyof typeof MODE_TEXT]?.label ?? h.mode}</div>
               </td>
               <td>

@@ -458,6 +458,7 @@ export interface MatchmakingInfo {
     matches: MmMatch[];
     freeServers: number;
   };
+  mapNames: Record<string, string>;
   themes: MmTheme[];
   images: { icon: string | null; banner: string | null };
   history: {

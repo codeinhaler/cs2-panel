@@ -97,6 +97,7 @@ export interface State {
   drafts: Draft[];
   matches: Match[];
   look: { icon: string | null; banner: string | null };
+  mapNames: Record<string, string>;
   casual: {
     name: string;
     servers: {
@@ -149,7 +150,14 @@ export const play = {
 };
 
 /** de_mirage → Mirage; a Workshop ID → Workshop 123. */
+let workshopNames: Record<string, string> = {};
+/** Steam's names for Workshop maps, from the latest state. */
+export function setMapNames(names: Record<string, string>): void {
+  workshopNames = names ?? {};
+}
+
 export function mapName(map: string): string {
+  if (workshopNames[map]) return workshopNames[map];
   if (/^\d+$/.test(map) || /^workshop[:/]/i.test(map)) return `Workshop ${map.replace(/\D/g, "")}`;
   const bare = map.replace(/^(de|cs|ar)_/, "").replace(/_/g, " ");
   return bare.charAt(0).toUpperCase() + bare.slice(1);
