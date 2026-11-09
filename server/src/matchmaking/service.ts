@@ -109,8 +109,10 @@ export const MatchmakingSettingsSchema = z.object({
       channels: z.record(z.string().regex(/^\d+$/), z.object({ a: DiscordChannel, b: DiscordChannel })),
       /** One voice channel for everyone on the casual servers. */
       casual: DiscordChannel.default(""),
+      /** One voice channel for everyone in 1v1 matches, instead of a channel per team. */
+      duel: DiscordChannel.default(""),
     })
-    .default({ invite: "", channels: {}, casual: "" }),
+    .default({ invite: "", channels: {}, casual: "", duel: "" }),
   /** Servers anyone can just join from the site: no sign-in, no teams made, no veto. */
   casual: z
     .object({
@@ -141,7 +143,7 @@ export const DEFAULT_SETTINGS: MatchmakingSettings = {
   botDifficulty: 1,
   look: DEFAULT_LOOK,
   casual: { name: "Casual", serverIds: [] },
-  discord: { invite: "", channels: {}, casual: "" },
+  discord: { invite: "", channels: {}, casual: "", duel: "" },
   gameAddress: "",
   vetoSeconds: 30,
 };
@@ -1389,7 +1391,8 @@ export class Matchmaking {
     const shown = (t: Member[]) => (showBot ? t : humans(t));
     const myTeam: TeamKey | null = !member ? null : m.teamA.some((p) => p.steamId === viewer) ? "a" : "b";
     const channels = this.config().discord.channels[String(m.serverId)];
-    const channel = myTeam && channels ? (myTeam === "a" ? channels.a : channels.b) : "";
+    // 1v1: one shared channel for everyone; other lobbies: the player's own team's channel on this server.
+    const channel = !myTeam ? "" : m.mode === "duel" ? this.config().discord.duel : channels ? (myTeam === "a" ? channels.a : channels.b) : "";
     return {
       ...this.teamsView(shown(m.teamA), shown(m.teamB)),
       bots: m.bot ? { team: m.bot, on: showBot, votes: { ...m.botVotes } } : null,

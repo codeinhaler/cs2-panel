@@ -865,7 +865,7 @@ describe("matchmaking site", () => {
     expect(bad.body.error).toMatch(/voice channel's link/);
     await enable(owner, [serverId], { discord: { invite: "https://discord.gg/fredag", channels: { [serverId]: { a: chA, b: chB } } } });
     const cookies = await Promise.all(P.slice(0, 3).map((id, i) => playerCookie(id, ["Alpha", "Bravo", "Charlie"][i]!)));
-    for (const c of cookies.slice(0, 2)) await play(c, "POST", "/api/lobby/join", { mode: "duel" });
+    for (const c of cookies.slice(0, 2)) await play(c, "POST", "/api/lobby/join", { mode: "wingman" });
     await play(cookies[0]!, "POST", "/api/teams");
     const draft = (await play(cookies[0]!, "GET", "/api/state")).body.drafts[0];
     await play(cookies[0]!, "POST", `/api/teams/${draft.id}/start`);
@@ -884,6 +884,18 @@ describe("matchmaking site", () => {
     // One channel for the casual servers, shown to everyone.
     await enable(owner, [serverId], { discord: { invite: "https://discord.gg/fredag", channels: {}, casual: chA } });
     expect((await play(null, "GET", "/api/state")).body.casual.discord).toEqual({ channel: chA, invite: "https://discord.gg/fredag" });
+
+    // 1v1 uses one shared channel instead of the team channels.
+    const duelCh = "https://discord.com/channels/111/444";
+    await enable(owner, [serverId], { discord: { invite: "", channels: { [serverId]: { a: chA, b: chB } }, casual: "", duel: duelCh } });
+    for (const c of cookies.slice(0, 2)) await play(c, "POST", "/api/lobby/join", { mode: "duel" });
+    await play(cookies[0]!, "POST", "/api/teams");
+    const duelDraft = (await play(cookies[0]!, "GET", "/api/state")).body.drafts[0];
+    expect((await play(cookies[0]!, "POST", `/api/teams/${duelDraft.id}/start`)).status).toBe(200);
+    for (const c of cookies.slice(0, 2)) {
+      const mine = (await play(c, "GET", "/api/state")).body.matches.find((x: any) => x.mode === "duel");
+      expect(mine.discord).toEqual({ channel: duelCh, invite: null });
+    }
   });
 
   it("runs the lobby's rules config after each map load, without the lines that fight the match", async () => {

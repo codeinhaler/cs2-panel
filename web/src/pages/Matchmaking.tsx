@@ -163,8 +163,8 @@ export function MatchmakingPage() {
         <div className="panel">
           <h2 style={{ marginBottom: 6 }}>Discord</h2>
           <p className="hint" style={{ marginTop: 0 }}>
-            Players in a match get a <b>Join Discord channel</b> button for their own team's voice channel. Make two voice channels per match server,
-            right-click each in Discord and pick <b>Copy Link</b>, and paste them here. Leave empty to show no button.
+            Players in a match get a <b>Join Discord channel</b> button for their own team's voice channel. Make two voice channels per match server
+            (Competitive and Wingman), right-click each in Discord and pick <b>Copy Link</b>, and paste them here. Leave empty to show no button.
           </p>
           <label className="field" style={{ maxWidth: 480 }}>
             <span>Invite link (shown as "Not on our Discord? Join here")</span>
@@ -201,6 +201,15 @@ export function MatchmakingPage() {
               );
             })}
           {form.serverIds.filter((id) => !form.casual.serverIds.includes(id)).length === 0 && <p className="hint">Tick servers for matches first.</p>}
+          <label className="field" style={{ maxWidth: 480, marginTop: 16 }}>
+            <span>1v1 voice channel (one for everyone in 1v1 matches; the team channels above aren't used for 1v1)</span>
+            <input
+              value={form.discord.duel}
+              placeholder="https://discord.com/channels/…"
+              onChange={(e) => set("discord", { ...form.discord, duel: e.target.value.trim() })}
+              disabled={!manage}
+            />
+          </label>
           <label className="field" style={{ maxWidth: 480, marginTop: 16 }}>
             <span>Casual servers' voice channel (one for everyone on them)</span>
             <input
