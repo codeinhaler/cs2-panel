@@ -26,6 +26,25 @@ function makeCert(dir: string, domain: string, days: number): CertFiles {
 }
 
 describe("Palo Alto API", () => {
+  it("reads PAN-OS answers with single quotes and spaces", () => {
+    expect(parseResponse({ status: 200, body: "<response status = 'success'><result><key>LUFRPT1abc==</key></result></response>" }).ok).toBe(true);
+    const err = parseResponse({ status: 200, body: "<response status = 'error' code = '403'><result><msg>Invalid Credential</msg></result></response>" });
+    expect(err).toMatchObject({ ok: false, message: "Invalid Credential" });
+    expect(parseResponse({ status: 200, body: "<html>login</html>" }).message).toMatch(/Unexpected answer from the firewall \(HTTP 200\): <html>login/);
+  });
+
+  it("sends the login as a form, not in the address", async () => {
+    let seen: { query: Record<string, string>; body?: string; contentType?: string } | null = null;
+    const pan = new PaloAlto("fw", FP, async ({ query, body, contentType }) => {
+      seen = { query, body: body?.toString(), contentType };
+      return { status: 200, body: "<response status = 'success'><result><key>KEY123</key></result></response>" };
+    });
+    expect(await pan.keygen("certbot", "p&ss word")).toBe("KEY123");
+    expect(seen!.query).toEqual({ type: "keygen" });
+    expect(seen!.contentType).toBe("application/x-www-form-urlencoded");
+    expect(new URLSearchParams(seen!.body)).toEqual(new URLSearchParams({ user: "certbot", password: "p&ss word" }));
+  });
+
   it("reads success and error answers", () => {
     expect(parseResponse({ status: 200, body: '<response status="success"><result><key>K</key></result></response>' }).ok).toBe(true);
     const err = parseResponse({ status: 200, body: '<response status="error"><msg><line>Invalid credentials.</line></msg></response>' });
@@ -123,12 +142,12 @@ describe("HTTPS for the matchmaking site", () => {
         },
         probe: async () => FP,
         sleep: async () => undefined,
-        panRequest: async ({ query }) => {
+        panRequest: async ({ query, body }) => {
           panCalls.push(query.type!);
           if (query.type === "keygen") {
-            return query.password === "secret"
-              ? { status: 200, body: '<response status="success"><result><key>APIKEY</key></result></response>' }
-              : { status: 200, body: '<response status="error"><result><msg>Invalid Credential</msg></result></response>' };
+            return new URLSearchParams(String(body ?? "")).get("password") === "secret"
+              ? { status: 200, body: "<response status = 'success'><result><key>APIKEY</key></result></response>" }
+              : { status: 200, body: "<response status = 'error' code = '403'><result><msg>Invalid Credential</msg></result></response>" };
           }
           if (query.type === "op" && query.cmd!.includes("<system>")) {
             return {

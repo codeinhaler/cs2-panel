@@ -92,13 +92,15 @@ function unescapeXml(s: string): string {
 
 /** "success" or the firewall's own error text. */
 export function parseResponse(r: PanResult): { ok: boolean; message: string; body: string } {
-  const status = /<response[^>]*status\s*=\s*"(\w+)"/.exec(r.body)?.[1];
+  // PAN-OS writes status = 'success' (single quotes, spaces); accept either quote style.
+  const status = /<response[^>]*?\bstatus\s*=\s*["'](\w+)["']/.exec(r.body)?.[1];
   const lines = [...r.body.matchAll(/<(?:line|msg)>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/(?:line|msg)>/g)]
     .map((m) => unescapeXml(m[1]!.replace(/<[^>]+>/g, " ").trim()))
     .filter(Boolean);
   if (r.status === 403) return { ok: false, message: "The firewall refused the API key.", body: r.body };
   if (status === "success") return { ok: true, message: lines.join(" "), body: r.body };
-  return { ok: false, message: lines.join(" ") || `The firewall answered HTTP ${r.status}.`, body: r.body };
+  const snippet = r.body.replace(/\s+/g, " ").trim().slice(0, 200);
+  return { ok: false, message: lines.join(" ") || `Unexpected answer from the firewall (HTTP ${r.status})${snippet ? `: ${snippet}` : ""}`, body: r.body };
 }
 
 export class PaloAlto {
@@ -116,7 +118,7 @@ export class PaloAlto {
 
   /** Swaps a username and password for an API key. The password isn't kept. */
   async keygen(user: string, password: string): Promise<string> {
-    const r = await this.call({ type: "keygen", user, password });
+    const r = await this.call({ type: "keygen" }, Buffer.from(new URLSearchParams({ user, password }).toString()), "application/x-www-form-urlencoded");
     const key = /<key>([^<]+)<\/key>/.exec(r.body)?.[1];
     if (!key) throw new Error("The firewall didn't return an API key.");
     return key;
