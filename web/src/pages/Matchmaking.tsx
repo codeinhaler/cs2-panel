@@ -201,6 +201,15 @@ export function MatchmakingPage() {
               );
             })}
           {form.serverIds.filter((id) => !form.casual.serverIds.includes(id)).length === 0 && <p className="hint">Tick servers for matches first.</p>}
+          <label className="field" style={{ maxWidth: 480, marginTop: 16 }}>
+            <span>Casual servers' voice channel (one for everyone on them)</span>
+            <input
+              value={form.discord.casual}
+              placeholder="https://discord.com/channels/…"
+              onChange={(e) => set("discord", { ...form.discord, casual: e.target.value.trim() })}
+              disabled={!manage}
+            />
+          </label>
         </div>
 
         <div className="panel">

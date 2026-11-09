@@ -111,6 +111,7 @@ export interface State {
       online: boolean;
       joinInfo: { address: string; password: string; steamUrl: string; console: string };
     }[];
+    discord: { channel: string; invite: string | null } | null;
   };
   freeServers: number;
   serverStates: { name: string; state: string; label: string }[];

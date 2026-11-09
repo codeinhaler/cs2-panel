@@ -871,6 +871,17 @@ describe("matchmaking site", () => {
     const mine = m.teamA.some((p: any) => p.steamId === P[0]) ? chA : chB;
     expect(m.discord).toEqual({ channel: mine, invite: "https://discord.gg/fredag" });
     expect((await play(cookies[2]!, "GET", "/api/state")).body.matches[0].discord).toBeNull();
+    expect((await play(cookies[2]!, "GET", "/api/state")).body.casual.discord).toBeNull();
+
+    // An ended match leaves the list for everyone but its own players.
+    await play(cookies[0]!, "POST", `/api/matches/${m.id}/cancel`);
+    await settle(async () => (await play(cookies[0]!, "GET", "/api/state")).body.matches[0]?.phase === "cancelled");
+    expect((await play(cookies[2]!, "GET", "/api/state")).body.matches).toHaveLength(0);
+    expect((await play(cookies[0]!, "GET", "/api/state")).body.matches[0].discord).toBeNull();
+
+    // One channel for the casual servers, shown to everyone.
+    await enable(owner, [serverId], { discord: { invite: "https://discord.gg/fredag", channels: {}, casual: chA } });
+    expect((await play(null, "GET", "/api/state")).body.casual.discord).toEqual({ channel: chA, invite: "https://discord.gg/fredag" });
   });
 
   it("runs the lobby's rules config after each map load, without the lines that fight the match", async () => {

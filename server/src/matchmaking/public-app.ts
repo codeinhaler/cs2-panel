@@ -169,6 +169,7 @@ export async function buildPublicApp(d: PublicDeps): Promise<FastifyInstance> {
           },
         };
       }),
+      discord: s.casual.discord,
     };
     return { ...s, casual, matches: s.matches.map((m) => withJoin(req, m)) };
   });

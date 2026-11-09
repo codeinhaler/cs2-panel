@@ -107,8 +107,10 @@ export const MatchmakingSettingsSchema = z.object({
         .max(200)
         .regex(/^$|^https:\/\/(discord\.gg|(www\.)?discord\.com\/invite)\/[\w-]+\/?$/, "The invite must be a link like https://discord.gg/abc123."),
       channels: z.record(z.string().regex(/^\d+$/), z.object({ a: DiscordChannel, b: DiscordChannel })),
+      /** One voice channel for everyone on the casual servers. */
+      casual: DiscordChannel.default(""),
     })
-    .default({ invite: "", channels: {} }),
+    .default({ invite: "", channels: {}, casual: "" }),
   /** Servers anyone can just join from the site: no sign-in, no teams made, no veto. */
   casual: z
     .object({
@@ -139,7 +141,7 @@ export const DEFAULT_SETTINGS: MatchmakingSettings = {
   botDifficulty: 1,
   look: DEFAULT_LOOK,
   casual: { name: "Casual", serverIds: [] },
-  discord: { invite: "", channels: {} },
+  discord: { invite: "", channels: {}, casual: "" },
   gameAddress: "",
   vetoSeconds: 30,
 };
@@ -332,7 +334,7 @@ export interface StateView {
   /** Uploaded images, as URLs on the matchmaking site. */
   look: { icon: string | null; banner: string | null };
   /** Servers anyone can join, shown even to people who aren't signed in. */
-  casual: { name: string; servers: CasualView[] };
+  casual: { name: string; servers: CasualView[]; discord: { channel: string; invite: string | null } | null };
   /** Steam's names for Workshop maps, by "workshop:ID". */
   mapNames: Record<string, string>;
   freeServers: number;
@@ -565,7 +567,8 @@ export class Matchmaking {
       await Promise.all(this.matches.filter((m) => m.phase === "live" && !m.polling).map((m) => this.poll(m)));
     }
 
-    this.matches = this.matches.filter((m) => isActive(m) || m.phase === "over" || (m.endedAt !== null && t - m.endedAt < KEEP_ENDED_MS));
+    // Ended matches stay a while for their own players (score, what happened); servers stay held until released.
+    this.matches = this.matches.filter((m) => isActive(m) || !m.released || (m.endedAt !== null && t - m.endedAt < KEEP_ENDED_MS));
   }
 
   // ------------------------------------------------------------- players and ratings
@@ -1475,7 +1478,9 @@ export class Matchmaking {
       lobbies,
       lobby,
       drafts,
+      // Ongoing matches for everyone (so people can join them); an ended match only for its own players.
       matches: this.matches
+        .filter((m) => isActive(m) || (viewer !== null && [...m.teamA, ...m.teamB].some((p) => p.steamId === viewer)))
         .slice()
         .reverse()
         .map((m) => this.matchView(m, viewer)),
@@ -1484,6 +1489,7 @@ export class Matchmaking {
       casual: {
         name: c.casual.name,
         servers: c.casual.serverIds.map((id) => this.casualInfo.get(id)).filter((x): x is CasualView => !!x),
+        discord: c.discord.casual ? { channel: c.discord.casual, invite: c.discord.invite || null } : null,
       },
       freeServers: this.freeCountSync(),
       serverStates: this.serverStates().map(({ name, state, label }) => ({ name, state, label })),

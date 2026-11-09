@@ -605,18 +605,7 @@ function MatchCard({ match: m, meId, skew, busy, act, mine }: { match: Match; me
         </div>
       )}
 
-      {m.discord && (
-        <div className="play-discord">
-          <a className="btn play-discord-btn" href={m.discord.channel} target="_blank" rel="noreferrer">
-            Join Discord channel
-          </a>
-          {m.discord.invite && (
-            <a className="hint" href={m.discord.invite} target="_blank" rel="noreferrer">
-              Not on our Discord? Join here
-            </a>
-          )}
-        </div>
-      )}
+      {m.discord && <DiscordLinks discord={m.discord} />}
 
       {ended && m.phase !== "over" && m.error && <p className="notice warn">{m.error}</p>}
 
@@ -748,6 +737,22 @@ function CopyLine({ label, text }: { label: string; text: string }) {
 
 // ------------------------------------------------------------- casual servers
 
+/** One plain button to the voice channel, and the invite for people not on the Discord yet. */
+function DiscordLinks({ discord }: { discord: { channel: string; invite: string | null } }) {
+  return (
+    <div className="play-discord">
+      <a className="btn play-discord-btn" href={discord.channel} target="_blank" rel="noreferrer">
+        Join Discord channel
+      </a>
+      {discord.invite && (
+        <a className="hint" href={discord.invite} target="_blank" rel="noreferrer">
+          Not on our Discord? Join here
+        </a>
+      )}
+    </div>
+  );
+}
+
 function CasualCard({ state }: { state: State }) {
   return (
     <section className="panel play-casual">
@@ -781,6 +786,7 @@ function CasualCard({ state }: { state: State }) {
           </div>
         ))}
       </div>
+      {state.casual.discord && <DiscordLinks discord={state.casual.discord} />}
     </section>
   );
 }

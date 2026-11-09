@@ -404,7 +404,7 @@ export interface MatchmakingSettings {
   gameAddress: string;
   vetoSeconds: number;
   /** Discord: one voice-channel link per team on each match server (keyed by server ID), plus an invite link. */
-  discord: { invite: string; channels: Record<string, { a: string; b: string }> };
+  discord: { invite: string; channels: Record<string, { a: string; b: string }>; casual: string };
 }
 
 export type MmColorKey = "paper" | "panel" | "ink" | "accent" | "teamA" | "teamB";
