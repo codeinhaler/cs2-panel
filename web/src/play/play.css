@@ -638,3 +638,18 @@
 .play-casual .play-discord {
   margin-top: 14px;
 }
+.play-discord-main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.play-discord-browser {
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  opacity: 0.85;
+  text-decoration: underline;
+}
+.play-discord-browser:hover {
+  opacity: 1;
+}

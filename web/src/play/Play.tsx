@@ -737,13 +737,24 @@ function CopyLine({ label, text }: { label: string; text: string }) {
 
 // ------------------------------------------------------------- casual servers
 
-/** One plain button to the voice channel, and the invite for people not on the Discord yet. */
+/** discord.com/channels/… → the same channel in the Discord app. */
+function discordAppUrl(channel: string): string {
+  const m = /discord\.com\/channels\/(\d+)\/(\d+)/.exec(channel);
+  return m ? `discord://-/channels/${m[1]}/${m[2]}` : channel;
+}
+
+/** One plain button that opens the voice channel in the Discord app; the browser and the invite as small links. */
 function DiscordLinks({ discord }: { discord: { channel: string; invite: string | null } }) {
   return (
     <div className="play-discord">
-      <a className="btn play-discord-btn" href={discord.channel} target="_blank" rel="noreferrer">
-        Join Discord channel
-      </a>
+      <div className="play-discord-main">
+        <a className="btn play-discord-btn" href={discordAppUrl(discord.channel)}>
+          Join Discord channel
+        </a>
+        <a className="play-discord-browser" href={discord.channel} target="_blank" rel="noreferrer">
+          Open in browser instead
+        </a>
+      </div>
       {discord.invite && (
         <a className="hint" href={discord.invite} target="_blank" rel="noreferrer">
           Not on our Discord? Join here
