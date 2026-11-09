@@ -210,6 +210,8 @@ export class TlsService {
     const info = await pan.systemInfo(key);
     this.d.settings.set("tls.firewallState", { fingerprint: fingerprint.toUpperCase(), admin: user, apiKey: this.d.box.sealOptional(key) });
     this.d.audit.record(actorId, "tls.firewall.connect", null, { host, admin: user, hostname: info.hostname, version: info.version });
+    // Send the certificate we already have right away, instead of waiting for the next renewal.
+    if (this.firewall().enabled && this.cert && !this.busy) await this.push(actorId).catch(() => undefined);
     return info;
   }
 

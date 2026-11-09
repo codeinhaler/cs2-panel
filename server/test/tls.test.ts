@@ -199,6 +199,9 @@ describe("HTTPS for the matchmaking site", () => {
     });
     expect(JSON.stringify(db.prepare("SELECT * FROM settings").all())).not.toContain("secret");
 
+    // No certificate yet when connecting: nothing to send.
+    expect(conn.body.lastPush).toBeNull();
+
     panCalls = [];
     const renewed = await call("POST", "/api/tls/renew");
     expect(renewed.status, JSON.stringify(renewed.body)).toBe(200);
@@ -241,5 +244,15 @@ describe("HTTPS for the matchmaking site", () => {
     await call("POST", "/api/tls/renew");
     expect(app.services.tls.active()).toBeNull();
     expect((await call("POST", "/api/tls/firewall/push")).body.error).toMatch(/Connect to the firewall first/);
+  });
+
+  it("sends the existing certificate as soon as the firewall is connected", async () => {
+    await call("PUT", "/api/tls/https", { settings: https, cloudflareToken: "cf_" + "x".repeat(37) });
+    await call("POST", "/api/tls/renew");
+    await call("PUT", "/api/tls/firewall", { settings: { enabled: true, host: "10.10.10.1", certName: "enfredagsspillerdk", commit: true } });
+    panCalls = [];
+    const conn = await call("POST", "/api/tls/firewall/connect", { fingerprint: FP, user: "cs2panel", password: "secret" });
+    expect(conn.body.lastPush).toMatchObject({ ok: true, message: 'Imported as "enfredagsspillerdk". Commit job 9 finished.' });
+    expect(panCalls).toEqual(["keygen", "op", "import", "commit", "op"]);
   });
 });
