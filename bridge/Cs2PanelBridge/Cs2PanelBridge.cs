@@ -28,7 +28,7 @@ namespace Cs2PanelBridge;
 public class Cs2PanelBridge : BasePlugin
 {
     public override string ModuleName => "CS2 Panel Bridge";
-    public override string ModuleVersion => "1.6.0";
+    public override string ModuleVersion => "1.7.0";
     public override string ModuleAuthor => "cs2-panel";
     public override string ModuleDescription => "Enforces cs2-panel bans, locks matchmaking matches and reports players to the panel.";
 
@@ -70,6 +70,8 @@ public class Cs2PanelBridge : BasePlugin
     private bool _casual;
     /// <summary>Counts map loads, so the panel can tell when its map change has happened.</summary>
     private int _mapLoads;
+    /// <summary>Server.CurrentTime when the match ended, so the panel can time the kick from the real end.</summary>
+    private float _matchOverAt;
 
     public override void Load(bool hotReload)
     {
@@ -97,6 +99,9 @@ public class Cs2PanelBridge : BasePlugin
         RegisterEventHandler<EventPlayerConnectFull>(OnPlayerConnectFull);
         RegisterEventHandler<EventPlayerTeam>(OnPlayerTeam);
         RegisterEventHandler<EventCsWinPanelMatch>(OnMatchOver);
+        RegisterEventHandler<EventItemPurchase>(OnItemPurchase);
+        RegisterEventHandler<EventPlayerDeath>(OnPlayerDeath);
+        RegisterEventHandler<EventPlayerSpawn>(OnPlayerSpawn);
         AddCommandListener("jointeam", OnJoinTeam);
         // Tell people in warmup who the match is still waiting for.
         AddTimer(30.0f, AnnounceMissing, TimerFlags.REPEAT);
@@ -192,7 +197,7 @@ public class Cs2PanelBridge : BasePlugin
         {
             Logger.LogWarning(e, "cs2panel: could not read team scores");
         }
-        var status = new MatchStatus(_match != null, _match?.MatchId ?? "", phase, MatchPlayersOnline().Count(), _matchPlayers.Count, scoreA, scoreB, _mapLoads, Server.MapName);
+        var status = new MatchStatus(_match != null, _match?.MatchId ?? "", phase, MatchPlayersOnline().Count(), _matchPlayers.Count, scoreA, scoreB, _mapLoads, Server.MapName, _matchOver ? Math.Round(Server.CurrentTime - _matchOverAt, 1) : 0);
         command.ReplyToCommand(MatchMarker + JsonSerializer.Serialize(status, Json));
     }
 
@@ -222,6 +227,8 @@ public class Cs2PanelBridge : BasePlugin
             {
                 _matchOver = false;
                 _countdown = false;
+                _loadouts.Clear();
+                _died.Clear();
             }
         }
         catch (Exception e)
@@ -287,7 +294,11 @@ public class Cs2PanelBridge : BasePlugin
 
     private HookResult OnMatchOver(EventCsWinPanelMatch @event, GameEventInfo info)
     {
-        if (_match != null) _matchOver = true;
+        if (_match != null)
+        {
+            _matchOver = true;
+            _matchOverAt = Server.CurrentTime;
+        }
         else if (CycleActive && _cycleNext >= 0)
         {
             var next = _cycleNext;
@@ -300,6 +311,74 @@ public class Cs2PanelBridge : BasePlugin
             });
         }
         return HookResult.Continue;
+    }
+
+    // ------------------------------------------------------------- keep bought weapons (1v1)
+
+    /// <summary>The last primary and pistol each player bought in this match.</summary>
+    private readonly Dictionary<ulong, (string? Primary, string? Secondary)> _loadouts = new();
+    /// <summary>Players who died since their last spawn: they get their bought weapons back.</summary>
+    private readonly HashSet<ulong> _died = new();
+
+    private static readonly HashSet<string> Pistols = new()
+    {
+        "weapon_glock", "weapon_hkp2000", "weapon_usp_silencer", "weapon_p250", "weapon_fiveseven",
+        "weapon_tec9", "weapon_cz75a", "weapon_deagle", "weapon_revolver", "weapon_elite",
+    };
+    private static readonly HashSet<string> NotGuns = new()
+    {
+        "weapon_hegrenade", "weapon_flashbang", "weapon_smokegrenade", "weapon_molotov", "weapon_incgrenade",
+        "weapon_decoy", "weapon_taser", "weapon_c4", "weapon_knife", "weapon_knife_t",
+    };
+
+    private bool KeepWeapons => _match is { KeepWeapons: true } && !_matchOver;
+
+    private HookResult OnItemPurchase(EventItemPurchase @event, GameEventInfo info)
+    {
+        var player = @event.Userid;
+        if (!KeepWeapons || player is not { IsValid: true, IsBot: false }) return HookResult.Continue;
+        var weapon = @event.Weapon ?? "";
+        if (!weapon.StartsWith("weapon_")) weapon = "weapon_" + weapon;
+        if (NotGuns.Contains(weapon) || weapon.StartsWith("weapon_knife")) return HookResult.Continue;
+        _loadouts.TryGetValue(player.SteamID, out var l);
+        _loadouts[player.SteamID] = Pistols.Contains(weapon) ? (l.Primary, weapon) : (weapon, l.Secondary);
+        return HookResult.Continue;
+    }
+
+    private HookResult OnPlayerDeath(EventPlayerDeath @event, GameEventInfo info)
+    {
+        var player = @event.Userid;
+        if (KeepWeapons && player is { IsValid: true, IsBot: false }) _died.Add(player.SteamID);
+        return HookResult.Continue;
+    }
+
+    private HookResult OnPlayerSpawn(EventPlayerSpawn @event, GameEventInfo info)
+    {
+        var player = @event.Userid;
+        if (!KeepWeapons || player is not { IsValid: true, IsBot: false }) return HookResult.Continue;
+        var id = player.SteamID;
+        if (!_died.Remove(id) || !_loadouts.TryGetValue(id, out var loadout)) return HookResult.Continue;
+        // After the game has handed out the default pistol.
+        AddTimer(0.3f, () => RestoreLoadout(player, loadout));
+        return HookResult.Continue;
+    }
+
+    private void RestoreLoadout(CCSPlayerController player, (string? Primary, string? Secondary) loadout)
+    {
+        if (!player.IsValid || !player.PawnIsAlive) return;
+        var weapons = player.PlayerPawn.Value?.WeaponServices?.MyWeapons;
+        if (weapons == null) return;
+        var held = weapons.Where(w => w.IsValid && w.Value != null).Select(w => w.Value!).ToList();
+        if (loadout.Secondary != null)
+        {
+            // The spawn pistol goes; the bought one comes back.
+            foreach (var w in held.Where(w => Pistols.Contains(w.DesignerName))) w.Remove();
+            player.GiveNamedItem(loadout.Secondary);
+        }
+        if (loadout.Primary != null && !held.Any(w => !Pistols.Contains(w.DesignerName) && !NotGuns.Contains(w.DesignerName) && !w.DesignerName.StartsWith("weapon_knife")))
+        {
+            player.GiveNamedItem(loadout.Primary);
+        }
     }
 
     // ------------------------------------------------------------- map cycle (Casual servers)
@@ -599,7 +678,8 @@ public record MatchStatus(
     [property: JsonPropertyName("scoreA")] int ScoreA,
     [property: JsonPropertyName("scoreB")] int ScoreB,
     [property: JsonPropertyName("mapLoads")] int MapLoads,
-    [property: JsonPropertyName("map")] string Map);
+    [property: JsonPropertyName("map")] string Map,
+    [property: JsonPropertyName("overSeconds")] double OverSeconds);
 
 public class MatchFile
 {
@@ -612,6 +692,8 @@ public class MatchFile
     public string? Password { get; set; }
     /// <summary>The one bot filling a short team, or none.</summary>
     public MatchBot? Bot { get; set; }
+    /// <summary>Players get the weapons they bought back after dying (1v1).</summary>
+    public bool KeepWeapons { get; set; }
     /// <summary>A config under cfg/ run after every map load, before the match's own settings.</summary>
     public string? Exec { get; set; }
     public List<MatchPlayer> Players { get; set; } = new();

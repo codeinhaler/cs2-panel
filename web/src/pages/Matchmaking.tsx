@@ -370,11 +370,11 @@ function LobbySettings({
   onTitle,
 }: {
   mode: (typeof MODES)[number];
-  value: { enabled: boolean; maps: string[]; config: string };
+  value: { enabled: boolean; maps: string[]; config: string; keepWeapons: boolean };
   stock: string[];
   manage: boolean;
   names: Record<string, string>;
-  onChange: (v: { enabled: boolean; maps: string[]; config: string }) => void;
+  onChange: (v: { enabled: boolean; maps: string[]; config: string; keepWeapons: boolean }) => void;
   onTitle: (map: string, title: string) => void;
 }) {
   const [workshop, setWorkshop] = useState("");
@@ -440,6 +440,12 @@ function LobbySettings({
           <p className="hint" style={{ margin: "8px 0 0" }}>
             {value.maps.length} map{value.maps.length === 1 ? "" : "s"} in the pool.
           </p>
+          <label className="check" style={{ marginTop: 10 }}>
+            <input type="checkbox" checked={value.keepWeapons} onChange={(e) => onChange({ ...value, keepWeapons: e.target.checked })} disabled={!manage} />
+            <span>
+              Keep bought weapons <span className="hint">· after dying, players respawn with the gun and pistol they last bought (bridge 1.7.0)</span>
+            </span>
+          </label>
           <details className="mm-config" open={false}>
             <summary>
               Rules config <span className="hint">{value.config.trim() ? "· in use" : "· none, the game mode's own rules"}</span>

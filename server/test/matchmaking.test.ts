@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { cleanModeConfig, winRoundsFromConfig } from "../src/matchmaking/mode-config.js";
+import { DUEL_CONFIG, OLD_DUEL_CONFIGS, cleanModeConfig, winRoundsFromConfig } from "../src/matchmaking/mode-config.js";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { FastifyInstance } from "fastify";
@@ -76,6 +76,7 @@ describe("parsers", () => {
     const out = `junk\nCS2PANEL_MATCH {"active":true,"matchId":"3","phase":"live","connected":10,"expected":10,"scoreA":7,"scoreB":5}\n`;
     expect(parseMatchStatus(out)).toMatchObject({ active: true, matchId: "3", phase: "live", connected: 10, scoreA: 7, scoreB: 5 });
     expect(parseMatchStatus(`CS2PANEL_MATCH {"phase":"warmup","mapLoads":4,"map":"de_nuke"}`)).toMatchObject({ mapLoads: 4, map: "de_nuke" });
+    expect(parseMatchStatus(`CS2PANEL_MATCH {"phase":"over","overSeconds":7.5}`)).toMatchObject({ phase: "over", overSeconds: 7.5 });
     expect(() => parseMatchStatus("Unknown command")).toThrow(/bridge/);
   });
 
@@ -908,7 +909,7 @@ describe("matchmaking site", () => {
       modes: {
         competitive: { enabled: true, maps: ["de_mirage"], config: "" },
         wingman: { enabled: false, maps: ["de_vertigo"], config: "" },
-        duel: { enabled: true, maps: ["de_vertigo"], config: duelCfg },
+        duel: { enabled: true, maps: ["de_vertigo"], config: duelCfg, keepWeapons: true },
       },
     });
     const cookies = await Promise.all(P.slice(0, 2).map((id, i) => playerCookie(id, ["Alpha", "Bravo"][i]!)));
@@ -926,7 +927,7 @@ describe("matchmaking site", () => {
     const cfg = readFileSync(cfgFile!, "utf8");
     expect(cfg).toContain("mp_maxrounds 30\nmp_startmoney 16000\n");
     expect(cfg).not.toMatch(/sv_password|bot_quota|mp_warmup_end|mp_restartgame|first to/);
-    expect(JSON.parse(readFileSync(findFile(dir, "match.json")[0]!, "utf8")).exec).toBe("cs2panel_match.cfg");
+    expect(JSON.parse(readFileSync(findFile(dir, "match.json")[0]!, "utf8"))).toMatchObject({ exec: "cs2panel_match.cfg", keepWeapons: true });
   });
 });
 
@@ -939,5 +940,8 @@ describe("lobby rules config", () => {
     expect(winRoundsFromConfig("mp_maxrounds 30")).toBe(16);
     expect(winRoundsFromConfig('mp_maxrounds "24"\nmp_maxrounds 16')).toBe(9);
     expect(winRoundsFromConfig("mp_freezetime 2")).toBeNull();
+    // The built-in 1v1 rules: 10-minute rounds; earlier built-ins are recognised so saved copies follow along.
+    expect(DUEL_CONFIG).toContain("mp_roundtime 10\n");
+    expect(OLD_DUEL_CONFIGS[0]).toContain("mp_roundtime 1\n");
   });
 });

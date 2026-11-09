@@ -403,7 +403,7 @@ export interface MatchmakingSettings {
   port: number;
   title: string;
   serverIds: number[];
-  modes: Record<"competitive" | "wingman" | "duel", { enabled: boolean; maps: string[]; config: string }>;
+  modes: Record<"competitive" | "wingman" | "duel", { enabled: boolean; maps: string[]; config: string; keepWeapons: boolean }>;
   botDifficulty: number;
   look: MmLook;
   casual: { name: string; serverIds: number[] };

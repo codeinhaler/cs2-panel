@@ -65,6 +65,41 @@ mp_overtime_enable 0
 mp_halftime 0
 mp_freezetime 2
 mp_round_restart_delay 2
+mp_roundtime 10
+mp_roundtime_defuse 10
+mp_roundtime_hostage 10
+mp_ignore_round_win_conditions 0
+mp_respawn_on_death_ct 0
+mp_respawn_on_death_t 0
+
+// Same equipment and money every round
+mp_startmoney 16000
+mp_maxmoney 16000
+mp_afterroundmoney 16000
+mp_free_armor 2
+mp_buy_anywhere 1
+mp_buytime 15
+sv_infinite_ammo 0
+
+// Other rules
+sv_allow_votes 0
+sv_cheats 0
+`;
+
+/** Earlier built-in 1v1 configs: a saved copy of one of these is replaced by the current default. */
+export const OLD_DUEL_CONFIGS = [
+  `// 1v1 aim duel
+mp_autoteambalance 0
+mp_limitteams 0
+mp_autokick 0
+
+// First to 16 (30 rounds), no halftime or overtime
+mp_maxrounds 30
+mp_match_can_clinch 1
+mp_overtime_enable 0
+mp_halftime 0
+mp_freezetime 2
+mp_round_restart_delay 2
 mp_roundtime 1
 mp_roundtime_defuse 1
 mp_roundtime_hostage 1
@@ -84,4 +119,5 @@ sv_infinite_ammo 0
 // Other rules
 sv_allow_votes 0
 sv_cheats 0
-`;
+`,
+];

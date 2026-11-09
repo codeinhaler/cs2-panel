@@ -19,7 +19,7 @@ import { LeetifyClient, leetifyProfileUrl } from "./leetify.js";
 import { workshopBlocks, type WorkshopInfo } from "../game/workshop.js";
 import { DEFAULT_LOOK, LookSchema, type ImageKind, type SiteImages } from "./look.js";
 import type { MmPlayer, MmPlayerStore } from "./players.js";
-import { DUEL_CONFIG, MATCH_CFG, cleanModeConfig, winRoundsFromConfig } from "./mode-config.js";
+import { DUEL_CONFIG, MATCH_CFG, OLD_DUEL_CONFIGS, cleanModeConfig, winRoundsFromConfig } from "./mode-config.js";
 
 /** Where the bridge reads the current match, relative to game/csgo. */
 export const MATCH_FILE = "addons/counterstrikesharp/configs/plugins/Cs2PanelBridge/match.json";
@@ -35,7 +35,7 @@ const DRAFT_MS = 5 * 60_000;
 /** A ready server nobody is on is given back after this long. */
 const IDLE_MATCH_MS = 10 * 60_000;
 /** The scoreboard stays up this long after the match before the server is unlocked. */
-const RELEASE_AFTER_MS = 20_000;
+const RELEASE_AFTER_MS = 15_000;
 /** Finished matches stay on the page this long. */
 const KEEP_ENDED_MS = 30 * 60_000;
 const POLL_MS = 10_000;
@@ -77,6 +77,8 @@ const ModeSettings = z.object({
   maps: MapList,
   /** Run on the match server after every map load (e.g. 1v1 rules). Empty: the game mode's own rules. */
   config: z.string().max(20_000, "The config is too long (20,000 characters at most).").default(""),
+  /** Players get the weapons they bought back after dying (the bridge gives them on respawn). */
+  keepWeapons: z.boolean().default(false),
 });
 const DiscordChannel = z
   .string()
@@ -136,9 +138,9 @@ export const DEFAULT_SETTINGS: MatchmakingSettings = {
   title: "CS night",
   serverIds: [],
   modes: {
-    competitive: { enabled: true, maps: DEFAULT_MAPS, config: "" },
-    wingman: { enabled: true, maps: ["de_inferno", "de_nuke", "de_overpass", "de_vertigo"], config: "" },
-    duel: { enabled: true, maps: ["de_inferno", "de_nuke", "de_vertigo"], config: DUEL_CONFIG },
+    competitive: { enabled: true, maps: DEFAULT_MAPS, config: "", keepWeapons: false },
+    wingman: { enabled: true, maps: ["de_inferno", "de_nuke", "de_overpass", "de_vertigo"], config: "", keepWeapons: false },
+    duel: { enabled: true, maps: ["de_inferno", "de_nuke", "de_vertigo"], config: DUEL_CONFIG, keepWeapons: true },
   },
   botDifficulty: 1,
   look: DEFAULT_LOOK,
@@ -410,6 +412,8 @@ export class Matchmaking {
     const { maps: legacyMaps, ...rest } = stored;
     const modes = { ...DEFAULT_SETTINGS.modes };
     for (const k of MODES) if (stored.modes?.[k]) modes[k] = { ...DEFAULT_SETTINGS.modes[k], ...stored.modes[k] };
+    // A saved copy of an earlier built-in 1v1 config follows the current default.
+    if (OLD_DUEL_CONFIGS.includes(modes.duel.config)) modes.duel = { ...modes.duel, config: DUEL_CONFIG };
     // Before lobbies there was one map pool, for Competitive.
     if (!stored.modes && legacyMaps?.length) modes.competitive = { ...modes.competitive, enabled: true, maps: legacyMaps };
     return {
@@ -1057,6 +1061,7 @@ export class Matchmaking {
       matchId: String(m.id),
       mode: m.mode,
       password: m.password,
+      keepWeapons: this.config().modes[m.mode].keepWeapons,
       exec: cleanModeConfig(this.config().modes[m.mode].config).text ? MATCH_CFG : null,
       bot: this.botActive(m) ? { side: m.bot === "a" ? m.sideA : sideB, difficulty: this.config().botDifficulty } : null,
       players: [
@@ -1141,7 +1146,7 @@ export class Matchmaking {
     m.polling = true;
     try {
       const s = this.d.servers.require(m.serverId);
-      let st: { phase?: string; connected?: number; scoreA?: number; scoreB?: number };
+      let st: { phase?: string; connected?: number; scoreA?: number; scoreB?: number; overSeconds?: number };
       try {
         st = parseMatchStatus(await this.exec(s, "cs2panel_match_status"));
         m.pollFailures = 0;
@@ -1158,7 +1163,8 @@ export class Matchmaking {
 
       if (st.phase === "over") {
         m.phase = "over";
-        m.overAt = t;
+        // Time the kick from when the match really ended (the bridge says how long ago), not from this poll.
+        m.overAt = t - Math.min(Math.max(st.overSeconds ?? 0, 0), 60) * 1000;
         m.status = "Match over";
         this.save(m);
         return;
@@ -1563,6 +1569,7 @@ export function parseMatchStatus(output: string): {
   scoreB?: number;
   mapLoads?: number;
   map?: string;
+  overSeconds?: number;
 } {
   const line = output.split(/\r?\n/).find((l) => l.includes(MATCH_MARKER));
   if (!line) throw new Error("The bridge didn't answer. Is it up to date?");
@@ -1578,5 +1585,6 @@ export function parseMatchStatus(output: string): {
     scoreB: num(v.scoreB),
     mapLoads: num(v.mapLoads),
     map: str(v.map),
+    overSeconds: num(v.overSeconds),
   };
 }
