@@ -4,7 +4,9 @@ using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
 using CounterStrikeSharp.API.Modules.Commands;
+using CounterStrikeSharp.API.Modules.Cvars;
 using CounterStrikeSharp.API.Modules.Entities;
+using CounterStrikeSharp.API.Modules.Memory;
 using CounterStrikeSharp.API.Modules.Timers;
 using CounterStrikeSharp.API.Modules.Utils;
 using Microsoft.Extensions.Logging;
@@ -28,7 +30,7 @@ namespace Cs2PanelBridge;
 public class Cs2PanelBridge : BasePlugin
 {
     public override string ModuleName => "CS2 Panel Bridge";
-    public override string ModuleVersion => "1.7.0";
+    public override string ModuleVersion => "1.7.1";
     public override string ModuleAuthor => "cs2-panel";
     public override string ModuleDescription => "Enforces cs2-panel bans, locks matchmaking matches and reports players to the panel.";
 
@@ -355,12 +357,25 @@ public class Cs2PanelBridge : BasePlugin
     private HookResult OnPlayerSpawn(EventPlayerSpawn @event, GameEventInfo info)
     {
         var player = @event.Userid;
+        if ((_match != null || _casual) && player is { IsValid: true, IsBot: false }) AddTimer(0.5f, () => FixNoclip(player));
         if (!KeepWeapons || player is not { IsValid: true, IsBot: false }) return HookResult.Continue;
         var id = player.SteamID;
         if (!_died.Remove(id) || !_loadouts.TryGetValue(id, out var loadout)) return HookResult.Continue;
         // After the game has handed out the default pistol.
         AddTimer(0.3f, () => RestoreLoadout(player, loadout));
         return HookResult.Continue;
+    }
+
+    /// <summary>A spawned player should walk, never fly through walls (a spawn racing a team change can leave them in noclip).</summary>
+    private static void FixNoclip(CCSPlayerController player)
+    {
+        if (!player.IsValid || !player.PawnIsAlive) return;
+        var pawn = player.PlayerPawn.Value;
+        if (pawn == null || pawn.MoveType != MoveType_t.MOVETYPE_NOCLIP) return;
+        if (ConVar.Find("sv_cheats")?.GetPrimitiveValue<bool>() == true) return;
+        pawn.MoveType = MoveType_t.MOVETYPE_WALK;
+        Schema.SetSchemaValue(pawn.Handle, "CBaseEntity", "m_nActualMoveType", 2);
+        Utilities.SetStateChanged(pawn, "CBaseEntity", "m_MoveType");
     }
 
     private void RestoreLoadout(CCSPlayerController player, (string? Primary, string? Secondary) loadout)
@@ -474,9 +489,11 @@ public class Cs2PanelBridge : BasePlugin
     private void RespawnInWarmup(CCSPlayerController player)
     {
         if (!IsWarmup()) return;
-        AddTimer(0.5f, () =>
+        // Warmup normally spawns a player who joins a team by itself. Only step in when that hasn't happened:
+        // respawning while the game is spawning them too can leave the first player flying around in noclip.
+        AddTimer(2.5f, () =>
         {
-            if (player.IsValid && !player.PawnIsAlive && (CsTeam)player.TeamNum is CsTeam.Terrorist or CsTeam.CounterTerrorist) player.Respawn();
+            if (player.IsValid && IsWarmup() && !player.PawnIsAlive && (CsTeam)player.TeamNum is CsTeam.Terrorist or CsTeam.CounterTerrorist) player.Respawn();
         });
     }
 
