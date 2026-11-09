@@ -62,6 +62,7 @@ export function MatchmakingPage() {
   const pageUrl = data.site.port ? `http://${window.location.hostname}:${data.site.port}` : null;
   const poolServers = data.servers.filter((s) => form.serverIds.includes(s.id));
   const missingBridge = poolServers.filter((s) => !s.hasBridge);
+  const stateOf = (name: string) => data.state.serverStates?.find((x) => x.name === name);
 
   return (
     <div>
@@ -133,6 +134,15 @@ export function MatchmakingPage() {
                 />
                 <span>
                   <Link to={`/servers/${s.id}`}>{s.name}</Link> <span className="hint">port {s.port}</span>
+                  {form.serverIds.includes(s.id) && !form.casual.serverIds.includes(s.id) && stateOf(s.name) && (
+                    <span
+                      className="state-pill"
+                      data-state={{ free: "active", "no-bridge": "failed" }[stateOf(s.name)!.state] ?? "activating"}
+                      style={{ marginLeft: 10 }}
+                    >
+                      {stateOf(s.name)!.label}
+                    </span>
+                  )}
                   {form.casual.serverIds.includes(s.id) ? (
                     <span className="hint"> · casual server, not used for matches</span>
                   ) : (
@@ -148,6 +158,49 @@ export function MatchmakingPage() {
               with it and keeps strangers off the server during a match.
             </p>
           )}
+        </div>
+
+        <div className="panel">
+          <h2 style={{ marginBottom: 6 }}>Discord</h2>
+          <p className="hint" style={{ marginTop: 0 }}>
+            Players in a match get a <b>Join Discord channel</b> button for their own team's voice channel. Make two voice channels per match server,
+            right-click each in Discord and pick <b>Copy Link</b>, and paste them here. Leave empty to show no button.
+          </p>
+          <label className="field" style={{ maxWidth: 480 }}>
+            <span>Invite link (shown as "Not on our Discord? Join here")</span>
+            <input
+              value={form.discord.invite}
+              placeholder="https://discord.gg/…"
+              onChange={(e) => set("discord", { ...form.discord, invite: e.target.value.trim() })}
+              disabled={!manage}
+            />
+          </label>
+          {data.servers
+            .filter((s) => form.serverIds.includes(s.id) && !form.casual.serverIds.includes(s.id))
+            .map((s) => {
+              const ch = form.discord.channels[String(s.id)] ?? { a: "", b: "" };
+              const setCh = (team: "a" | "b", v: string) => {
+                const next = { ...ch, [team]: v.trim() };
+                const channels = { ...form.discord.channels };
+                if (!next.a && !next.b) delete channels[String(s.id)];
+                else channels[String(s.id)] = next;
+                set("discord", { ...form.discord, channels });
+              };
+              return (
+                <div key={s.id} style={{ marginTop: 12 }}>
+                  <b>{s.name}</b>
+                  <div className="row" style={{ gap: 12, flexWrap: "wrap", marginTop: 4 }}>
+                    {(["a", "b"] as const).map((t) => (
+                      <label key={t} className="field" style={{ flex: "1 1 280px" }}>
+                        <span>Team {t === "a" ? 1 : 2} voice channel</span>
+                        <input value={ch[t]} placeholder="https://discord.com/channels/…" onChange={(e) => setCh(t, e.target.value)} disabled={!manage} />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          {form.serverIds.filter((id) => !form.casual.serverIds.includes(id)).length === 0 && <p className="hint">Tick servers for matches first.</p>}
         </div>
 
         <div className="panel">

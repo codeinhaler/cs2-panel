@@ -73,7 +73,8 @@ describe("parsers", () => {
 
   it("reads the bridge's match status", () => {
     const out = `junk\nCS2PANEL_MATCH {"active":true,"matchId":"3","phase":"live","connected":10,"expected":10,"scoreA":7,"scoreB":5}\n`;
-    expect(parseMatchStatus(out)).toEqual({ active: true, phase: "live", connected: 10, scoreA: 7, scoreB: 5 });
+    expect(parseMatchStatus(out)).toMatchObject({ active: true, matchId: "3", phase: "live", connected: 10, scoreA: 7, scoreB: 5 });
+    expect(parseMatchStatus(`CS2PANEL_MATCH {"phase":"warmup","mapLoads":4,"map":"de_nuke"}`)).toMatchObject({ mapLoads: 4, map: "de_nuke" });
     expect(() => parseMatchStatus("Unknown command")).toThrow(/bridge/);
   });
 
@@ -98,6 +99,7 @@ let now: number;
 let rconLog: string[];
 let statusReply: string;
 let leetifyCalls: number;
+let mapLoads: number;
 
 async function setup() {
   dir = mkdtempSync(path.join(tmpdir(), "cs2panel-mm-"));
@@ -124,6 +126,7 @@ async function setup() {
   now = 1_000_000;
   rconLog = [];
   leetifyCalls = 0;
+  mapLoads = 0;
   statusReply = `CS2PANEL_MATCH {"active":true,"phase":"warmup","connected":0,"scoreA":0,"scoreB":0}`;
   const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
     const u = new URL(String(url));
@@ -158,7 +161,16 @@ async function setup() {
     rcon: async (o, cmd) => {
       rconLog.push(cmd);
       if (cmd === "cs2panel_version") return "cs2panel bridge 1.1.0, 0 bans";
-      if (cmd === "cs2panel_match_status") return statusReply;
+      if (/^game_type \d+; game_mode \d+; map /.test(cmd)) mapLoads++;
+      if (cmd === "cs2panel_match_status") {
+        // Like the bridge: the match it has loaded (from match.json) and how many maps it has loaded.
+        const v = JSON.parse(statusReply.slice("CS2PANEL_MATCH ".length));
+        const file = findFile(dir, "match.json")[0];
+        const loaded = file ? JSON.parse(readFileSync(file, "utf8")) : null;
+        if (v.matchId === undefined) v.matchId = loaded?.active ? loaded.matchId : "";
+        if (v.mapLoads === undefined) v.mapLoads = mapLoads;
+        return `CS2PANEL_MATCH ${JSON.stringify(v)}`;
+      }
       return `ok ${cmd}`;
     },
   });
@@ -214,10 +226,10 @@ function findFile(root: string, name: string): string[] {
   return out;
 }
 
-async function setupServer(cookie: string, opts: { bridge?: boolean } = {}): Promise<number> {
+async function setupServer(cookie: string, opts: { bridge?: boolean; name?: string; port?: number } = {}): Promise<number> {
   const presets = (await admin(cookie, "GET", "/api/presets")).body.presets as { id: number; key: string }[];
   const pid = presets.find((p) => p.key === "competitive")!.id;
-  const res = await admin(cookie, "POST", "/api/servers", { name: "Match #1", presetId: pid, port: 27015 });
+  const res = await admin(cookie, "POST", "/api/servers", { name: opts.name ?? "Match #1", presetId: pid, port: opts.port ?? 27015 });
   expect(res.status, JSON.stringify(res.body)).toBe(200);
   const id = res.body.server.id as number;
   if (opts.bridge !== false) {
@@ -336,12 +348,14 @@ describe("matchmaking site", () => {
     expect(rconLog).toContain("game_type 0; game_mode 2; map de_vertigo");
     const botTeam = state.matches[0].teamA.some((p: any) => p.steamId === "BOT") ? "a" : "b";
     const botSide = botTeam === "a" ? state.matches[0].sideA : state.matches[0].sideA === "ct" ? "t" : "ct";
-    expect(rconLog).toContain(`bot_kick; bot_quota_mode normal; bot_difficulty 2; bot_join_team ${botSide.toUpperCase()}; bot_quota 1`);
+    // The bridge gets the bot and password from match.json and puts them back after every map load.
     // The bot isn't in the bridge's player list.
     const [matchFile] = findFile(dir, "match.json");
     const file = JSON.parse(readFileSync(matchFile!, "utf8"));
     expect(file.players).toHaveLength(3);
     expect(file.mode).toBe("wingman");
+    expect(file.bot).toEqual({ side: botSide, difficulty: 2 });
+    expect(file.password).toBe(state.matches[0].joinInfo.password);
 
     // Can't switch lobby during a match; afterwards the bot is removed again.
     expect((await play(cookies[0]!, "POST", "/api/lobby/join", { mode: "duel" })).body.error).toMatch(/Finish your match/);
@@ -459,6 +473,8 @@ describe("matchmaking site", () => {
     await app.services.matchmaking.tick();
     expect(JSON.parse(readFileSync(matchFile!, "utf8")).active).toBe(false);
     expect(rconLog.at(-1)).toBe('sv_password ""');
+    // Everyone was kicked first, so the server is really free for the next match.
+    expect(rconLog).toContain('cs2panel_kick_all "Match over, thanks for playing! Back to the site for the next match."');
 
     const panel = (await admin(owner, "GET", "/api/matchmaking")).body;
     expect(panel.history[0]).toMatchObject({ status: "over", map: "de_mirage", scoreA: 13, scoreB: 9 });
@@ -747,5 +763,112 @@ describe("matchmaking site", () => {
     expect((await admin(owner, "PUT", "/api/matchmaking", withMaps(["workshop:111", "de_nuke"]))).status).toBe(200);
     expect((await admin(owner, "GET", "/api/matchmaking")).body.mapNames).toEqual({ "workshop:111": "Aim Botz" });
     expect((await play(null, "GET", "/api/state")).body.mapNames).toEqual({ "workshop:111": "Aim Botz" });
+  });
+
+  it("keeps a just-used server out of the next match, and shows why servers aren't free", async () => {
+    const owner = await adminCookie();
+    const first = await setupServer(owner, { name: "Match #1", port: 27015 });
+    const second = await setupServer(owner, { name: "Match #2", port: 27025 });
+    const third = await setupServer(owner, { name: "Match #3", port: 27035, bridge: false });
+    await enable(owner, [first, second, third]);
+    const names = ["Alpha", "Bravo", "Charlie", "Delta"];
+    const cookies = await Promise.all(P.slice(0, 4).map((id, i) => playerCookie(id, names[i]!)));
+    for (const c of cookies.slice(0, 2)) await play(c, "POST", "/api/lobby/join", { mode: "wingman" });
+    await play(cookies[0]!, "POST", "/api/teams");
+    let draft = (await play(cookies[0]!, "GET", "/api/state")).body.drafts[0];
+    const one = (await play(cookies[0]!, "POST", `/api/teams/${draft.id}/start`)).body.matchId;
+    let m = await toLive(cookies, P, one);
+    expect(m.serverName).toBe("Match #1");
+
+    // While it runs, the same lobby can make another match on another server.
+    for (const c of cookies.slice(2, 4)) await play(c, "POST", "/api/lobby/join", { mode: "wingman" });
+    let st = (await play(cookies[2]!, "GET", "/api/state")).body;
+    expect(st.serverStates).toEqual([
+      { name: "Match #1", state: "in-match", label: `Running match ${one}` },
+      { name: "Match #2", state: "free", label: "Free" },
+      { name: "Match #3", state: "no-bridge", label: "Needs CounterStrikeSharp (with CS2 Panel Bridge)" },
+    ]);
+
+    // Cancelling kicks everyone; the freed server goes to the back of the line.
+    rconLog = [];
+    await play(cookies[0]!, "POST", `/api/matches/${one}/cancel`);
+    expect(rconLog[0]).toBe('cs2panel_kick_all "The match was cancelled. Back to the site for the next one."');
+    await play(cookies[2]!, "POST", "/api/teams");
+    draft = (await play(cookies[2]!, "GET", "/api/state")).body.drafts[0];
+    const two = (await play(cookies[2]!, "POST", `/api/teams/${draft.id}/start`)).body.matchId;
+    m = await toLive(cookies, P, two);
+    expect(m.serverName).toBe("Match #2");
+  });
+
+  it("only gives out the Join button once the server runs the match", async () => {
+    const owner = await adminCookie();
+    await enable(owner, [await setupServer(owner)]);
+    const a = await playerCookie(P[0]!, "Alpha");
+    const b = await playerCookie(P[1]!, "Bravo");
+    for (const c of [a, b]) await play(c, "POST", "/api/lobby/join", { mode: "duel" });
+    await play(a, "POST", "/api/teams");
+    const draft = (await play(a, "GET", "/api/state")).body.drafts[0];
+    const { matchId } = (await play(a, "POST", `/api/teams/${draft.id}/start`)).body;
+    // The server keeps reporting an old match (the map change never happened).
+    statusReply = `CS2PANEL_MATCH {"active":true,"matchId":"999","phase":"warmup","connected":0,"scoreA":0,"scoreB":0,"mapLoads":0}`;
+    const m = await toLive([a, b], P, matchId);
+    expect(m.phase).toBe("cancelled");
+    expect(m.joinInfo).toBeNull();
+    expect(m.error).toMatch(/didn't finish loading the match/);
+  });
+
+  it("lets the captains turn the bot off and on", async () => {
+    const owner = await adminCookie();
+    await enable(owner, [await setupServer(owner)]);
+    const names = ["Alpha", "Bravo", "Charlie"];
+    const cookies = await Promise.all(P.slice(0, 3).map((id, i) => playerCookie(id, names[i]!)));
+    for (const c of cookies) await play(c, "POST", "/api/lobby/join", { mode: "wingman" });
+    await play(cookies[0]!, "POST", "/api/teams");
+    const draft = (await play(cookies[0]!, "GET", "/api/state")).body.drafts[0];
+    const { matchId } = (await play(cookies[0]!, "POST", `/api/teams/${draft.id}/start`)).body;
+    let m = await toLive(cookies, P, matchId);
+    expect(m.bots).toMatchObject({ on: true, votes: { a: true, b: true } });
+    const capA = cookies[P.indexOf(m.captainA)]!;
+    const capB = cookies[P.indexOf(m.captainB)]!;
+    const [matchFile] = findFile(dir, "match.json");
+
+    await play(capA, "POST", `/api/matches/${matchId}/bot`, { allow: false });
+    expect((await play(capA, "GET", "/api/state")).body.matches[0].bots.on).toBe(true);
+    rconLog = [];
+    await play(capB, "POST", `/api/matches/${matchId}/bot`, { allow: false });
+    m = (await play(capA, "GET", "/api/state")).body.matches[0];
+    expect(m.bots).toMatchObject({ on: false, votes: { a: false, b: false } });
+    expect([...m.teamA, ...m.teamB].some((p: any) => p.steamId === "BOT")).toBe(false);
+    expect(JSON.parse(readFileSync(matchFile!, "utf8")).bot).toBeNull();
+    expect(rconLog).toContain("cs2panel_match_reload");
+
+    await play(capB, "POST", `/api/matches/${matchId}/bot`, { allow: true });
+    m = (await play(capA, "GET", "/api/state")).body.matches[0];
+    expect(m.bots.on).toBe(true);
+    expect(JSON.parse(readFileSync(matchFile!, "utf8")).bot).not.toBeNull();
+  });
+
+  it("gives each team its Discord channel", async () => {
+    const owner = await adminCookie();
+    const serverId = await setupServer(owner);
+    const chA = "https://discord.com/channels/111/222";
+    const chB = "https://discord.com/channels/111/333";
+    const bad = await admin(owner, "PUT", "/api/matchmaking", {
+      settings: {
+        ...(await admin(owner, "GET", "/api/matchmaking")).body.settings,
+        discord: { invite: "", channels: { [serverId]: { a: "discord team 1", b: "" } } },
+      },
+    });
+    expect(bad.body.error).toMatch(/voice channel's link/);
+    await enable(owner, [serverId], { discord: { invite: "https://discord.gg/fredag", channels: { [serverId]: { a: chA, b: chB } } } });
+    const cookies = await Promise.all(P.slice(0, 3).map((id, i) => playerCookie(id, ["Alpha", "Bravo", "Charlie"][i]!)));
+    for (const c of cookies.slice(0, 2)) await play(c, "POST", "/api/lobby/join", { mode: "duel" });
+    await play(cookies[0]!, "POST", "/api/teams");
+    const draft = (await play(cookies[0]!, "GET", "/api/state")).body.drafts[0];
+    await play(cookies[0]!, "POST", `/api/teams/${draft.id}/start`);
+    const m = (await play(cookies[0]!, "GET", "/api/state")).body.matches[0];
+    const mine = m.teamA.some((p: any) => p.steamId === P[0]) ? chA : chB;
+    expect(m.discord).toEqual({ channel: mine, invite: "https://discord.gg/fredag" });
+    expect((await play(cookies[2]!, "GET", "/api/state")).body.matches[0].discord).toBeNull();
   });
 });

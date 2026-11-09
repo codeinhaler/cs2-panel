@@ -403,6 +403,8 @@ export interface MatchmakingSettings {
   casual: { name: string; serverIds: number[] };
   gameAddress: string;
   vetoSeconds: number;
+  /** Discord: one voice-channel link per team on each match server (keyed by server ID), plus an invite link. */
+  discord: { invite: string; channels: Record<string, { a: string; b: string }> };
 }
 
 export type MmColorKey = "paper" | "panel" | "ink" | "accent" | "teamA" | "teamB";
@@ -458,6 +460,7 @@ export interface MatchmakingInfo {
     drafts: { id: number; teamA: MmMember[]; teamB: MmMember[] }[];
     matches: MmMatch[];
     freeServers: number;
+    serverStates?: { name: string; state: string; label: string }[];
   };
   mapNames: Record<string, string>;
   themes: MmTheme[];
@@ -503,12 +506,10 @@ export const api = {
 
   users: () => request<{ users: User[] }>("GET", "/api/users"),
   addUser: (steam: string, role: "admin" | "moderator") => request<{ user: User }>("POST", "/api/users", { steam, role }),
-  updateUser: (id: number, changes: { role?: "admin" | "moderator"; disabled?: boolean }) =>
-    request<{ user: User }>("PATCH", `/api/users/${id}`, changes),
+  updateUser: (id: number, changes: { role?: "admin" | "moderator"; disabled?: boolean }) => request<{ user: User }>("PATCH", `/api/users/${id}`, changes),
   removeUser: (id: number) => request<{ ok: true }>("DELETE", `/api/users/${id}`),
 
-  audit: (params: { before?: number; serverId?: number; limit?: number } = {}) =>
-    request<{ entries: AuditEntry[] }>("GET", `/api/audit?${q(params)}`),
+  audit: (params: { before?: number; serverId?: number; limit?: number } = {}) => request<{ entries: AuditEntry[] }>("GET", `/api/audit?${q(params)}`),
 
   host: () => request<HostInfo>("GET", "/api/host"),
   gameMode: (id: number) =>
@@ -531,7 +532,11 @@ export const api = {
   mmSetRating: (steamId: string, rating: number | null) => request<{ ok: true }>("PUT", `/api/matchmaking/players/${steamId}/rating`, { rating }),
   mmRemove: (steamId: string) => request<{ ok: true }>("POST", `/api/matchmaking/players/${steamId}/remove`, {}),
   mmUploadImage: async (kind: "icon" | "banner", file: File) => {
-    const res = await fetch(`/api/matchmaking/images/${kind}`, { method: "PUT", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file });
+    const res = await fetch(`/api/matchmaking/images/${kind}`, {
+      method: "PUT",
+      headers: { "Content-Type": file.type || "application/octet-stream" },
+      body: file,
+    });
     const data = (await res.json().catch(() => ({}))) as { error?: string; images?: MatchmakingInfo["images"] };
     if (!res.ok) throw new Error(data.error ?? `Upload failed (${res.status})`);
     return data as { images: MatchmakingInfo["images"] };
@@ -546,7 +551,8 @@ export const api = {
   saveBackupSettings: (s: BackupSettings) => request<{ settings: BackupSettings }>("PUT", "/api/backups/settings", s),
   backupDownloadUrl: (id: string) => `/api/backups/download?id=${encodeURIComponent(id)}`,
   notifications: () => request<{ discord: DiscordSettings; groups: Record<EventGroup, string> }>("GET", "/api/notifications"),
-  saveNotifications: (body: { webhook?: string; events: Partial<Record<EventGroup, boolean>> }) => request<{ discord: DiscordSettings }>("PUT", "/api/notifications", body),
+  saveNotifications: (body: { webhook?: string; events: Partial<Record<EventGroup, boolean>> }) =>
+    request<{ discord: DiscordSettings }>("PUT", "/api/notifications", body),
   testNotification: () => request<{ ok: true }>("POST", "/api/notifications/test", {}),
   monitor: () => request<MonitorOverview>("GET", "/api/monitor"),
   metrics: (scope: "machine" | number, range: MetricRange) => request<MetricSeries>("GET", `/api/metrics?scope=${scope}&range=${range}`),
@@ -556,18 +562,16 @@ export const api = {
   createPreset: (p: PresetInput) => request<{ preset: Preset }>("POST", "/api/presets", p),
   updatePreset: (id: number, p: PresetInput) => request<{ preset: Preset }>("PUT", `/api/presets/${id}`, p),
   deletePreset: (id: number) => request<{ serversUsing: number }>("DELETE", `/api/presets/${id}`),
-  saveAsPreset: (serverId: number, name: string, description: string) => request<{ preset: Preset }>("POST", `/api/servers/${serverId}/save-preset`, { name, description }),
+  saveAsPreset: (serverId: number, name: string, description: string) =>
+    request<{ preset: Preset }>("POST", `/api/servers/${serverId}/save-preset`, { name, description }),
   setExecConfigs: (serverId: number, configs: string[]) => request<{ execConfigs: string[] }>("PUT", `/api/servers/${serverId}/exec-configs`, { configs }),
-  checkPort: (port: number, serverId?: number) =>
-    request<{ problem: string | null }>("GET", `/api/ports/check?${q({ port, serverId })}`),
+  checkPort: (port: number, serverId?: number) => request<{ problem: string | null }>("GET", `/api/ports/check?${q({ port, serverId })}`),
 
   servers: () => request<{ servers: Server[] }>("GET", "/api/servers"),
   server: (id: number) => request<ServerDetail>("GET", `/api/servers/${id}`),
   createServer: (input: Record<string, unknown>) => request<{ server: Server }>("POST", "/api/servers", input),
-  updateServer: (id: number, input: Record<string, unknown>) =>
-    request<{ server: Server; restartRequired: boolean }>("PATCH", `/api/servers/${id}`, input),
-  duplicateServer: (id: number, input: Record<string, unknown>) =>
-    request<{ server: Server }>("POST", `/api/servers/${id}/duplicate`, input),
+  updateServer: (id: number, input: Record<string, unknown>) => request<{ server: Server; restartRequired: boolean }>("PATCH", `/api/servers/${id}`, input),
+  duplicateServer: (id: number, input: Record<string, unknown>) => request<{ server: Server }>("POST", `/api/servers/${id}/duplicate`, input),
   deleteServer: (id: number, confirm: string) => request<{ ok: true }>("DELETE", `/api/servers/${id}`, { confirm }),
   control: (id: number, action: "start" | "stop" | "restart" | "kill") => request<{ server: Server }>("POST", `/api/servers/${id}/${action}`, {}),
   rcon: (id: number, command: string) => request<{ output: string }>("POST", `/api/servers/${id}/rcon`, { command }),
@@ -576,10 +580,8 @@ export const api = {
   config: (id: number, path: string) => request<ConfigFile>("GET", `/api/servers/${id}/configs/file?${q({ path })}`),
   saveConfig: (id: number, body: { path: string; content: string; comment?: string; apply: "save" | "exec" | "restart" }) =>
     request<{ changed: boolean; applied: string; file: ConfigFile }>("PUT", `/api/servers/${id}/configs/file`, body),
-  revertConfig: (id: number, path: string) =>
-    request<{ result: "stock" | "deleted" }>("DELETE", `/api/servers/${id}/configs/file?${q({ path })}`),
-  revision: (id: number, revId: number) =>
-    request<{ path: string; content: string | null }>("GET", `/api/servers/${id}/configs/revisions/${revId}`),
+  revertConfig: (id: number, path: string) => request<{ result: "stock" | "deleted" }>("DELETE", `/api/servers/${id}/configs/file?${q({ path })}`),
+  revision: (id: number, revId: number) => request<{ path: string; content: string | null }>("GET", `/api/servers/${id}/configs/revisions/${revId}`),
   rollback: (id: number, revisionId: number) =>
     request<{ path: string; file: ConfigFile | null }>("POST", `/api/servers/${id}/configs/rollback`, { revisionId }),
 
@@ -587,7 +589,10 @@ export const api = {
     request<{ plugins: PluginStatus[]; databaseConfigured: boolean; warnings: string[] }>("GET", `/api/servers/${id}/plugins${refresh ? "?refresh=true" : ""}`),
   catalog: () => request<{ plugins: CatalogPlugin[] }>("GET", "/api/plugins/catalog"),
   pluginVersions: (pluginId: string) =>
-    request<{ versions: { version: string; publishedAt: string | null; prerelease: boolean }[] }>("GET", `/api/plugins/${encodeURIComponent(pluginId)}/versions`),
+    request<{ versions: { version: string; publishedAt: string | null; prerelease: boolean }[] }>(
+      "GET",
+      `/api/plugins/${encodeURIComponent(pluginId)}/versions`,
+    ),
   installPlugin: (id: number, pluginId: string, version?: string) =>
     request<{ installed: { id: string; version: string }[]; restarted: boolean }>(
       "POST",
@@ -596,8 +601,7 @@ export const api = {
     ),
   rollbackPlugin: (id: number, pluginId: string) =>
     request<{ version: string; restarted: boolean }>("POST", `/api/servers/${id}/plugins/${encodeURIComponent(pluginId)}/rollback`, {}),
-  removePlugin: (id: number, pluginId: string) =>
-    request<{ restarted: boolean }>("DELETE", `/api/servers/${id}/plugins/${encodeURIComponent(pluginId)}`),
+  removePlugin: (id: number, pluginId: string) => request<{ restarted: boolean }>("DELETE", `/api/servers/${id}/plugins/${encodeURIComponent(pluginId)}`),
   uploadPlugin: async (id: number, file: File) => {
     const res = await fetch(`/api/servers/${id}/plugins/upload?${q({ name: file.name })}`, {
       method: "POST",

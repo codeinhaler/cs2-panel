@@ -24,6 +24,8 @@ export function Play() {
   const [offline, setOffline] = useState(false);
   const [error, setError] = useState<string | null>(() => new URLSearchParams(window.location.search).get("error"));
   const [busy, setBusy] = useState(false);
+  /** Signed in and not in a lobby: the casual card shows once picked from the lobby choices. */
+  const [casualOpen, setCasualOpen] = useState(false);
   // The server's clock minus ours, so countdowns are right even if the phone's clock isn't.
   const skew = useRef(0);
 
@@ -145,8 +147,13 @@ export function Play() {
         <>
           {myMatch && <MatchCard match={myMatch} meId={me.steamId} skew={skew.current} busy={busy} act={act} mine />}
           {myDraft && <DraftCard draft={myDraft} state={state} busy={busy} act={act} />}
-          {state.enabled && (me.inLobby ? <LobbyCard state={state} busy={busy} act={act} /> : <LobbyPicker state={state} busy={busy} act={act} />)}
-          {state.casual.servers.length > 0 && <CasualCard state={state} />}
+          {state.enabled &&
+            (me.inLobby ? (
+              <LobbyCard state={state} busy={busy} act={act} />
+            ) : (
+              <LobbyPicker state={state} busy={busy} act={act} casualOpen={casualOpen} onCasual={() => setCasualOpen((v) => !v)} />
+            ))}
+          {!me.inLobby && !myMatch && casualOpen && state.casual.servers.length > 0 && <CasualCard state={state} />}
           <RatingCard state={state} busy={busy} act={act} />
         </>
       )}
@@ -240,7 +247,7 @@ function tier(v: number | null): string {
 // ------------------------------------------------------------- lobby
 
 /** First thing after signing in: which lobby to wait in. */
-function LobbyPicker({ state, busy, act }: { state: State; busy: boolean; act: Act }) {
+function LobbyPicker({ state, busy, act, casualOpen, onCasual }: { state: State; busy: boolean; act: Act; casualOpen: boolean; onCasual: () => void }) {
   return (
     <section className="panel">
       <h2 style={{ marginBottom: 12 }}>Pick a lobby</h2>
@@ -256,6 +263,13 @@ function LobbyPicker({ state, busy, act }: { state: State; busy: boolean; act: A
               <span className="hint play-lobby-maps">{l.maps.map(mapName).join(" · ")}</span>
             </button>
           ))}
+          {state.casual.servers.length > 0 && (
+            <button className={`play-lobby casual ${casualOpen ? "on" : ""}`} onClick={onCasual} aria-expanded={casualOpen}>
+              <span className="play-lobby-name">{state.casual.name}</span>
+              <span className="hint">Join any time, no teams made</span>
+              <span className="hint">{state.casual.servers.reduce((n, s) => n + (s.online ? s.players : 0), 0)} playing now</span>
+            </button>
+          )}
         </div>
       )}
     </section>
@@ -283,7 +297,7 @@ function LobbyCard({ state, busy, act }: { state: State; busy: boolean; act: Act
           : state.matchServers === 0
             ? "No server is set up for matches yet. Ask the organiser."
             : state.freeServers === 0
-              ? "All servers are busy. Teams can be made when a match finishes."
+              ? "All match servers are busy; teams can be made when one is free."
               : draft
                 ? null
                 : available.length > max
@@ -590,6 +604,19 @@ function MatchCard({ match: m, meId, skew, busy, act, mine }: { match: Match; me
         </div>
       )}
 
+      {m.discord && (
+        <div className="play-discord">
+          <a className="btn play-discord-btn" href={m.discord.channel} target="_blank" rel="noreferrer">
+            Join Discord channel
+          </a>
+          {m.discord.invite && (
+            <a className="hint" href={m.discord.invite} target="_blank" rel="noreferrer">
+              Not on our Discord? Join here
+            </a>
+          )}
+        </div>
+      )}
+
       {ended && m.phase !== "over" && m.error && <p className="notice warn">{m.error}</p>}
 
       <TeamsView
@@ -640,6 +667,30 @@ function MatchCard({ match: m, meId, skew, busy, act, mine }: { match: Match; me
       )}
       {!ended && myTeam && !iAmCaptainOf(myTeam) && (
         <p className="hint">{m.lateJoins.open ? "Others can join this match if a team has room." : "Closed to new players by the captains."}</p>
+      )}
+
+      {!ended && m.bots && (iAmCaptainOf("a") || iAmCaptainOf("b")) && (
+        <div className="play-vote">
+          <label className="check">
+            <input
+              type="checkbox"
+              disabled={busy}
+              checked={m.bots.votes[iAmCaptainOf("a") ? "a" : "b"]}
+              onChange={(e) => act(() => play.bot(m.id, e.target.checked))}
+            />
+            <span>Fill the short team with a bot</span>
+          </label>
+          <span className="hint">
+            {m.bots.on
+              ? m.bots.votes.a && m.bots.votes.b
+                ? "The bot plays. It's left out only if both captains untick this."
+                : "The bot still plays: the other captain wants it."
+              : `No bot: both captains said no, so ${label(m.bots.team)} plays one short.`}
+          </span>
+        </div>
+      )}
+      {!ended && m.bots && myTeam && !iAmCaptainOf(myTeam) && (
+        <p className="hint">{m.bots.on ? `A bot fills the empty spot on ${label(m.bots.team)}.` : `No bot: ${label(m.bots.team)} plays one short.`}</p>
       )}
 
       {myTeam && !ended && (

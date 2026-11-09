@@ -72,6 +72,14 @@ const MapList = z
     "Each map must be a map name like de_mirage or a Workshop map (workshop:ID). Collections can't be voted on.",
   );
 const ModeSettings = z.object({ enabled: z.boolean(), maps: MapList });
+const DiscordChannel = z
+  .string()
+  .trim()
+  .max(200)
+  .regex(
+    /^$|^https:\/\/((ptb|canary)\.)?discord\.com\/channels\/\d+\/\d+\/?$/,
+    "Paste the voice channel's link (right-click the channel in Discord → Copy Link).",
+  );
 
 export const MatchmakingSettingsSchema = z.object({
   enabled: z.boolean(),
@@ -84,6 +92,17 @@ export const MatchmakingSettingsSchema = z.object({
     .refine((m) => MODES.every((k) => !m[k].enabled || m[k].maps.length > 0), "Every open lobby needs at least one map."),
   botDifficulty: z.number().int().min(0).max(3),
   look: LookSchema.default(DEFAULT_LOOK),
+  /** Discord voice channels per match server (Team 1 / Team 2), and an invite for people not on the Discord yet. */
+  discord: z
+    .object({
+      invite: z
+        .string()
+        .trim()
+        .max(200)
+        .regex(/^$|^https:\/\/(discord\.gg|(www\.)?discord\.com\/invite)\/[\w-]+\/?$/, "The invite must be a link like https://discord.gg/abc123."),
+      channels: z.record(z.string().regex(/^\d+$/), z.object({ a: DiscordChannel, b: DiscordChannel })),
+    })
+    .default({ invite: "", channels: {} }),
   /** Servers anyone can just join from the site: no sign-in, no teams made, no veto. */
   casual: z
     .object({
@@ -114,6 +133,7 @@ export const DEFAULT_SETTINGS: MatchmakingSettings = {
   botDifficulty: 1,
   look: DEFAULT_LOOK,
   casual: { name: "Casual", serverIds: [] },
+  discord: { invite: "", channels: {} },
   gameAddress: "",
   vetoSeconds: 30,
 };
@@ -182,6 +202,8 @@ interface Match {
   released: boolean;
   /** Each captain's vote on letting people join mid-match. Closed only when both say no. */
   lateJoinVotes: { a: boolean; b: boolean };
+  /** Each captain's vote on the bot playing (when there is one). Left out only when both say no. */
+  botVotes: { a: boolean; b: boolean };
 }
 
 interface LobbyEntry {
@@ -260,6 +282,10 @@ export interface MatchView extends TeamsView {
   endedAt: number | null;
   /** Only for players in the match. */
   join: { port: number; password: string } | null;
+  /** The bot filling a short team: which team, whether it plays, and the captains' votes. */
+  bots: { team: TeamKey; on: boolean; votes: { a: boolean; b: boolean } } | null;
+  /** The viewer's own team's Discord voice channel. */
+  discord: { channel: string; invite: string | null } | null;
   /** Mid-match joins: open unless both captains voted no. */
   lateJoins: { open: boolean; votes: { a: boolean; b: boolean } };
   /** For a viewer not in the match: the team they'd join, or why they can't. */
@@ -304,6 +330,8 @@ export interface StateView {
   /** Steam's names for Workshop maps, by "workshop:ID". */
   mapNames: Record<string, string>;
   freeServers: number;
+  /** Why each match server is or isn't free. */
+  serverStates: { name: string; state: string; label: string }[];
   /** Servers set up for matches (in the pool, with the bridge), busy or not. */
   matchServers: number;
   now: number;
@@ -379,6 +407,7 @@ export class Matchmaking {
       modes,
       look: { ...DEFAULT_LOOK, ...(stored.look ?? {}) },
       casual: { ...DEFAULT_SETTINGS.casual, ...(stored.casual ?? {}) },
+      discord: { ...DEFAULT_SETTINGS.discord, ...(stored.discord ?? {}) },
     };
   }
 
@@ -488,7 +517,8 @@ export class Matchmaking {
     }[];
     for (const row of open) {
       this.d.db.prepare("UPDATE mm_matches SET status = 'abandoned', note = 'The panel restarted', ended_at = datetime('now') WHERE id = ?").run(row.id);
-      if (row.server_id) await this.unlockServer(row.server_id).catch(() => undefined);
+      if (row.server_id)
+        await this.unlockServer(row.server_id, "The match was ended (the panel restarted). Back to the site for the next one.").catch(() => undefined);
     }
   }
 
@@ -710,24 +740,58 @@ export class Matchmaking {
     this.casualInfo = next;
   }
 
+  /** A match still holds the server: running, or not yet completely freed (kicked, unlocked, password back). */
   private reserved(serverId: number): boolean {
     return this.matches.some((m) => m.serverId === serverId && (isActive(m) || !m.released));
   }
 
-  /** Servers in the pool that are free: not reserved, bridge installed, and nobody on them. Running ones first. */
+  /** When each server was last emptied and unlocked by matchmaking. */
+  private freedAt = new Map<number, number>();
+
+  /** People on the server, ignoring the stale count right after matchmaking kicked everyone. */
+  private peopleOn(serverId: number): number {
+    const freed = this.freedAt.get(serverId);
+    if (freed !== undefined && this.now() - freed < 60_000) return 0;
+    return this.d.humans(serverId) ?? 0;
+  }
+
+  /** Why each match server is or isn't free, for the panel and the site. */
+  serverStates(): { id: number; name: string; state: "free" | "in-match" | "freeing" | "people" | "no-bridge"; label: string }[] {
+    return this.poolRecords().map((s) => {
+      const holder = this.matches.find((m) => m.serverId === s.id && (isActive(m) || !m.released));
+      if (holder && isActive(holder)) return { id: s.id, name: s.name, state: "in-match" as const, label: `Running match ${holder.id}` };
+      if (holder) return { id: s.id, name: s.name, state: "freeing" as const, label: "Being emptied after a match" };
+      if (!this.d.hasBridge(s.id)) return { id: s.id, name: s.name, state: "no-bridge" as const, label: "Needs CounterStrikeSharp (with CS2 Panel Bridge)" };
+      const people = this.peopleOn(s.id);
+      if (people > 0) return { id: s.id, name: s.name, state: "people" as const, label: `${people} ${people === 1 ? "person" : "people"} on it` };
+      return { id: s.id, name: s.name, state: "free" as const, label: "Free" };
+    });
+  }
+
+  /**
+   * Free match servers, best first: running ones that have been idle a while,
+   * then stopped ones (they need starting), then the ones just freed.
+   */
   private async freeServers(): Promise<ServerRecord[]> {
-    const free: { s: ServerRecord; running: boolean }[] = [];
+    const t = this.now();
+    const free: { s: ServerRecord; rank: number; freed: number }[] = [];
+    const ok = new Set(
+      this.serverStates()
+        .filter((x) => x.state === "free")
+        .map((x) => x.id),
+    );
     for (const s of this.poolRecords()) {
-      if (this.reserved(s.id) || !this.d.hasBridge(s.id)) continue;
+      if (!ok.has(s.id)) continue;
       const running = (await this.d.host.serviceStatus(s.slug)).state === "active";
-      if (running && (this.d.humans(s.id) ?? 0) > 0) continue;
-      free.push({ s, running });
+      const freed = this.freedAt.get(s.id) ?? 0;
+      const recent = t - freed < 5 * 60_000;
+      free.push({ s, rank: recent ? 2 : running ? 0 : 1, freed });
     }
-    return free.sort((x, y) => Number(y.running) - Number(x.running)).map((x) => x.s);
+    return free.sort((x, y) => x.rank - y.rank || x.freed - y.freed).map((x) => x.s);
   }
 
   private freeCountSync(): number {
-    return this.poolRecords().filter((s) => !this.reserved(s.id) && this.d.hasBridge(s.id) && (this.d.humans(s.id) ?? 0) === 0).length;
+    return this.serverStates().filter((x) => x.state === "free").length;
   }
 
   // ------------------------------------------------------------- making teams
@@ -857,6 +921,7 @@ export class Matchmaking {
       endedAt: null,
       released: true,
       lateJoinVotes: { a: true, b: true },
+      botVotes: { a: true, b: true },
     };
     this.matches.push(m);
 
@@ -953,7 +1018,12 @@ export class Matchmaking {
     await writeAtomic(file, JSON.stringify(content, null, 2) + "\n", 0o664);
   }
 
-  /** What the bridge needs: who may join, on which team. The bot isn't listed. */
+  /** The bot plays when the match has one and not both captains said no. */
+  private botActive(m: Match): boolean {
+    return !!m.bot && (m.botVotes.a || m.botVotes.b);
+  }
+
+  /** What the bridge needs: who may join, on which team, the password and the bot. The bridge re-applies these after every map load. */
   private matchFileContent(m: Match) {
     const sideB: Side = m.sideA === "ct" ? "t" : "ct";
     return {
@@ -961,6 +1031,8 @@ export class Matchmaking {
       active: true,
       matchId: String(m.id),
       mode: m.mode,
+      password: m.password,
+      bot: this.botActive(m) ? { side: m.bot === "a" ? m.sideA : sideB, difficulty: this.config().botDifficulty } : null,
       players: [
         ...humans(m.teamA).map((p) => ({ steamId: p.steamId, name: p.name, team: m.sideA, group: "a" })),
         ...humans(m.teamB).map((p) => ({ steamId: p.steamId, name: p.name, team: sideB, group: "b" })),
@@ -972,7 +1044,6 @@ export class Matchmaking {
     try {
       const s = this.d.servers.require(m.serverId);
       if (!this.d.hasBridge(s.id)) throw new Error(`${s.name} doesn't have the CS2 Panel Bridge plugin.`);
-      const sideB: Side = m.sideA === "ct" ? "t" : "ct";
       m.released = false;
       await this.matchFile(s, this.matchFileContent(m));
 
@@ -985,21 +1056,16 @@ export class Matchmaking {
       if (!isActive(m)) return;
 
       m.status = "Loading the map";
-      await this.exec(s, `sv_password "${m.password}"`);
+      const before = await this.status(s).catch(() => null);
+      // The bridge takes the player list, password and bot from match.json, now and after every map load.
       await this.exec(s, "cs2panel_match_reload");
-      // Bot settings stick across the map load. A bot joins the short team; otherwise none.
-      if (m.bot) {
-        const botSide = m.bot === "a" ? m.sideA : sideB;
-        await this.exec(
-          s,
-          `bot_kick; bot_quota_mode normal; bot_difficulty ${this.config().botDifficulty}; bot_join_team ${botSide!.toUpperCase()}; bot_quota 1`,
-        );
-      } else {
-        await this.exec(s, "bot_kick; bot_quota 0");
-      }
+      await this.exec(s, `sv_password "${m.password}"`);
       // A full map load in the lobby's mode; the bridge keeps warmup going until everyone is in.
       const info = MODE_INFO[m.mode];
       await this.exec(s, gameModeLine(info.gameType, info.gameMode, m.map!), 15_000).catch(() => undefined);
+      if (!isActive(m)) return;
+      // Only hand out the Join button once the server has loaded the map and runs this match.
+      await this.waitForMatch(s, m, before?.mapLoads ?? null);
       if (!isActive(m)) return;
 
       m.phase = "live";
@@ -1024,6 +1090,23 @@ export class Matchmaking {
       if (!isActive(m)) return;
       if (this.now() > deadline) throw new Error(`${s.name} didn't answer within 3 minutes.`);
       await this.sleep(3000);
+    }
+  }
+
+  private async status(s: ServerRecord) {
+    return parseMatchStatus(await this.exec(s, "cs2panel_match_status", 3000));
+  }
+
+  /** Waits until the bridge reports this match, on a newly loaded map, in warmup (or later). */
+  private async waitForMatch(s: ServerRecord, m: Match, mapLoadsBefore: number | null): Promise<void> {
+    const deadline = this.now() + 120_000;
+    for (;;) {
+      const st = await this.status(s).catch(() => null);
+      const loaded = mapLoadsBefore === null || st?.mapLoads === undefined || st.mapLoads > mapLoadsBefore;
+      if (st && st.matchId === String(m.id) && loaded && (st.phase === "warmup" || st.phase === "live")) return;
+      if (!isActive(m)) return;
+      if (this.now() > deadline) throw new Error(`${s.name} didn't finish loading the match within 2 minutes. Is its CS2 Panel Bridge up to date?`);
+      await this.sleep(2000);
     }
   }
 
@@ -1073,8 +1156,16 @@ export class Matchmaking {
     } else if (phase === "over") m.status = "Match over";
     this.save(m, note);
     if (!m.released) {
+      const reason =
+        phase === "over"
+          ? "Match over, thanks for playing! Back to the site for the next match."
+          : phase === "cancelled"
+            ? "The match was cancelled. Back to the site for the next one."
+            : "The match was ended. Back to the site for the next one.";
+      // The server stays reserved until it's empty and unlocked, so a new match can't grab it halfway.
+      await this.unlockServer(m.serverId, reason).catch(() => undefined);
       m.released = true;
-      await this.unlockServer(m.serverId).catch(() => undefined);
+      this.freedAt.set(m.serverId, this.now());
     }
     this.d.audit.record(null, `matchmaking.${phase === "over" ? "finished" : phase}`, m.serverId, {
       match: m.id,
@@ -1084,11 +1175,14 @@ export class Matchmaking {
     });
   }
 
-  private async unlockServer(serverId: number): Promise<void> {
+  /** Empties the server (kicking everyone with a reason), then opens it again: no player list, no bot, its own password. */
+  private async unlockServer(serverId: number, kickReason: string | null = null): Promise<void> {
     const s = this.d.servers.listRecords().find((x) => x.id === serverId);
     if (!s) return;
+    const running = (await this.d.host.serviceStatus(s.slug)).state === "active";
+    if (running && kickReason) await this.exec(s, `cs2panel_kick_all "${kickReason.replace(/["\;\r\n]/g, "")}"`).catch(() => undefined);
     await this.matchFile(s, { version: 1, active: false, players: [] });
-    if ((await this.d.host.serviceStatus(s.slug)).state !== "active") return;
+    if (!running) return;
     await this.exec(s, "cs2panel_match_reload").catch(() => undefined);
     await this.exec(s, "bot_quota 0; bot_kick; bot_join_team any").catch(() => undefined);
     await this.exec(s, `sv_password "${(s.password ?? "").replace(/["\\;\r\n]/g, "")}"`).catch(() => undefined);
@@ -1217,6 +1311,21 @@ export class Matchmaking {
     return teamKey;
   }
 
+  /** A captain's vote on the bot. Turning it off kicks the bot; on again brings it back. */
+  async setBot(by: string, matchId: number, allow: boolean): Promise<void> {
+    const m = this.requireMatch(matchId);
+    if (!isActive(m)) throw badRequest("That match has already ended.");
+    if (!m.bot) throw badRequest("This match has no bot.");
+    const team: TeamKey | null = m.captainA === by ? "a" : m.captainB === by ? "b" : null;
+    if (!team) throw forbidden("Only the captains vote on this.");
+    const before = this.botActive(m);
+    m.botVotes[team] = allow;
+    if (before === this.botActive(m) || m.released) return;
+    const s = this.d.servers.require(m.serverId);
+    await this.matchFile(s, this.matchFileContent(m));
+    await this.exec(s, "cs2panel_match_reload").catch(() => undefined);
+  }
+
   setLateJoins(by: string, matchId: number, allow: boolean): void {
     const m = this.requireMatch(matchId);
     if (!isActive(m)) throw badRequest("That match has already ended.");
@@ -1245,8 +1354,15 @@ export class Matchmaking {
   private matchView(m: Match, viewer: string | null): MatchView {
     const s = this.d.servers.listRecords().find((x) => x.id === m.serverId);
     const member = viewer !== null && [...m.teamA, ...m.teamB].some((p) => p.steamId === viewer);
+    const showBot = this.botActive(m);
+    const shown = (t: Member[]) => (showBot ? t : humans(t));
+    const myTeam: TeamKey | null = !member ? null : m.teamA.some((p) => p.steamId === viewer) ? "a" : "b";
+    const channels = this.config().discord.channels[String(m.serverId)];
+    const channel = myTeam && channels ? (myTeam === "a" ? channels.a : channels.b) : "";
     return {
-      ...this.teamsView(m.teamA, m.teamB),
+      ...this.teamsView(shown(m.teamA), shown(m.teamB)),
+      bots: m.bot ? { team: m.bot, on: showBot, votes: { ...m.botVotes } } : null,
+      discord: channel && isActive(m) ? { channel, invite: this.config().discord.invite || null } : null,
       id: m.id,
       mode: m.mode,
       modeLabel: MODE_INFO[m.mode].label,
@@ -1348,6 +1464,7 @@ export class Matchmaking {
         servers: c.casual.serverIds.map((id) => this.casualInfo.get(id)).filter((x): x is CasualView => !!x),
       },
       freeServers: this.freeCountSync(),
+      serverStates: this.serverStates().map(({ name, state, label }) => ({ name, state, label })),
       matchServers: this.poolRecords().filter((s) => this.d.hasBridge(s.id)).length,
       now: this.now(),
     };
@@ -1400,15 +1517,29 @@ export class Matchmaking {
 }
 
 /** Parses the bridge's `cs2panel_match_status` reply. */
-export function parseMatchStatus(output: string): { active?: boolean; phase?: string; connected?: number; scoreA?: number; scoreB?: number } {
+export function parseMatchStatus(output: string): {
+  active?: boolean;
+  matchId?: string;
+  phase?: string;
+  connected?: number;
+  scoreA?: number;
+  scoreB?: number;
+  mapLoads?: number;
+  map?: string;
+} {
   const line = output.split(/\r?\n/).find((l) => l.includes(MATCH_MARKER));
   if (!line) throw new Error("The bridge didn't answer. Is it up to date?");
   const v = JSON.parse(line.slice(line.indexOf(MATCH_MARKER) + MATCH_MARKER.length)) as Record<string, unknown>;
+  const num = (x: unknown) => (typeof x === "number" ? x : undefined);
+  const str = (x: unknown) => (typeof x === "string" ? x : undefined);
   return {
     active: typeof v.active === "boolean" ? v.active : undefined,
-    phase: typeof v.phase === "string" ? v.phase : undefined,
-    connected: typeof v.connected === "number" ? v.connected : undefined,
-    scoreA: typeof v.scoreA === "number" ? v.scoreA : undefined,
-    scoreB: typeof v.scoreB === "number" ? v.scoreB : undefined,
+    matchId: str(v.matchId),
+    phase: str(v.phase),
+    connected: num(v.connected),
+    scoreA: num(v.scoreA),
+    scoreB: num(v.scoreB),
+    mapLoads: num(v.mapLoads),
+    map: str(v.map),
   };
 }

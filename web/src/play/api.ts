@@ -75,6 +75,8 @@ export interface Match extends Teams {
   endedAt: number | null;
   joinInfo: { address: string; password: string; steamUrl: string; console: string } | null;
   lateJoins: { open: boolean; votes: { a: boolean; b: boolean } };
+  bots: { team: TeamKey; on: boolean; votes: { a: boolean; b: boolean } } | null;
+  discord: { channel: string; invite: string | null } | null;
   canJoin: { team: TeamKey | null; reason: string | null } | null;
 }
 
@@ -111,6 +113,7 @@ export interface State {
     }[];
   };
   freeServers: number;
+  serverStates: { name: string; state: string; label: string }[];
   matchServers: number;
   now: number;
 }
@@ -144,6 +147,7 @@ export const play = {
   ban: (id: number, map: string) => request<{ ok: true }>("POST", `/matches/${id}/ban`, { map }),
   side: (id: number, side: Side) => request<{ ok: true }>("POST", `/matches/${id}/side`, { side }),
   joinMatch: (id: number) => request<{ team: TeamKey }>("POST", `/matches/${id}/join`, {}),
+  bot: (id: number, allow: boolean) => request<{ ok: true }>("POST", `/matches/${id}/bot`, { allow }),
   lateJoins: (id: number, allow: boolean) => request<{ ok: true }>("POST", `/matches/${id}/late-joins`, { allow }),
   startNow: (id: number) => request<{ ok: true }>("POST", `/matches/${id}/start-now`, {}),
   cancelMatch: (id: number) => request<{ ok: true }>("POST", `/matches/${id}/cancel`, {}),

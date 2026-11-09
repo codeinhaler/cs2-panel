@@ -230,6 +230,11 @@ export async function buildPublicApp(d: PublicDeps): Promise<FastifyInstance> {
     const team = await mm.joinMatch(requirePlayer(req), idParam.parse(req.params).id);
     return { team };
   });
+  app.post("/api/matches/:id/bot", async (req) => {
+    const { allow } = z.object({ allow: z.boolean() }).parse(req.body ?? {});
+    await mm.setBot(requirePlayer(req), idParam.parse(req.params).id, allow);
+    return { ok: true };
+  });
   app.post("/api/matches/:id/late-joins", async (req) => {
     const { allow } = z.object({ allow: z.boolean() }).parse(req.body ?? {});
     mm.setLateJoins(requirePlayer(req), idParam.parse(req.params).id, allow);

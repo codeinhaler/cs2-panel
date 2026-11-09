@@ -28,7 +28,7 @@ namespace Cs2PanelBridge;
 public class Cs2PanelBridge : BasePlugin
 {
     public override string ModuleName => "CS2 Panel Bridge";
-    public override string ModuleVersion => "1.3.0";
+    public override string ModuleVersion => "1.4.0";
     public override string ModuleAuthor => "cs2-panel";
     public override string ModuleDescription => "Enforces cs2-panel bans, locks matchmaking matches and reports players to the panel.";
 
@@ -54,17 +54,28 @@ public class Cs2PanelBridge : BasePlugin
     private bool _countdown;
     /// <summary>A casual server: no match, but each newcomer goes on the smaller team.</summary>
     private bool _casual;
+    /// <summary>Counts map loads, so the panel can tell when its map change has happened.</summary>
+    private int _mapLoads;
 
     public override void Load(bool hotReload)
     {
         LoadBans();
         LoadMatch();
         RegisterListener<Listeners.OnClientAuthorized>(OnClientAuthorized);
-        RegisterListener<Listeners.OnMapStart>(_ => AddTimer(2.0f, () =>
+        RegisterListener<Listeners.OnMapStart>(_ =>
         {
-            HoldWarmup();
-            ApplyCasual();
-        }));
+            _mapLoads++;
+            // Loading a map runs the game mode's config and server.cfg, which reset the password
+            // and bots. Put the match's own settings back once those have run.
+            AddTimer(2.0f, () =>
+            {
+                HoldWarmup();
+                ApplyCasual();
+                ApplyMatchSettings();
+            });
+        });
+        // And keep them, in case a config or an admin changes them during the match.
+        AddTimer(5.0f, ApplyMatchSettings, TimerFlags.REPEAT);
         RegisterEventHandler<EventPlayerConnectFull>(OnPlayerConnectFull);
         RegisterEventHandler<EventPlayerTeam>(OnPlayerTeam);
         RegisterEventHandler<EventCsWinPanelMatch>(OnMatchOver);
@@ -134,6 +145,7 @@ public class Cs2PanelBridge : BasePlugin
         var hadMatch = _match != null;
         LoadMatch();
         ApplyMatch();
+        ApplyMatchSettings();
         // The server is open again: let warmup run out normally.
         if (hadMatch && _match == null) Server.ExecuteCommand("mp_warmup_pausetimer 0");
         ApplyCasual();
@@ -162,7 +174,7 @@ public class Cs2PanelBridge : BasePlugin
         {
             Logger.LogWarning(e, "cs2panel: could not read team scores");
         }
-        var status = new MatchStatus(_match != null, _match?.MatchId ?? "", phase, MatchPlayersOnline().Count(), _matchPlayers.Count, scoreA, scoreB);
+        var status = new MatchStatus(_match != null, _match?.MatchId ?? "", phase, MatchPlayersOnline().Count(), _matchPlayers.Count, scoreA, scoreB, _mapLoads, Server.MapName);
         command.ReplyToCommand(MatchMarker + JsonSerializer.Serialize(status, Json));
     }
 
@@ -269,6 +281,49 @@ public class Cs2PanelBridge : BasePlugin
         if (_match == null || !player.IsValid || !_matchPlayers.ContainsKey(player.SteamID)) return;
         var want = DesiredTeam(player.SteamID);
         if ((CsTeam)player.TeamNum != want) player.ChangeTeam(want);
+        RespawnInWarmup(player);
+    }
+
+    /// <summary>In warmup, someone just put on a team spawns right away instead of watching a bot.</summary>
+    private void RespawnInWarmup(CCSPlayerController player)
+    {
+        if (!IsWarmup()) return;
+        AddTimer(0.5f, () =>
+        {
+            if (player.IsValid && !player.PawnIsAlive && (CsTeam)player.TeamNum is CsTeam.Terrorist or CsTeam.CounterTerrorist) player.Respawn();
+        });
+    }
+
+    /// <summary>The match's password and bot, from match.json. Safe to run again and again.</summary>
+    private void ApplyMatchSettings()
+    {
+        if (_match == null || _matchOver) return;
+        if (_match.Password != null) Server.ExecuteCommand($"sv_password \"{Clean(_match.Password)}\"");
+        if (_match.Bot is { } bot)
+        {
+            var side = bot.Side == "t" ? "T" : "CT";
+            Server.ExecuteCommand($"bot_quota_mode normal; bot_difficulty {Math.Clamp(bot.Difficulty, 0, 3)}; bot_join_team {side}; bot_quota 1");
+        }
+        else
+        {
+            Server.ExecuteCommand("bot_quota 0; bot_kick");
+        }
+    }
+
+    [ConsoleCommand("cs2panel_kick_all", "Kicks every player (after a match), with a reason")]
+    [CommandHelper(whoCanExecute: CommandUsage.SERVER_ONLY)]
+    public void OnKickAll(CCSPlayerController? caller, CommandInfo command)
+    {
+        var reason = Clean(command.ArgString.Trim().Trim('"'));
+        if (reason.Length == 0) reason = "The match is over";
+        var count = 0;
+        foreach (var p in Utilities.GetPlayers().Where(p => p is { IsValid: true, IsBot: false, IsHLTV: false }))
+        {
+            if (!p.UserId.HasValue) continue;
+            Server.ExecuteCommand($"kickid {p.UserId.Value} \"{reason}\"");
+            count++;
+        }
+        command.ReplyToCommand($"cs2panel: kicked {count} players");
     }
 
     /// <summary>
@@ -367,6 +422,7 @@ public class Cs2PanelBridge : BasePlugin
         var ct = others.Count(p => (CsTeam)p.TeamNum == CsTeam.CounterTerrorist);
         var pick = t < ct ? CsTeam.Terrorist : ct < t ? CsTeam.CounterTerrorist : (Random.Shared.Next(2) == 0 ? CsTeam.Terrorist : CsTeam.CounterTerrorist);
         player.ChangeTeam(pick);
+        RespawnInWarmup(player);
     }
 
     // ------------------------------------------------------------- bans
@@ -434,7 +490,9 @@ public record MatchStatus(
     [property: JsonPropertyName("connected")] int Connected,
     [property: JsonPropertyName("expected")] int Expected,
     [property: JsonPropertyName("scoreA")] int ScoreA,
-    [property: JsonPropertyName("scoreB")] int ScoreB);
+    [property: JsonPropertyName("scoreB")] int ScoreB,
+    [property: JsonPropertyName("mapLoads")] int MapLoads,
+    [property: JsonPropertyName("map")] string Map);
 
 public class MatchFile
 {
@@ -443,7 +501,18 @@ public class MatchFile
     /// <summary>No match; a casual server where newcomers are put on the smaller team.</summary>
     public bool Casual { get; set; }
     public string MatchId { get; set; } = "";
+    /// <summary>The match's password; put back after every map load.</summary>
+    public string? Password { get; set; }
+    /// <summary>The one bot filling a short team, or none.</summary>
+    public MatchBot? Bot { get; set; }
     public List<MatchPlayer> Players { get; set; } = new();
+}
+
+public class MatchBot
+{
+    /// <summary>Side at the start: "ct" or "t".</summary>
+    public string Side { get; set; } = "ct";
+    public int Difficulty { get; set; } = 1;
 }
 
 public class MatchPlayer
