@@ -366,6 +366,32 @@ public class Cs2PanelBridge : BasePlugin
         return HookResult.Continue;
     }
 
+    /// <summary>Puts a player on a free-looking spawn point of their team.</summary>
+    private static void MoveToSpawn(CCSPlayerController player)
+    {
+        if (!player.IsValid || !player.PawnIsAlive) return;
+        var pawn = player.PlayerPawn.Value;
+        if (pawn == null) return;
+        var name = (CsTeam)player.TeamNum == CsTeam.Terrorist ? "info_player_terrorist" : "info_player_counterterrorist";
+        var spawns = Utilities.FindAllEntitiesByDesignerName<SpawnPoint>(name).Where(sp => sp.IsValid && sp.AbsOrigin != null).ToList();
+        if (spawns.Count == 0) return;
+        var others = Utilities.GetPlayers()
+            .Where(p => p.IsValid && p != player && p.PawnIsAlive && p.PlayerPawn.Value?.AbsOrigin != null)
+            .Select(p => p.PlayerPawn.Value!.AbsOrigin!)
+            .ToList();
+        // The spawn furthest from anyone else, so nobody ends up inside another player.
+        var spot = spawns
+            .OrderByDescending(sp => others.Count == 0 ? 0 : others.Min(o => Distance(o, sp.AbsOrigin!)))
+            .First();
+        pawn.Teleport(spot.AbsOrigin!, spot.AbsRotation ?? new QAngle(0, 0, 0), new Vector(0, 0, 0));
+    }
+
+    private static float Distance(Vector a, Vector b)
+    {
+        float dx = a.X - b.X, dy = a.Y - b.Y, dz = a.Z - b.Z;
+        return MathF.Sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
     /// <summary>A spawned player should walk, never fly through walls (a spawn racing a team change can leave them in noclip).</summary>
     private static void FixNoclip(CCSPlayerController player)
     {
@@ -493,7 +519,10 @@ public class Cs2PanelBridge : BasePlugin
         // respawning while the game is spawning them too can leave the first player flying around in noclip.
         AddTimer(2.5f, () =>
         {
-            if (player.IsValid && IsWarmup() && !player.PawnIsAlive && (CsTeam)player.TeamNum is CsTeam.Terrorist or CsTeam.CounterTerrorist) player.Respawn();
+            if (!player.IsValid || !IsWarmup() || player.PawnIsAlive || (CsTeam)player.TeamNum is not (CsTeam.Terrorist or CsTeam.CounterTerrorist)) return;
+            player.Respawn();
+            // Respawn() leaves the body where the team-select camera was, often inside the map: move it to a real spawn.
+            AddTimer(0.1f, () => MoveToSpawn(player));
         });
     }
 
