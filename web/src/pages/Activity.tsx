@@ -71,7 +71,9 @@ function describe(e: AuditEntry): string {
     case "matchmaking.settings":
       return d.enabled ? `changed the matchmaking settings (site open on port ${str("port")})` : "changed the matchmaking settings (site closed)";
     case "matchmaking.rating":
-      return d.rating === null ? `cleared the matchmaking rating of ${str("name") || str("steamId")}` : `set the matchmaking rating of ${str("name") || str("steamId")} to ${str("rating")}`;
+      return d.rating === null
+        ? `cleared the matchmaking rating of ${str("name") || str("steamId")}`
+        : `set the matchmaking rating of ${str("name") || str("steamId")} to ${str("rating")}`;
     case "matchmaking.kick":
       return `removed ${str("name") || str("steamId")} from the matchmaking lobby`;
     case "matchmaking.cancel":
@@ -121,8 +123,12 @@ function describe(e: AuditEntry): string {
       const list = Array.isArray(d.configs) ? (d.configs as string[]) : [];
       return list.length ? `set configs to run on every map start: ${list.join(", ")}` : "stopped running extra configs on map start";
     }
+    case "server.map_cycle":
+      return Number(d.maps) >= 2 ? `set a map cycle of ${String(d.maps)} maps${d.random ? ", in random order" : ""}` : "turned off the map cycle";
     case "server.schedule":
-      return d.restartAt ? `set a daily restart at ${str("restartAt")}${d.ifPlayers === "wait" ? `, waiting up to ${str("maxWaitMinutes")} min for players to leave` : ""}` : "turned off the daily restart";
+      return d.restartAt
+        ? `set a daily restart at ${str("restartAt")}${d.ifPlayers === "wait" ? `, waiting up to ${str("maxWaitMinutes")} min for players to leave` : ""}`
+        : "turned off the daily restart";
     case "server.kill":
       return "force-stopped the server";
     case "server.rcon":
@@ -210,10 +216,7 @@ export function ActivityList({ serverId, limit = 50, compact = false }: { server
                 <td>
                   <b style={{ fontWeight: 600 }}>{e.userName ?? (e.userSteamId ? e.userSteamId : "System")}</b> {describe(e)}
                   {!compact && e.serverName && e.action !== "server.delete" && (
-                    <>
-                      {" "}
-                      on {e.serverId ? <Link to={`/servers/${e.serverId}`}>{e.serverName}</Link> : e.serverName}
-                    </>
+                    <> on {e.serverId ? <Link to={`/servers/${e.serverId}`}>{e.serverName}</Link> : e.serverName}</>
                   )}
                 </td>
               </tr>

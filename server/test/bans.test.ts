@@ -8,6 +8,7 @@ import { buildApp, type App } from "../src/app.js";
 import { FakeHost, installFakeBase } from "../src/host/fake-host.js";
 import type { Config } from "../src/config.js";
 import { BANS_FILE, parseBridgePlayers } from "../src/players/bans.js";
+import { MAP_CYCLE_FILE, parseCycleStatus } from "../src/servers/map-cycle.js";
 
 const OWNER = "76561198000000001";
 const ALICE = "76561198000000011";
@@ -57,7 +58,13 @@ const fakeFetch = (async (input: string | URL | Request) => {
           draft: false,
           prerelease: false,
           published_at: "2026-11-01T00:00:00Z",
-          assets: [{ name: "counterstrikesharp-with-runtime-linux-1.0.370.zip", browser_download_url: "https://dl.test/counterstrikesharp-with-runtime-linux-1.0.370.zip", size: 1 }],
+          assets: [
+            {
+              name: "counterstrikesharp-with-runtime-linux-1.0.370.zip",
+              browser_download_url: "https://dl.test/counterstrikesharp-with-runtime-linux-1.0.370.zip",
+              size: 1,
+            },
+          ],
         },
       ]),
     );
@@ -111,6 +118,7 @@ beforeEach(async () => {
       rconCalls.push(cmd);
       if (cmd === "status") return STATUS;
       if (cmd === "cs2panel_players") return BRIDGE_PLAYERS;
+      if (cmd === "cs2panel_mapcycle_status") return 'CS2PANEL_MAPCYCLE {"active":true,"next":"workshop:3070244931"}\n';
       return "";
     },
   });
@@ -126,7 +134,12 @@ async function login() {
   return `cs2p_session=${res.cookies.find((c) => c.name === "cs2p_session")!.value}`;
 }
 async function call(cookie: string, method: string, url: string, body?: unknown) {
-  const res = await app.fastify.inject({ method: method as "GET", url, headers: { cookie, host: "panel.lan" }, ...(body !== undefined ? { payload: body as object } : {}) });
+  const res = await app.fastify.inject({
+    method: method as "GET",
+    url,
+    headers: { cookie, host: "panel.lan" },
+    ...(body !== undefined ? { payload: body as object } : {}),
+  });
   return { status: res.statusCode, body: res.json() as Record<string, any> };
 }
 async function newServer(c: string, name: string, port: number) {
@@ -134,7 +147,8 @@ async function newServer(c: string, name: string, port: number) {
   return (await call(c, "POST", "/api/servers", { name, presetId: presets[0].id, port })).body.server as { id: number; slug: string };
 }
 const bansFile = (slug: string) => path.join(dir, "cs2/instances", slug, "upper/game/csgo", BANS_FILE);
-const fileBans = (slug: string) => (JSON.parse(readFileSync(bansFile(slug), "utf8")) as { bans: { steamId: string; reason: string; expiresAt: string | null }[] }).bans;
+const fileBans = (slug: string) =>
+  (JSON.parse(readFileSync(bansFile(slug), "utf8")) as { bans: { steamId: string; reason: string; expiresAt: string | null }[] }).bans;
 
 describe("panel bans", () => {
   it("installs the bridge together with CounterStrikeSharp and gives it the ban list", async () => {
@@ -144,7 +158,9 @@ describe("panel bans", () => {
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.installed.map((p: { id: string }) => p.id)).toEqual(["metamod", "counterstrikesharp", "cs2panel-bridge"]);
     expect(res.body.installed.at(-1).version).toBe("v0.3.0");
-    expect(readFileSync(path.join(dir, "cs2/instances", s.slug, "upper/game/csgo/addons/counterstrikesharp/plugins/Cs2PanelBridge/Cs2PanelBridge.dll"), "utf8")).toBe("bridge");
+    expect(
+      readFileSync(path.join(dir, "cs2/instances", s.slug, "upper/game/csgo/addons/counterstrikesharp/plugins/Cs2PanelBridge/Cs2PanelBridge.dll"), "utf8"),
+    ).toBe("bridge");
     expect(fileBans(s.slug)).toEqual([]);
     expect((await call(c, "GET", "/api/bans/coverage")).body.enforced).toEqual([{ id: s.id, name: "A" }]);
   });
@@ -221,5 +237,40 @@ describe("panel bans", () => {
     const res = await call(c, "POST", "/api/bans", { serverId: s.id, userId: 2, minutes: 0, reason: "x" });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/CS2 Panel Bridge/);
+  });
+});
+
+describe("map cycle", () => {
+  it("reads the bridge's map cycle status", () => {
+    expect(parseCycleStatus('x\nCS2PANEL_MAPCYCLE {"active":true,"next":"de_inferno"}')).toEqual({ active: true, next: "de_inferno" });
+    expect(parseCycleStatus("Unknown command")).toBeNull();
+  });
+
+  it("gives a Casual server's bridge the cycle, and turns it off in other modes", async () => {
+    const c = await login();
+    const s = await newServer(c, "Casual", 27015);
+    const cycleFile = path.join(dir, "cs2/instances", s.slug, "upper/game/csgo", MAP_CYCLE_FILE);
+    let info = (await call(c, "GET", `/api/servers/${s.id}/map-cycle`)).body;
+    expect(info).toMatchObject({ casual: true, bridge: false, mapCycle: { maps: [], random: false }, next: null });
+
+    expect((await call(c, "PUT", `/api/servers/${s.id}/map-cycle`, { maps: ["de_dust2", "workshop:123:456"], random: false })).status).toBe(400);
+    expect((await call(c, "PUT", `/api/servers/${s.id}/map-cycle`, { maps: ["de_dust2", "de_dust2", "workshop:3070244931"], random: true })).status).toBe(200);
+    // Without the bridge nothing is written; installing it writes the file.
+    expect(existsSync(cycleFile)).toBe(false);
+    await call(c, "POST", `/api/servers/${s.id}/plugins/counterstrikesharp/install`, {});
+    expect(JSON.parse(readFileSync(cycleFile, "utf8"))).toEqual({
+      version: 1,
+      active: true,
+      random: true,
+      maps: [{ map: "de_dust2" }, { workshop: "3070244931" }],
+    });
+
+    await call(c, "POST", `/api/servers/${s.id}/start`, {});
+    rconCalls.length = 0;
+    await call(c, "PUT", `/api/servers/${s.id}/map-cycle`, { maps: ["de_dust2", "de_inferno"], random: false });
+    expect(rconCalls).toContain("cs2panel_mapcycle_reload");
+    info = (await call(c, "GET", `/api/servers/${s.id}/map-cycle`)).body;
+    expect(info).toMatchObject({ casual: true, bridge: true, next: "workshop:3070244931" });
+    expect((await call(c, "GET", `/api/servers/${s.id}`)).body.mapCycle).toEqual({ maps: ["de_dust2", "de_inferno"], random: false });
   });
 });

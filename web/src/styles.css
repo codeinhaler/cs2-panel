@@ -1716,3 +1716,20 @@ details.inline-form[open] > summary {
   display: block;
   margin-top: 6px;
 }
+
+.map-cycle-list {
+  margin: 8px 0 0;
+  padding-left: 22px;
+  max-width: 560px;
+}
+.map-cycle-list li {
+  padding: 4px 0;
+}
+.map-cycle-list li > span:first-child {
+  display: inline-block;
+  min-width: 220px;
+}
+.map-cycle-list .row-actions {
+  display: inline-flex;
+  gap: 4px;
+}

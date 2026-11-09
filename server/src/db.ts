@@ -221,6 +221,9 @@ const MIGRATIONS: string[] = [
   /* 10: matchmaking lobbies (Competitive, Wingman, 1v1) */ `
   ALTER TABLE mm_matches ADD COLUMN mode TEXT NOT NULL DEFAULT 'competitive';
   `,
+  /* 11: map cycle for Casual servers, run by the bridge */ `
+  ALTER TABLE servers ADD COLUMN map_cycle TEXT;
+  `,
 ];
 
 export function openDb(file: string): Db {

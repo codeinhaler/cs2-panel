@@ -30,6 +30,7 @@ import { PlayerService } from "./players/service.js";
 import { BanService, BRIDGE_ID } from "./players/bans.js";
 import { MapMenuService } from "./plugins/map-menu.js";
 import { ExecConfigService, withBlock } from "./servers/exec-configs.js";
+import { MapCycleService, isCasual } from "./servers/map-cycle.js";
 import { SharedConfigService, withoutSharedBlock } from "./servers/shared-config.js";
 import { WorkshopLookup, workshopBlocks } from "./game/workshop.js";
 import { parseMapSpec } from "./servers/map-spec.js";
@@ -147,7 +148,14 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const humans = humanCounter(players);
   const discord = new DiscordNotifier(db, settings, box, fetchFn);
   audit.listeners.push(discord.onEvent);
-  const monitor = new Monitor({ db, host, servers: () => servers.listRecords(), query: deps.a2sQuery ?? ((port) => queryInfo(port)), counts: (id) => players.recentCounts(id), audit });
+  const monitor = new Monitor({
+    db,
+    host,
+    servers: () => servers.listRecords(),
+    query: deps.a2sQuery ?? ((port) => queryInfo(port)),
+    counts: (id) => players.recentCounts(id),
+    audit,
+  });
   const backups = new BackupService(
     db,
     settings,
@@ -173,6 +181,13 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   // Every server with the bridge gets the current ban list before it starts and right after the bridge is installed.
   servers.beforeStart.push((s) => bans.writeFor(s));
   plugins.afterApply.push((s, ids) => (ids.includes(BRIDGE_ID) ? bans.writeFor(s) : Promise.resolve()));
+  // Casual servers' map cycle: the bridge's file before each start, after the bridge is installed and when the mode changes.
+  const mapCycles = new MapCycleService(db, files, host, rcon, audit, (id) => plugins.installedIds(id).includes(BRIDGE_ID), checkWorkshop);
+  servers.beforeStart.push((s) => mapCycles.apply(s).catch(() => undefined));
+  plugins.afterApply.push((s, ids) => (ids.includes(BRIDGE_ID) ? mapCycles.apply(s).catch(() => undefined) : Promise.resolve()));
+  servers.afterUpdate.push(async (s, info) => {
+    if (info.appliedPreset || info.modeChanged) await mapCycles.apply(s).catch(() => undefined);
+  });
   if (deps.pluginCheckDelayMs !== undefined) updater.pluginCheckDelayMs = deps.pluginCheckDelayMs;
 
   const mmPlayers = new MmPlayerStore(db);
@@ -502,6 +517,19 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     return { execConfigs: await execConfigs.set(servers.require(id), list, user.id) };
   });
 
+  app.get("/api/servers/:id/map-cycle", async (req) => {
+    requirePerm(req, "view");
+    const { id } = idParam.parse(req.params);
+    const s = servers.require(id);
+    return { mapCycle: mapCycles.get(id), casual: isCasual(s), bridge: plugins.installedIds(id).includes(BRIDGE_ID), next: await mapCycles.next(s) };
+  });
+
+  app.put("/api/servers/:id/map-cycle", async (req) => {
+    const user = requirePerm(req, "config.edit");
+    const { id } = idParam.parse(req.params);
+    return { mapCycle: await mapCycles.set(servers.require(id), req.body, user.id) };
+  });
+
   app.get("/api/ports/check", async (req) => {
     requirePerm(req, "view");
     const q = z.object({ port: z.coerce.number().int(), serverId: z.coerce.number().int().optional() }).parse(req.query);
@@ -527,6 +555,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       pluginPages: pluginPages(installed),
       bridge: installed.includes(BRIDGE_ID),
       execConfigs: execConfigs.get(id),
+      mapCycle: mapCycles.get(id),
       // The token itself only for those who may change it; others see the last 4 characters (gsltHint).
       ...(can(user.role, "server.manage") ? { gslt: servers.require(id).gsltToken ?? "" } : {}),
     };
@@ -551,6 +580,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     const server = await servers.duplicate(id, req.body, actorOf(user));
     plugins.copyInstalls(id, server.id);
     execConfigs.copy(id, server.id);
+    mapCycles.copy(id, server.id);
     return { server };
   });
 
@@ -637,7 +667,12 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     const user = requirePerm(req, "server.control");
     const { id } = idParam.parse(req.params);
     const body = z
-      .object({ presetId: z.number().int(), map: z.string().trim().max(80).optional(), keep: z.boolean().default(false), applyConfigs: z.boolean().default(false) })
+      .object({
+        presetId: z.number().int(),
+        map: z.string().trim().max(80).optional(),
+        keep: z.boolean().default(false),
+        applyConfigs: z.boolean().default(false),
+      })
       .parse(req.body);
     if (body.keep && !can(user.role, "server.manage")) throw forbidden("Only Admins and the Owner can change a server's saved game mode.");
     const s = servers.require(id);
@@ -786,7 +821,14 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   app.get("/api/plugins/catalog", async (req) => {
     requirePerm(req, "view");
     return {
-      plugins: CATALOG.map((e) => ({ id: e.id, name: e.name, description: e.description, requires: e.requires, library: !!e.library, companionOf: e.companionOf ?? null })),
+      plugins: CATALOG.map((e) => ({
+        id: e.id,
+        name: e.name,
+        description: e.description,
+        requires: e.requires,
+        library: !!e.library,
+        companionOf: e.companionOf ?? null,
+      })),
     };
   });
 
@@ -794,7 +836,11 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     requirePerm(req, "view");
     const { pluginId } = z.object({ pluginId: z.string() }).parse(req.params);
     try {
-      return { versions: (await plugins.versions(pluginId)).filter((v) => v.asset).map((v) => ({ version: v.version, publishedAt: v.publishedAt, prerelease: v.prerelease })) };
+      return {
+        versions: (await plugins.versions(pluginId))
+          .filter((v) => v.asset)
+          .map((v) => ({ version: v.version, publishedAt: v.publishedAt, prerelease: v.prerelease })),
+      };
     } catch (e) {
       if (e instanceof HttpError) throw e;
       throw badRequest((e as Error).message);
@@ -820,8 +866,10 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     return plugins.uninstall(id, pluginId, user.id);
   });
 
-  app.addContentTypeParser(["application/zip", "application/gzip", "application/octet-stream"], { parseAs: "buffer", bodyLimit: 200 * 1024 * 1024 }, (_req, body, done) =>
-    done(null, body),
+  app.addContentTypeParser(
+    ["application/zip", "application/gzip", "application/octet-stream"],
+    { parseAs: "buffer", bodyLimit: 200 * 1024 * 1024 },
+    (_req, body, done) => done(null, body),
   );
   app.post("/api/servers/:id/plugins/upload", { bodyLimit: 200 * 1024 * 1024 }, async (req) => {
     // Custom plugins run arbitrary code on the server, so only the Owner may upload them.
@@ -1125,7 +1173,10 @@ export async function buildApp(deps: AppDeps): Promise<App> {
 
   app.get("/api/shared", async (req) => {
     requirePerm(req, "view");
-    return { shared: shared.get(), preview: servers.listRecords().map((s) => ({ id: s.id, name: s.name, hostname: shared.hostnameFor(s), uses: shared.uses(s.id) })) };
+    return {
+      shared: shared.get(),
+      preview: servers.listRecords().map((s) => ({ id: s.id, name: s.name, hostname: shared.hostnameFor(s), uses: shared.uses(s.id) })),
+    };
   });
 
   app.put("/api/shared", async (req) => {
@@ -1188,9 +1239,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
 
   app.post("/api/game/update", async (req) => {
     const user = requirePerm(req, "game.update");
-    const body = z
-      .object({ validate: z.boolean().default(false), warnSeconds: z.number().int().min(0).max(600).default(60) })
-      .parse(req.body ?? {});
+    const body = z.object({ validate: z.boolean().default(false), warnSeconds: z.number().int().min(0).max(600).default(60) }).parse(req.body ?? {});
     void updater.start(body, user.id);
     return { ok: true };
   });
@@ -1347,6 +1396,24 @@ export async function buildApp(deps: AppDeps): Promise<App> {
 
   return {
     fastify: app,
-    services: { users, sessions, audit, servers, configs, updater, presets, plugins, players, bans, automation, monitor, discord, backups, matchmaking, publicSite, tls },
+    services: {
+      users,
+      sessions,
+      audit,
+      servers,
+      configs,
+      updater,
+      presets,
+      plugins,
+      players,
+      bans,
+      automation,
+      monitor,
+      discord,
+      backups,
+      matchmaking,
+      publicSite,
+      tls,
+    },
   };
 }

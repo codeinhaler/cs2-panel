@@ -473,7 +473,9 @@ describe("matchmaking site", () => {
     now += 25_000;
     await app.services.matchmaking.tick();
     expect(JSON.parse(readFileSync(matchFile!, "utf8")).active).toBe(false);
-    expect(rconLog.at(-1)).toBe('sv_password ""');
+    expect(rconLog.at(-2)).toBe('sv_password ""');
+    // And back to its own mode and map, which also drops the lobby's rules config.
+    expect(rconLog.at(-1)).toMatch(/^game_type \d+; game_mode \d+; map /);
     // Everyone was kicked first, so the server is really free for the next match.
     expect(rconLog).toContain('cs2panel_kick_all "Match over, thanks for playing! Back to the site for the next match."');
 

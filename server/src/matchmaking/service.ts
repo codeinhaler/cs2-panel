@@ -1211,6 +1211,12 @@ export class Matchmaking {
     await this.exec(s, "cs2panel_match_reload").catch(() => undefined);
     await this.exec(s, "bot_quota 0; bot_kick; bot_join_team any").catch(() => undefined);
     await this.exec(s, `sv_password "${(s.password ?? "").replace(/["\\;\r\n]/g, "")}"`).catch(() => undefined);
+    // Back to the server's own game mode and map, which also clears the lobby's rules config (e.g. 1v1).
+    try {
+      await this.exec(s, gameModeLine(s.gameType, s.gameMode, s.map), 15_000).catch(() => undefined);
+    } catch {
+      // The server's own map isn't one we can load by command; it keeps the match's map until its next change.
+    }
   }
 
   private save(m: Match, note: string | null = null): void {

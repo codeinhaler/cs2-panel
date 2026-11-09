@@ -28,13 +28,16 @@ namespace Cs2PanelBridge;
 public class Cs2PanelBridge : BasePlugin
 {
     public override string ModuleName => "CS2 Panel Bridge";
-    public override string ModuleVersion => "1.5.0";
+    public override string ModuleVersion => "1.6.0";
     public override string ModuleAuthor => "cs2-panel";
     public override string ModuleDescription => "Enforces cs2-panel bans, locks matchmaking matches and reports players to the panel.";
 
     /// <summary>Marks the JSON line in RCON output so the panel can find it among other console text.</summary>
     private const string PlayersMarker = "CS2PANEL_PLAYERS ";
     private const string MatchMarker = "CS2PANEL_MATCH ";
+    private const string CycleMarker = "CS2PANEL_MAPCYCLE ";
+    /// <summary>Seconds of scoreboard before the cycle loads the next map; CS2's own end-of-match action is pushed later.</summary>
+    private const float CycleDelay = 10.0f;
 
     private static readonly JsonSerializerOptions Json = new()
     {
@@ -45,6 +48,17 @@ public class Cs2PanelBridge : BasePlugin
     private Dictionary<ulong, BanEntry> _bans = new();
 
     private string BansFile => Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "configs", "plugins", "Cs2PanelBridge", "bans.json"));
+    private string CycleFilePath => Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "configs", "plugins", "Cs2PanelBridge", "mapcycle.json"));
+
+    /// <summary>The panel's map cycle for a Casual server, or null.</summary>
+    private MapCycleFile? _cycle;
+    /// <summary>Where in the cycle the current map is (-1: not one of its maps).</summary>
+    private int _cycleIndex = -1;
+    /// <summary>The map the cycle loads at the end of this match.</summary>
+    private int _cycleNext = -1;
+    /// <summary>The cycle entry being loaded right now, so a Workshop map is recognised after the load.</summary>
+    private int _cycleLoading = -1;
+
     private string MatchFilePath => Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "configs", "plugins", "Cs2PanelBridge", "match.json"));
 
     /// <summary>The match being played, or null when the server is open to everyone.</summary>
@@ -61,6 +75,7 @@ public class Cs2PanelBridge : BasePlugin
     {
         LoadBans();
         LoadMatch();
+        LoadCycle();
         RegisterListener<Listeners.OnClientAuthorized>(OnClientAuthorized);
         RegisterListener<Listeners.OnMapStart>(_ =>
         {
@@ -74,6 +89,7 @@ public class Cs2PanelBridge : BasePlugin
                 HoldWarmup();
                 ApplyCasual();
                 ApplyMatchSettings();
+                CycleOnMapStart();
             });
         });
         // And keep them, in case a config or an admin changes them during the match.
@@ -272,7 +288,88 @@ public class Cs2PanelBridge : BasePlugin
     private HookResult OnMatchOver(EventCsWinPanelMatch @event, GameEventInfo info)
     {
         if (_match != null) _matchOver = true;
+        else if (CycleActive && _cycleNext >= 0)
+        {
+            var next = _cycleNext;
+            AddTimer(CycleDelay, () =>
+            {
+                if (_match != null || !CycleActive || next >= _cycle!.Maps.Count) return;
+                _cycleLoading = next;
+                var entry = _cycle.Maps[next];
+                Server.ExecuteCommand(entry.Workshop != null ? $"host_workshop_map {entry.Workshop}" : $"changelevel {entry.Map}");
+            });
+        }
         return HookResult.Continue;
+    }
+
+    // ------------------------------------------------------------- map cycle (Casual servers)
+
+    private bool CycleActive => _cycle is { Active: true } && _cycle.Maps.Count >= 2 && _match == null;
+
+    private void LoadCycle()
+    {
+        try
+        {
+            var file = File.Exists(CycleFilePath) ? JsonSerializer.Deserialize<MapCycleFile>(File.ReadAllText(CycleFilePath), Json) : null;
+            _cycle = file?.Maps.All(ValidEntry) == true ? file : null;
+            if (_cycle == null) { _cycleIndex = -1; _cycleNext = -1; return; }
+            _cycleIndex = _cycle.Maps.FindIndex(e => e.Map != null && e.Map.Equals(Server.MapName, StringComparison.OrdinalIgnoreCase));
+            PickNext();
+        }
+        catch (Exception e)
+        {
+            _cycle = null;
+            Logger.LogError(e, "cs2panel: could not read {File}", CycleFilePath);
+        }
+    }
+
+    private static bool ValidEntry(MapCycleEntry e) =>
+        (e.Map != null && System.Text.RegularExpressions.Regex.IsMatch(e.Map, @"^[A-Za-z0-9_\-]+$")) ||
+        (e.Workshop != null && System.Text.RegularExpressions.Regex.IsMatch(e.Workshop, @"^\d+$"));
+
+    /// <summary>After a map load: note where we are, choose the next map, and keep CS2 from changing map itself.</summary>
+    private void CycleOnMapStart()
+    {
+        if (!CycleActive) { _cycleLoading = -1; return; }
+        var byName = _cycle!.Maps.FindIndex(e => e.Map != null && e.Map.Equals(Server.MapName, StringComparison.OrdinalIgnoreCase));
+        _cycleIndex = byName >= 0 ? byName : _cycleLoading >= 0 ? _cycleLoading : -1;
+        _cycleLoading = -1;
+        PickNext();
+        Server.ExecuteCommand("mp_match_end_changelevel 0; mp_match_end_restart 0; mp_match_restart_delay 25");
+    }
+
+    private void PickNext()
+    {
+        var n = _cycle?.Maps.Count ?? 0;
+        if (n < 2) { _cycleNext = -1; return; }
+        if (_cycle!.Random)
+        {
+            var pick = Random.Shared.Next(n - (_cycleIndex >= 0 ? 1 : 0));
+            _cycleNext = _cycleIndex >= 0 && pick >= _cycleIndex ? pick + 1 : pick;
+        }
+        else _cycleNext = (_cycleIndex + 1) % n;
+    }
+
+    [ConsoleCommand("cs2panel_mapcycle_reload", "Re-reads the map cycle written by cs2-panel")]
+    [CommandHelper(whoCanExecute: CommandUsage.SERVER_ONLY)]
+    public void OnCycleReload(CCSPlayerController? caller, CommandInfo command)
+    {
+        LoadCycle();
+        if (CycleActive) Server.ExecuteCommand("mp_match_end_changelevel 0; mp_match_end_restart 0; mp_match_restart_delay 25");
+        command.ReplyToCommand(CycleActive ? $"cs2panel: map cycle with {_cycle!.Maps.Count} maps" : "cs2panel: no map cycle");
+    }
+
+    [ConsoleCommand("cs2panel_mapcycle_status", "Reports the map cycle for the panel")]
+    [CommandHelper(whoCanExecute: CommandUsage.SERVER_ONLY)]
+    public void OnCycleStatus(CCSPlayerController? caller, CommandInfo command)
+    {
+        string? next = null;
+        if (CycleActive && _cycleNext >= 0 && _cycleNext < _cycle!.Maps.Count)
+        {
+            var e = _cycle.Maps[_cycleNext];
+            next = e.Workshop != null ? $"workshop:{e.Workshop}" : e.Map;
+        }
+        command.ReplyToCommand(CycleMarker + JsonSerializer.Serialize(new { active = CycleActive, next }, Json));
     }
 
     /// <summary>Match players can't switch to the other team.</summary>
@@ -518,6 +615,23 @@ public class MatchFile
     /// <summary>A config under cfg/ run after every map load, before the match's own settings.</summary>
     public string? Exec { get; set; }
     public List<MatchPlayer> Players { get; set; } = new();
+}
+
+public class MapCycleFile
+{
+    public int Version { get; set; }
+    /// <summary>Only when the server runs Casual and the cycle has 2 or more maps.</summary>
+    public bool Active { get; set; }
+    public bool Random { get; set; }
+    public List<MapCycleEntry> Maps { get; set; } = new();
+}
+
+public class MapCycleEntry
+{
+    /// <summary>An installed map, e.g. de_dust2.</summary>
+    public string? Map { get; set; }
+    /// <summary>A Workshop map's ID.</summary>
+    public string? Workshop { get; set; }
 }
 
 public class MatchBot

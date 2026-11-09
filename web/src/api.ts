@@ -80,6 +80,12 @@ export interface Preset {
   execConfigs: string[];
 }
 
+/** Maps a Casual server moves through at the end of each match (installed names or workshop:ID). */
+export interface MapCycle {
+  maps: string[];
+  random: boolean;
+}
+
 export type PresetInput = Omit<Preset, "id" | "key" | "builtin">;
 
 export interface HostInfo {
@@ -564,6 +570,9 @@ export const api = {
   deletePreset: (id: number) => request<{ serversUsing: number }>("DELETE", `/api/presets/${id}`),
   saveAsPreset: (serverId: number, name: string, description: string) =>
     request<{ preset: Preset }>("POST", `/api/servers/${serverId}/save-preset`, { name, description }),
+  mapCycle: (serverId: number) =>
+    request<{ mapCycle: MapCycle; casual: boolean; bridge: boolean; next: string | null }>("GET", `/api/servers/${serverId}/map-cycle`),
+  setMapCycle: (serverId: number, cycle: MapCycle) => request<{ mapCycle: MapCycle }>("PUT", `/api/servers/${serverId}/map-cycle`, cycle),
   setExecConfigs: (serverId: number, configs: string[]) => request<{ execConfigs: string[] }>("PUT", `/api/servers/${serverId}/exec-configs`, { configs }),
   checkPort: (port: number, serverId?: number) => request<{ problem: string | null }>("GET", `/api/ports/check?${q({ port, serverId })}`),
 

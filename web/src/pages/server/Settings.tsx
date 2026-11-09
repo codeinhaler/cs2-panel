@@ -5,7 +5,7 @@ import { useAction, useApp } from "../../app-context";
 import { PortField } from "../../components/PortField";
 import { MapPicker } from "../../components/MapPicker";
 import { SchedulePanel } from "./Schedule";
-import { ConfigsToRunPanel, SaveAsPresetPanel } from "./SettingsExtras";
+import { ConfigsToRunPanel, MapCyclePanel, SaveAsPresetPanel } from "./SettingsExtras";
 
 export function SettingsTab({ server: s, detail, onSaved }: { server: Server; detail: ServerDetail; onSaved: () => void }) {
   const { can, toast } = useApp();
@@ -100,14 +100,7 @@ export function SettingsTab({ server: s, detail, onSaved }: { server: Server; de
               <span>Max players</span>
               <input inputMode="numeric" value={maxPlayers} onChange={(e) => setMaxPlayers(e.target.value)} required />
             </label>
-            <PortField
-              value={port}
-              onChange={setPort}
-              host={host}
-              serverId={s.id}
-              disabled={running}
-              disabledHint="Stop the server to change its port."
-            />
+            <PortField value={port} onChange={setPort} host={host} serverId={s.id} disabled={running} disabledHint="Stop the server to change its port." />
             <label className="field">
               <span>CPU core</span>
               <select value={cpu} onChange={(e) => setCpu(e.target.value)}>
@@ -161,6 +154,7 @@ export function SettingsTab({ server: s, detail, onSaved }: { server: Server; de
         </div>
       </form>
 
+      <MapCyclePanel server={s} />
       <ConfigsToRunPanel server={s} current={detail.execConfigs} onSaved={onSaved} />
       <SchedulePanel server={s} />
       <SaveAsPresetPanel server={s} />
@@ -220,8 +214,8 @@ function DeletePanel({ server: s }: { server: Server }) {
     <div className="panel">
       <h2 style={{ marginBottom: 6 }}>Delete server</h2>
       <p className="hint" style={{ marginTop: 0 }}>
-        Stops the server and removes it from the panel. Its config files and plugins are archived on the machine for 30 days. Remember to
-        remove the port forward for UDP {s.port}.
+        Stops the server and removes it from the panel. Its config files and plugins are archived on the machine for 30 days. Remember to remove the port
+        forward for UDP {s.port}.
       </p>
       <button className="btn danger" onClick={() => dialog.current?.showModal()}>
         Delete {s.name}
