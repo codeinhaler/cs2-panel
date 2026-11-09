@@ -30,7 +30,7 @@ namespace Cs2PanelBridge;
 public class Cs2PanelBridge : BasePlugin
 {
     public override string ModuleName => "CS2 Panel Bridge";
-    public override string ModuleVersion => "1.7.2";
+    public override string ModuleVersion => "1.7.3";
     public override string ModuleAuthor => "cs2-panel";
     public override string ModuleDescription => "Enforces cs2-panel bans, locks matchmaking matches and reports players to the panel.";
 
@@ -366,32 +366,6 @@ public class Cs2PanelBridge : BasePlugin
         return HookResult.Continue;
     }
 
-    /// <summary>Puts a player on a free-looking spawn point of their team.</summary>
-    private static void MoveToSpawn(CCSPlayerController player)
-    {
-        if (!player.IsValid || !player.PawnIsAlive) return;
-        var pawn = player.PlayerPawn.Value;
-        if (pawn == null) return;
-        var name = (CsTeam)player.TeamNum == CsTeam.Terrorist ? "info_player_terrorist" : "info_player_counterterrorist";
-        var spawns = Utilities.FindAllEntitiesByDesignerName<SpawnPoint>(name).Where(sp => sp.IsValid && sp.AbsOrigin != null).ToList();
-        if (spawns.Count == 0) return;
-        var others = Utilities.GetPlayers()
-            .Where(p => p.IsValid && p != player && p.PawnIsAlive && p.PlayerPawn.Value?.AbsOrigin != null)
-            .Select(p => p.PlayerPawn.Value!.AbsOrigin!)
-            .ToList();
-        // The spawn furthest from anyone else, so nobody ends up inside another player.
-        var spot = spawns
-            .OrderByDescending(sp => others.Count == 0 ? 0 : others.Min(o => Distance(o, sp.AbsOrigin!)))
-            .First();
-        pawn.Teleport(spot.AbsOrigin!, spot.AbsRotation ?? new QAngle(0, 0, 0), new Vector(0, 0, 0));
-    }
-
-    private static float Distance(Vector a, Vector b)
-    {
-        float dx = a.X - b.X, dy = a.Y - b.Y, dz = a.Z - b.Z;
-        return MathF.Sqrt(dx * dx + dy * dy + dz * dz);
-    }
-
     /// <summary>A spawned player should walk, never fly through walls (a spawn racing a team change can leave them in noclip).</summary>
     private static void FixNoclip(CCSPlayerController player)
     {
@@ -507,23 +481,17 @@ public class Cs2PanelBridge : BasePlugin
     {
         if (_match == null || !player.IsValid || !_matchPlayers.ContainsKey(player.SteamID)) return;
         var want = DesiredTeam(player.SteamID);
-        if ((CsTeam)player.TeamNum != want) player.ChangeTeam(want);
-        RespawnInWarmup(player);
+        if ((CsTeam)player.TeamNum != want) JoinTeam(player, want);
     }
 
-    /// <summary>In warmup, someone just put on a team spawns right away instead of watching a bot.</summary>
-    private void RespawnInWarmup(CCSPlayerController player)
+    /// <summary>
+    /// Puts a player on a team the way the team menu does, so the game spawns them properly (in warmup too).
+    /// A forced team change plus Respawn() gave the first player a broken body: stuck in the map, or invisible.
+    /// </summary>
+    private static void JoinTeam(CCSPlayerController player, CsTeam team)
     {
-        if (!IsWarmup()) return;
-        // Warmup normally spawns a player who joins a team by itself. Only step in when that hasn't happened:
-        // respawning while the game is spawning them too can leave the first player flying around in noclip.
-        AddTimer(2.5f, () =>
-        {
-            if (!player.IsValid || !IsWarmup() || player.PawnIsAlive || (CsTeam)player.TeamNum is not (CsTeam.Terrorist or CsTeam.CounterTerrorist)) return;
-            player.Respawn();
-            // Respawn() leaves the body where the team-select camera was, often inside the map: move it to a real spawn.
-            AddTimer(0.1f, () => MoveToSpawn(player));
-        });
+        if ((CsTeam)player.TeamNum is CsTeam.None or CsTeam.Spectator) player.ExecuteClientCommandFromServer($"jointeam {(int)team} 1");
+        else player.ChangeTeam(team);
     }
 
     /// <summary>The match's password and bot, from match.json. Safe to run again and again.</summary>
@@ -653,8 +621,7 @@ public class Cs2PanelBridge : BasePlugin
         var t = others.Count(p => (CsTeam)p.TeamNum == CsTeam.Terrorist);
         var ct = others.Count(p => (CsTeam)p.TeamNum == CsTeam.CounterTerrorist);
         var pick = t < ct ? CsTeam.Terrorist : ct < t ? CsTeam.CounterTerrorist : (Random.Shared.Next(2) == 0 ? CsTeam.Terrorist : CsTeam.CounterTerrorist);
-        player.ChangeTeam(pick);
-        RespawnInWarmup(player);
+        JoinTeam(player, pick);
     }
 
     // ------------------------------------------------------------- bans
