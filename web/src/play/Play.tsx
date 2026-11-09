@@ -587,6 +587,7 @@ function MatchCard({ match: m, meId, skew, busy, act, mine }: { match: Match; me
               <a className="btn primary play-big" href={m.joinInfo.steamUrl}>
                 Join the server
               </a>
+              <p className="play-cs2-first">Start CS2 first, then press Join.</p>
               <CopyLine label="Or paste in the CS2 console" text={m.joinInfo.console} />
             </div>
           )}
@@ -772,6 +773,7 @@ function CasualCard({ state }: { state: State }) {
             <a className={`btn primary ${s.online ? "" : "disabled"}`} href={s.online ? s.joinInfo.steamUrl : undefined} aria-disabled={!s.online}>
               Join the server
             </a>
+            <p className="play-cs2-first">Start CS2 first, then press Join.</p>
             <CopyLine
               label={s.joinInfo.password ? `Or paste in the CS2 console (password ${s.joinInfo.password})` : "Or paste in the CS2 console"}
               text={s.joinInfo.console}
