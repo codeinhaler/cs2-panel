@@ -397,7 +397,7 @@ export interface MatchmakingSettings {
   port: number;
   title: string;
   serverIds: number[];
-  modes: Record<"competitive" | "wingman" | "duel", { enabled: boolean; maps: string[] }>;
+  modes: Record<"competitive" | "wingman" | "duel", { enabled: boolean; maps: string[]; config: string }>;
   botDifficulty: number;
   look: MmLook;
   casual: { name: string; serverIds: number[] };

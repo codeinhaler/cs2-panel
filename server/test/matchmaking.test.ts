@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cleanModeConfig, winRoundsFromConfig } from "../src/matchmaking/mode-config.js";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { FastifyInstance } from "fastify";
@@ -870,5 +871,48 @@ describe("matchmaking site", () => {
     const mine = m.teamA.some((p: any) => p.steamId === P[0]) ? chA : chB;
     expect(m.discord).toEqual({ channel: mine, invite: "https://discord.gg/fredag" });
     expect((await play(cookies[2]!, "GET", "/api/state")).body.matches[0].discord).toBeNull();
+  });
+
+  it("runs the lobby's rules config after each map load, without the lines that fight the match", async () => {
+    const owner = await adminCookie();
+    const serverId = await setupServer(owner);
+    // Before anyone saves a config, 1v1 comes with the aim-duel rules.
+    expect((await admin(owner, "GET", "/api/matchmaking")).body.settings.modes.duel.config).toMatch(/mp_maxrounds 30/);
+    const duelCfg = "mp_maxrounds 30 // first to 16\nmp_startmoney 16000; sv_password nope\nbot_quota 2\nmp_warmup_end\nmp_restartgame 1\n";
+    await enable(owner, [serverId], {
+      modes: {
+        competitive: { enabled: true, maps: ["de_mirage"], config: "" },
+        wingman: { enabled: false, maps: ["de_vertigo"], config: "" },
+        duel: { enabled: true, maps: ["de_vertigo"], config: duelCfg },
+      },
+    });
+    const cookies = await Promise.all(P.slice(0, 2).map((id, i) => playerCookie(id, ["Alpha", "Bravo"][i]!)));
+    for (const c of cookies) await play(c, "POST", "/api/lobby/join", { mode: "duel" });
+    await play(cookies[0]!, "POST", "/api/teams");
+    const draft = (await play(cookies[0]!, "GET", "/api/state")).body.drafts[0];
+    const { matchId } = (await play(cookies[0]!, "POST", `/api/teams/${draft.id}/start`)).body;
+    const m = (await play(cookies[0]!, "GET", "/api/state")).body.matches[0];
+    const picker = m.sidePicker === "a" ? m.captainA : m.captainB;
+    await play(cookies[P.indexOf(picker)]!, "POST", `/api/matches/${matchId}/side`, { side: "t" });
+    await settle(async () => (await play(cookies[0]!, "GET", "/api/state")).body.matches[0].phase !== "starting");
+    expect((await play(cookies[0]!, "GET", "/api/state")).body.matches[0].phase).toBe("live");
+
+    const [cfgFile] = findFile(dir, "cs2panel_match.cfg");
+    const cfg = readFileSync(cfgFile!, "utf8");
+    expect(cfg).toContain("mp_maxrounds 30\nmp_startmoney 16000\n");
+    expect(cfg).not.toMatch(/sv_password|bot_quota|mp_warmup_end|mp_restartgame|first to/);
+    expect(JSON.parse(readFileSync(findFile(dir, "match.json")[0]!, "utf8")).exec).toBe("cs2panel_match.cfg");
+  });
+});
+
+describe("lobby rules config", () => {
+  it("drops comments and match-controlled commands, and reads the rounds to win", () => {
+    expect(cleanModeConfig("// x\nmp_freezetime 2 // short\nmap de_dust2; mp_buytime 15\nexec other.cfg")).toEqual({
+      text: "mp_freezetime 2\nmp_buytime 15",
+      ignored: ["map", "exec"],
+    });
+    expect(winRoundsFromConfig("mp_maxrounds 30")).toBe(16);
+    expect(winRoundsFromConfig('mp_maxrounds "24"\nmp_maxrounds 16')).toBe(9);
+    expect(winRoundsFromConfig("mp_freezetime 2")).toBeNull();
   });
 });

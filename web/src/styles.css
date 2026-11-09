@@ -1699,3 +1699,20 @@ details.inline-form[open] > summary {
   word-break: break-all;
   font-size: 0.85rem;
 }
+
+.mm-config {
+  margin-top: 10px;
+}
+.mm-config summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.mm-config textarea {
+  width: 100%;
+  margin-top: 8px;
+  font-size: 0.85rem;
+}
+.mm-config small {
+  display: block;
+  margin-top: 6px;
+}

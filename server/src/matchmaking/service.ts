@@ -19,6 +19,7 @@ import { LeetifyClient, leetifyProfileUrl } from "./leetify.js";
 import { workshopBlocks, type WorkshopInfo } from "../game/workshop.js";
 import { DEFAULT_LOOK, LookSchema, type ImageKind, type SiteImages } from "./look.js";
 import type { MmPlayer, MmPlayerStore } from "./players.js";
+import { DUEL_CONFIG, MATCH_CFG, cleanModeConfig, winRoundsFromConfig } from "./mode-config.js";
 
 /** Where the bridge reads the current match, relative to game/csgo. */
 export const MATCH_FILE = "addons/counterstrikesharp/configs/plugins/Cs2PanelBridge/match.json";
@@ -71,7 +72,12 @@ const MapList = z
     (maps) => maps.every((m) => ["stock", "workshop"].includes(parseMapSpec(m)?.kind ?? "")),
     "Each map must be a map name like de_mirage or a Workshop map (workshop:ID). Collections can't be voted on.",
   );
-const ModeSettings = z.object({ enabled: z.boolean(), maps: MapList });
+const ModeSettings = z.object({
+  enabled: z.boolean(),
+  maps: MapList,
+  /** Run on the match server after every map load (e.g. 1v1 rules). Empty: the game mode's own rules. */
+  config: z.string().max(20_000, "The config is too long (20,000 characters at most).").default(""),
+});
 const DiscordChannel = z
   .string()
   .trim()
@@ -126,9 +132,9 @@ export const DEFAULT_SETTINGS: MatchmakingSettings = {
   title: "CS night",
   serverIds: [],
   modes: {
-    competitive: { enabled: true, maps: DEFAULT_MAPS },
-    wingman: { enabled: true, maps: ["de_inferno", "de_nuke", "de_overpass", "de_vertigo"] },
-    duel: { enabled: true, maps: ["de_inferno", "de_nuke", "de_vertigo"] },
+    competitive: { enabled: true, maps: DEFAULT_MAPS, config: "" },
+    wingman: { enabled: true, maps: ["de_inferno", "de_nuke", "de_overpass", "de_vertigo"], config: "" },
+    duel: { enabled: true, maps: ["de_inferno", "de_nuke", "de_vertigo"], config: DUEL_CONFIG },
   },
   botDifficulty: 1,
   look: DEFAULT_LOOK,
@@ -398,9 +404,10 @@ export class Matchmaking {
   config(): MatchmakingSettings {
     const stored = this.d.settings.get<Partial<MatchmakingSettings> & { maps?: string[] }>("matchmaking", {});
     const { maps: legacyMaps, ...rest } = stored;
-    const modes = { ...DEFAULT_SETTINGS.modes, ...(stored.modes ?? {}) };
+    const modes = { ...DEFAULT_SETTINGS.modes };
+    for (const k of MODES) if (stored.modes?.[k]) modes[k] = { ...DEFAULT_SETTINGS.modes[k], ...stored.modes[k] };
     // Before lobbies there was one map pool, for Competitive.
-    if (!stored.modes && legacyMaps?.length) modes.competitive = { enabled: true, maps: legacyMaps };
+    if (!stored.modes && legacyMaps?.length) modes.competitive = { ...modes.competitive, enabled: true, maps: legacyMaps };
     return {
       ...DEFAULT_SETTINGS,
       ...rest,
@@ -1012,6 +1019,19 @@ export class Matchmaking {
     return this.d.rcon({ port: s.port, password: s.rconPassword, timeoutMs }, command);
   }
 
+  /** Writes the lobby's config for the bridge to run after each map load (empty file when there is none). */
+  private async modeConfigFile(s: ServerRecord, mode: Mode): Promise<void> {
+    const file = path.join(await this.d.files.liveDir(s.slug), "game", "csgo", "cfg", MATCH_CFG);
+    await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o2775 });
+    const { text } = cleanModeConfig(this.config().modes[mode].config);
+    await writeAtomic(file, `// Written by CS2 Panel for ${MODE_INFO[mode].label} matches. Edit it on the Matchmaking page.\n${text}\n`, 0o664);
+  }
+
+  /** Rounds a team needs to win: from the lobby's config (mp_maxrounds) or the mode's default. */
+  private winRounds(mode: Mode): number {
+    return winRoundsFromConfig(this.config().modes[mode].config) ?? WIN_ROUNDS[mode];
+  }
+
   private async matchFile(s: ServerRecord, content: unknown): Promise<void> {
     const file = path.join(await this.d.files.liveDir(s.slug), "game", "csgo", MATCH_FILE);
     await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o2775 });
@@ -1032,6 +1052,7 @@ export class Matchmaking {
       matchId: String(m.id),
       mode: m.mode,
       password: m.password,
+      exec: cleanModeConfig(this.config().modes[m.mode].config).text ? MATCH_CFG : null,
       bot: this.botActive(m) ? { side: m.bot === "a" ? m.sideA : sideB, difficulty: this.config().botDifficulty } : null,
       players: [
         ...humans(m.teamA).map((p) => ({ steamId: p.steamId, name: p.name, team: m.sideA, group: "a" })),
@@ -1045,6 +1066,7 @@ export class Matchmaking {
       const s = this.d.servers.require(m.serverId);
       if (!this.d.hasBridge(s.id)) throw new Error(`${s.name} doesn't have the CS2 Panel Bridge plugin.`);
       m.released = false;
+      await this.modeConfigFile(s, m.mode);
       await this.matchFile(s, this.matchFileContent(m));
 
       if ((await this.d.host.serviceStatus(s.slug)).state !== "active") {
@@ -1243,7 +1265,7 @@ export class Matchmaking {
     if (!entry || entry.mode !== m.mode) return no(`Join the ${MODE_INFO[m.mode].label} lobby to join this match.`);
     if (this.activeMatchOf(steamId)) return no("You're in another match.");
     if (!this.lateJoinsOpen(m)) return no("The captains have closed this match to new players.");
-    if (m.score && Math.max(m.score.a, m.score.b) >= WIN_ROUNDS[m.mode] - LATE_JOIN_CUTOFF) return no("Too late to join: the match is nearly over.");
+    if (m.score && Math.max(m.score.a, m.score.b) >= this.winRounds(m.mode) - LATE_JOIN_CUTOFF) return no("Too late to join: the match is nearly over.");
     if (room.length === 1) return { team: room[0]!, reason: null };
     // Both have room: the losing team, or on a tie (or before the first round) the team with the lower total rating.
     if (m.score && m.score.a !== m.score.b) return { team: m.score.a < m.score.b ? "a" : "b", reason: null };

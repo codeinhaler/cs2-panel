@@ -352,11 +352,11 @@ function LobbySettings({
   onTitle,
 }: {
   mode: (typeof MODES)[number];
-  value: { enabled: boolean; maps: string[] };
+  value: { enabled: boolean; maps: string[]; config: string };
   stock: string[];
   manage: boolean;
   names: Record<string, string>;
-  onChange: (v: { enabled: boolean; maps: string[] }) => void;
+  onChange: (v: { enabled: boolean; maps: string[]; config: string }) => void;
   onTitle: (map: string, title: string) => void;
 }) {
   const [workshop, setWorkshop] = useState("");
@@ -422,6 +422,25 @@ function LobbySettings({
           <p className="hint" style={{ margin: "8px 0 0" }}>
             {value.maps.length} map{value.maps.length === 1 ? "" : "s"} in the pool.
           </p>
+          <details className="mm-config" open={false}>
+            <summary>
+              Rules config <span className="hint">{value.config.trim() ? "· in use" : "· none, the game mode's own rules"}</span>
+            </summary>
+            <textarea
+              className="mono"
+              rows={12}
+              value={value.config}
+              onChange={(e) => onChange({ ...value, config: e.target.value })}
+              disabled={!manage}
+              spellCheck={false}
+              placeholder={"mp_maxrounds 24\nmp_freezetime 10"}
+              aria-label={`Rules config for ${text.label}`}
+            />
+            <small className="hint">
+              Runs on the match server after every map load, then the match's password and bot settings are put back on top. Lines that would fight the match
+              are skipped: warmup and restart commands, map changes, sv_password, bot_ commands, exec. Needs CS2 Panel Bridge 1.5.0.
+            </small>
+          </details>
         </>
       )}
     </div>

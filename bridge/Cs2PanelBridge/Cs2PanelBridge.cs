@@ -28,7 +28,7 @@ namespace Cs2PanelBridge;
 public class Cs2PanelBridge : BasePlugin
 {
     public override string ModuleName => "CS2 Panel Bridge";
-    public override string ModuleVersion => "1.4.0";
+    public override string ModuleVersion => "1.5.0";
     public override string ModuleAuthor => "cs2-panel";
     public override string ModuleDescription => "Enforces cs2-panel bans, locks matchmaking matches and reports players to the panel.";
 
@@ -69,6 +69,8 @@ public class Cs2PanelBridge : BasePlugin
             // and bots. Put the match's own settings back once those have run.
             AddTimer(2.0f, () =>
             {
+                // The lobby's own config (e.g. 1v1 rules) first, then the match's settings on top.
+                ExecMatchConfig();
                 HoldWarmup();
                 ApplyCasual();
                 ApplyMatchSettings();
@@ -222,6 +224,14 @@ public class Cs2PanelBridge : BasePlugin
             if (!_matchPlayers.ContainsKey(player.SteamID)) KickOutsider(player);
             else Place(player);
         }
+    }
+
+    /// <summary>Runs the config the panel wrote for this match's lobby (a plain file name under cfg/).</summary>
+    private void ExecMatchConfig()
+    {
+        if (_match == null || _matchOver || string.IsNullOrEmpty(_match.Exec)) return;
+        if (!System.Text.RegularExpressions.Regex.IsMatch(_match.Exec, @"^[A-Za-z0-9_\-]+\.cfg$")) return;
+        Server.ExecuteCommand($"exec {_match.Exec}");
     }
 
     /// <summary>Warmup goes on until everyone is in (or the players start the match from the site).</summary>
@@ -505,6 +515,8 @@ public class MatchFile
     public string? Password { get; set; }
     /// <summary>The one bot filling a short team, or none.</summary>
     public MatchBot? Bot { get; set; }
+    /// <summary>A config under cfg/ run after every map load, before the match's own settings.</summary>
+    public string? Exec { get; set; }
     public List<MatchPlayer> Players { get; set; } = new();
 }
 
