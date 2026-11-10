@@ -203,7 +203,7 @@ public class Cs2PanelBridge : BasePlugin
         }
         var status = new MatchStatus(_match != null, _match?.MatchId ?? "", phase, MatchPlayersOnline().Count(), _matchPlayers.Count, scoreA, scoreB, _mapLoads, Server.MapName, _matchOver ? Math.Round(Server.CurrentTime - _matchOverAt, 1) : 0,
             // For the panel's check after a match: is everyone gone, and is the server's own password back?
-            Utilities.GetPlayers().Count(p => p is { IsValid: true, IsBot: false, IsHLTV: false } && p.Connected == PlayerConnectedState.PlayerConnected),
+            Utilities.GetPlayers().Count(p => p is { IsValid: true, IsBot: false, IsHLTV: false } && (int)p.Connected == 0), // 0 = fully connected
             ConVar.Find("sv_password")?.StringValue ?? "");
         command.ReplyToCommand(MatchMarker + JsonSerializer.Serialize(status, Json));
     }
