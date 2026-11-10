@@ -166,7 +166,9 @@ function describe(e: AuditEntry): string {
       return `installed ${str("plugin")} ${str("version")}${extra}`;
     }
     case "plugin.update":
-      return `updated ${str("plugin")} to ${str("version")}`;
+      return d.automatic
+        ? `updated ${str("plugin")} from ${str("from")} to ${str("version")} automatically (nobody was on the server)`
+        : `updated ${str("plugin")} to ${str("version")}`;
     case "plugin.rollback":
       return `rolled ${str("plugin")} back from ${str("from")} to ${str("to")}`;
     case "plugin.remove":

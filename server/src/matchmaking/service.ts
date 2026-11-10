@@ -376,6 +376,8 @@ export interface MatchmakingDeps {
   players: MmPlayerStore;
   servers: ServerService;
   hasBridge: (serverId: number) => boolean;
+  /** A plugin is being installed or updated on the server (it may be restarting). */
+  pluginBusy?: (serverId: number) => boolean;
   files: InstanceFiles;
   host: Host;
   rcon: RconExec;
@@ -837,6 +839,7 @@ export class Matchmaking {
         };
       }
       if (c) return { id: s.id, name: s.name, state: "freeing" as const, label: "Being emptied after a match" };
+      if (this.d.pluginBusy?.(s.id)) return { id: s.id, name: s.name, state: "freeing" as const, label: "Updating a plugin" };
       if (!this.d.hasBridge(s.id)) return { id: s.id, name: s.name, state: "no-bridge" as const, label: "Needs CounterStrikeSharp (with CS2 Panel Bridge)" };
       const people = this.peopleOn(s.id);
       if (people > 0) return { id: s.id, name: s.name, state: "people" as const, label: `${people} ${people === 1 ? "person" : "people"} on it` };
@@ -1278,6 +1281,11 @@ export class Matchmaking {
   }
 
   // ------------------------------------------------------------- cleanup after a match
+
+  /** Matchmaking is using the server: a match on it, its scoreboard time, or its cleanup afterwards. */
+  inUse(serverId: number): boolean {
+    return this.matches.some((m) => m.serverId === serverId && (isActive(m) || !m.released)) || this.cleanups.has(serverId);
+  }
 
   /** Hands a server to the cleanup (or runs it again if it's already waiting). Saved, so a restart picks it up. */
   private queueCleanup(serverId: number, reason: string): void {

@@ -1,4 +1,5 @@
 import type { BackupService } from "../backups/service.js";
+import type { BridgeAutoUpdate } from "../plugins/bridge-autoupdate.js";
 import type { Monitor } from "../monitor/monitor.js";
 import type { RestartScheduler } from "./restarts.js";
 import type { UpdateWatcher } from "./updates.js";
@@ -7,6 +8,8 @@ import type { UpdateWatcher } from "./updates.js";
 export class Automation {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
+  /** Set once matchmaking exists (it needs to know which servers are in a match). */
+  bridge: BridgeAutoUpdate | null = null;
 
   constructor(
     readonly updates: UpdateWatcher,
@@ -24,6 +27,7 @@ export class Automation {
       // Updates first: an update restarts every server anyway.
       await this.updates.tick(now).catch(() => undefined);
       await this.restarts.tick(now).catch(() => undefined);
+      await this.bridge?.tick(now).catch(() => undefined);
       // Nightly backups run in the background; the next tick sees them as busy.
       void this.backups?.tick(now).catch(() => undefined);
       await sampling;

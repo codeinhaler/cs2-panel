@@ -89,7 +89,8 @@ export const CATALOG: CatalogEntry[] = [
   {
     id: "cs2panel-bridge",
     name: "CS2 Panel Bridge",
-    description: "Comes with the panel. Enforces the panel's bans and shows players' SteamIDs.",
+    description:
+      "Comes with the panel. Enforces the panel's bans, shows players' SteamIDs and runs matchmaking. Updates itself after a panel update, once nobody is on the server.",
     homepage: "https://github.com/codeinhaler/cs2-panel/tree/main/bridge",
     source: { type: "bundled", file: "cs2panel-bridge.zip" },
     requires: ["counterstrikesharp"],

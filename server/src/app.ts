@@ -31,6 +31,7 @@ import { BanService, BRIDGE_ID } from "./players/bans.js";
 import { MapMenuService } from "./plugins/map-menu.js";
 import { ExecConfigService, withBlock } from "./servers/exec-configs.js";
 import { MapCycleService, isCasual } from "./servers/map-cycle.js";
+import { BridgeAutoUpdate } from "./plugins/bridge-autoupdate.js";
 import { SharedConfigService, withoutSharedBlock } from "./servers/shared-config.js";
 import { WorkshopLookup, workshopBlocks } from "./game/workshop.js";
 import { parseMapSpec } from "./servers/map-spec.js";
@@ -199,6 +200,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     players: mmPlayers,
     servers,
     hasBridge: (id) => bans.hasBridge(id),
+    pluginBusy: (id) => plugins.isBusy(id),
     files,
     host,
     rcon,
@@ -210,6 +212,13 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     workshop: (id) => workshop.lookup(id, "map"),
     ...(deps.matchmakingClock ?? {}),
   });
+  // After a panel update, each server gets the bridge from this release once it's empty and not in a match.
+  automation.bridge = new BridgeAutoUpdate(
+    plugins,
+    () => servers.listRecords(),
+    humans,
+    (id) => matchmaking.inUse(id),
+  );
   const tls = new TlsService({
     settings,
     box,

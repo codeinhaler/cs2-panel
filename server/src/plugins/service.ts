@@ -13,7 +13,6 @@ import { extractArchive, isPreservedConfig, listFiles, mapArchiveFiles } from ".
 import { CATALOG, catalogEntry, dependencyOrder, type CatalogEntry, type DatabaseSettings } from "./catalog.js";
 import type { PluginRelease, PluginSources } from "./sources.js";
 
-
 interface InstallRow {
   id: number;
   server_id: number;
@@ -64,7 +63,6 @@ interface Prepared {
   extractDir: string;
   mapping: Map<string, string>;
 }
-
 
 export interface PluginInstallSnapshot {
   pluginId: string;
@@ -216,12 +214,32 @@ export class PluginService {
   }
 
   /** Installs or updates a catalog plugin, installing missing dependencies first. */
-  async install(serverId: number, pluginId: string, version: string | undefined, actorId: number) {
+  /** A plugin change is running for this server right now (it may be restarting). */
+  isBusy(serverId: number): boolean {
+    return this.busy.has(serverId);
+  }
+
+  /** The installed version of a plugin, or null. */
+  installedVersion(serverId: number, pluginId: string): string | null {
+    return this.currentOne(serverId, pluginId)?.version ?? null;
+  }
+
+  /** The newest version the panel can install (for the bridge: the one in this panel release). */
+  async latestVersion(pluginId: string): Promise<string | null> {
+    const entry = catalogEntry(pluginId);
+    if (!entry) return null;
+    const rel = await this.sources.releases(entry).catch(() => []);
+    return (rel.find((r) => !r.prerelease && r.asset) ?? null)?.version ?? null;
+  }
+
+  /** actorId null: the panel did it by itself (automatic bridge update). */
+  async install(serverId: number, pluginId: string, version: string | undefined, actorId: number | null) {
     const entry = catalogEntry(pluginId);
     if (!entry) throw notFound("Unknown plugin.");
     return this.lock(serverId, async () => {
       const server = this.servers.require(serverId);
       const have = new Set(this.installedIds(serverId));
+      const from = this.currentOne(serverId, pluginId)?.version ?? null;
       const plan = [...dependencyOrder(pluginId).filter((d) => !have.has(d)), pluginId];
       // Companions (the panel's own bridge) come along with the plugin they belong to.
       for (const id of [...plan]) {
@@ -243,6 +261,7 @@ export class PluginService {
           version: prepared.at(-1)!.version,
           alsoInstalled: prepared.slice(0, -1).map((p) => `${p.name} ${p.version}`),
           restarted,
+          ...(actorId === null ? { automatic: true, from } : {}),
         });
         return { installed: summary, restarted };
       } finally {
@@ -300,7 +319,11 @@ export class PluginService {
     if (!/\.(zip|tar\.gz|tgz)$/i.test(fileName)) throw badRequest("Upload a .zip or .tar.gz file.");
     if (data.length === 0) throw badRequest("The file is empty.");
     const base = fileName.replace(/\.(zip|tar\.gz|tgz)$/i, "").replace(/[-_ ]v?\d[\w.]*$/, "");
-    const name = base.replace(/[^\w .-]/g, "").trim().slice(0, 48) || "Custom plugin";
+    const name =
+      base
+        .replace(/[^\w .-]/g, "")
+        .trim()
+        .slice(0, 48) || "Custom plugin";
     const pluginId = `custom:${slugify(name)}`;
     if (catalogEntry(pluginId.slice(7))) throw badRequest(`${name} is in the catalog; install it from there instead.`);
     return this.lock(serverId, async () => {
@@ -322,7 +345,14 @@ export class PluginService {
   /** Copies another server's plugin records (Duplicate copies the files themselves). */
   /** The plugin records a backup keeps, so a restore can put the Plugins tab back as it was. */
   snapshotInstalls(serverId: number): PluginInstallSnapshot[] {
-    return this.current(serverId).map((r) => ({ pluginId: r.plugin_id, name: r.name, version: r.version, asset: r.asset, files: r.files, installedAt: r.installed_at }));
+    return this.current(serverId).map((r) => ({
+      pluginId: r.plugin_id,
+      name: r.name,
+      version: r.version,
+      asset: r.asset,
+      files: r.files,
+      installedAt: r.installed_at,
+    }));
   }
 
   /** Replaces a server's plugin records with the ones from a backup (its files are restored separately). */
@@ -427,21 +457,28 @@ export class PluginService {
   }
 
   /** Writes prepared plugins into the server's layer with the overlay down, then restarts it if it was running. */
-  private async apply(server: ServerRecord, prepared: Prepared[], actorId: number) {
+  private async apply(server: ServerRecord, prepared: Prepared[], actorId: number | null) {
     return this.servers.withUnmounted(server, { restart: true }, async () => {
       for (const p of prepared) await this.applyOne(server, p, actorId);
       await this.files.regenerateGameinfo(server.slug);
-      for (const hook of this.afterApply) await hook(server, prepared.map((p) => p.id));
+      for (const hook of this.afterApply)
+        await hook(
+          server,
+          prepared.map((p) => p.id),
+        );
     });
   }
 
-  private async applyOne(server: ServerRecord, p: Prepared, actorId: number): Promise<void> {
+  private async applyOne(server: ServerRecord, p: Prepared, actorId: number | null): Promise<void> {
     const csgo = path.join(this.files.upperDir(server.slug), "game", "csgo");
     const prev = this.currentOne(server.id, p.id);
     const newFiles = new Set(p.mapping.values());
     if (prev) {
       // Files the old version had and the new one doesn't.
-      await this.removeFiles(server, (JSON.parse(prev.files) as string[]).filter((f) => !newFiles.has(f)));
+      await this.removeFiles(
+        server,
+        (JSON.parse(prev.files) as string[]).filter((f) => !newFiles.has(f)),
+      );
     }
     for (const [src, dest] of p.mapping) {
       const target = path.join(csgo, dest);
