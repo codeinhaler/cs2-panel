@@ -224,6 +224,15 @@ const MIGRATIONS: string[] = [
   /* 11: map cycle for Casual servers, run by the bridge */ `
   ALTER TABLE servers ADD COLUMN map_cycle TEXT;
   `,
+  /* 12: match servers waiting to be cleaned up after a match (survives restarts) */ `
+  CREATE TABLE mm_cleanup (
+    server_id INTEGER PRIMARY KEY,
+    reason TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  `,
 ];
 
 export function openDb(file: string): Db {

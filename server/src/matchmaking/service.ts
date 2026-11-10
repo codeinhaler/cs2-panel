@@ -218,6 +218,26 @@ interface Match {
   botVotes: { a: boolean; b: boolean };
 }
 
+/**
+ * A match server waiting to be cleaned up after a match: everyone kicked, no match in the bridge, its own
+ * password back. Kept in mm_cleanup too, so it survives a panel restart. The server isn't used for another
+ * match until the cleanup has run and been checked.
+ */
+interface Cleanup {
+  serverId: number;
+  reason: string;
+  attempts: number;
+  lastError: string | null;
+  nextAt: number;
+  running: boolean;
+  /** Something touched the server while the cleanup ran (e.g. a launch that was cancelled): run it again. */
+  again: boolean;
+}
+
+/** Retries after a failed cleanup: 5 s, 10 s, 20 s … at most 5 minutes apart. */
+export const cleanupDelay = (attempts: number) => Math.min(5_000 * 2 ** Math.max(attempts - 1, 0), 5 * 60_000);
+const INACTIVE_MATCH = { version: 1, active: false, players: [] };
+
 interface LobbyEntry {
   steamId: string;
   mode: Mode;
@@ -388,6 +408,8 @@ export class Matchmaking {
   private nextDraftId = 1;
   private timer: NodeJS.Timeout | null = null;
   private lastPoll = 0;
+  /** Match servers whose cleanup hasn't been done and checked yet, by server ID. */
+  private cleanups = new Map<number, Cleanup>();
   /** Workshop map titles from Steam, by "workshop:ID". */
   private mapTitles = new Map<string, string>();
   private imageVersions: Record<ImageKind, number | null> = { icon: null, banner: null };
@@ -451,7 +473,7 @@ export class Matchmaking {
     // A casual server is never used for matches.
     next.serverIds = [...new Set(next.serverIds)].filter((id) => known.has(id) && !next.casual.serverIds.includes(id));
     for (const id of next.casual.serverIds) {
-      if (this.matches.some((m) => m.serverId === id && (isActive(m) || !m.released))) {
+      if (this.matches.some((m) => m.serverId === id && (isActive(m) || !m.released)) || this.cleanups.has(id)) {
         throw badRequest(`${this.d.servers.require(id).name} is running a match right now. Make it casual when the match is over.`);
       }
     }
@@ -532,9 +554,29 @@ export class Matchmaking {
     }[];
     for (const row of open) {
       this.d.db.prepare("UPDATE mm_matches SET status = 'abandoned', note = 'The panel restarted', ended_at = datetime('now') WHERE id = ?").run(row.id);
-      if (row.server_id)
-        await this.unlockServer(row.server_id, "The match was ended (the panel restarted). Back to the site for the next one.").catch(() => undefined);
+      if (row.server_id) this.queueCleanup(row.server_id, "The match was ended (the panel restarted). Back to the site for the next one.");
     }
+    // Cleanups that were still pending when the panel stopped, plus the ones above. Failures are retried by tick().
+    const pending = this.d.db.prepare("SELECT server_id, reason, attempts, last_error FROM mm_cleanup").all() as {
+      server_id: number;
+      reason: string;
+      attempts: number;
+      last_error: string | null;
+    }[];
+    for (const row of pending) {
+      const c = this.cleanups.get(row.server_id);
+      if (c) continue;
+      this.cleanups.set(row.server_id, {
+        serverId: row.server_id,
+        reason: row.reason,
+        attempts: row.attempts,
+        lastError: row.last_error,
+        nextAt: 0,
+        running: false,
+        again: false,
+      });
+    }
+    for (const id of [...this.cleanups.keys()]) await this.runCleanup(id);
   }
 
   start(): void {
@@ -566,6 +608,8 @@ export class Matchmaking {
         await this.finish(m, "over", null);
       }
     }
+
+    for (const c of this.cleanups.values()) if (!c.running && t >= c.nextAt) void this.runCleanup(c.serverId);
 
     if (t - this.lastCasual >= POLL_MS && this.config().casual.serverIds.length) void this.refreshCasual();
     if (t - this.lastPoll >= POLL_MS) {
@@ -772,11 +816,27 @@ export class Matchmaking {
   }
 
   /** Why each match server is or isn't free, for the panel and the site. */
-  serverStates(): { id: number; name: string; state: "free" | "in-match" | "freeing" | "people" | "no-bridge"; label: string }[] {
+  serverStates(): {
+    id: number;
+    name: string;
+    state: "free" | "in-match" | "freeing" | "cleanup-failed" | "people" | "no-bridge";
+    label: string;
+  }[] {
     return this.poolRecords().map((s) => {
       const holder = this.matches.find((m) => m.serverId === s.id && (isActive(m) || !m.released));
       if (holder && isActive(holder)) return { id: s.id, name: s.name, state: "in-match" as const, label: `Running match ${holder.id}` };
-      if (holder) return { id: s.id, name: s.name, state: "freeing" as const, label: "Being emptied after a match" };
+      if (holder) return { id: s.id, name: s.name, state: "freeing" as const, label: "Showing the scoreboard, then emptied" };
+      const c = this.cleanups.get(s.id);
+      if (c && c.attempts > 0) {
+        const wait = Math.max(0, Math.ceil((c.nextAt - this.now()) / 1000));
+        return {
+          id: s.id,
+          name: s.name,
+          state: "cleanup-failed" as const,
+          label: `Couldn't be emptied after a match (tried ${c.attempts}×: ${c.lastError ?? "unknown error"}). ${c.running ? "Trying again now" : `Trying again in ${wait} s`}`,
+        };
+      }
+      if (c) return { id: s.id, name: s.name, state: "freeing" as const, label: "Being emptied after a match" };
       if (!this.d.hasBridge(s.id)) return { id: s.id, name: s.name, state: "no-bridge" as const, label: "Needs CounterStrikeSharp (with CS2 Panel Bridge)" };
       const people = this.peopleOn(s.id);
       if (people > 0) return { id: s.id, name: s.name, state: "people" as const, label: `${people} ${people === 1 ? "person" : "people"} on it` };
@@ -883,9 +943,16 @@ export class Matchmaking {
     const c = this.requireEnabled();
     const d = this.requireDraft(by, draftId);
     const split = d.splits[d.index]!;
-    const server = (await this.freeServers())[0];
-    if (!server) throw badRequest("Every matchmaking server is busy. Wait for a match to finish.");
+    const candidates = await this.freeServers();
     if (this.drafts.get(d.mode) !== d) throw badRequest("Those teams aren't up any more.");
+    // Checked again without waiting in between, so two teams starting at once can't get the same server.
+    const stillFree = new Set(
+      this.serverStates()
+        .filter((x) => x.state === "free")
+        .map((x) => x.id),
+    );
+    const server = candidates.find((x) => stillFree.has(x.id));
+    if (!server) throw badRequest("Every matchmaking server is busy. Wait for a match to finish.");
     this.drafts.delete(d.mode);
 
     const teamA = split.a.map((i) => d.players[i]!);
@@ -1075,9 +1142,11 @@ export class Matchmaking {
     try {
       const s = this.d.servers.require(m.serverId);
       if (!this.d.hasBridge(s.id)) throw new Error(`${s.name} doesn't have the CS2 Panel Bridge plugin.`);
+      if (!isActive(m)) return;
       m.released = false;
       await this.modeConfigFile(s, m.mode);
       await this.matchFile(s, this.matchFileContent(m));
+      if (this.recleanIfEnded(m)) return;
 
       if ((await this.d.host.serviceStatus(s.slug)).state !== "active") {
         m.status = "Starting the server";
@@ -1085,7 +1154,7 @@ export class Matchmaking {
       }
       m.status = "Waiting for the server to answer";
       await this.waitForBridge(s, m);
-      if (!isActive(m)) return;
+      if (this.recleanIfEnded(m)) return;
 
       m.status = "Loading the map";
       const before = await this.status(s).catch(() => null);
@@ -1095,7 +1164,7 @@ export class Matchmaking {
       // A full map load in the lobby's mode; the bridge keeps warmup going until everyone is in.
       const info = MODE_INFO[m.mode];
       await this.exec(s, gameModeLine(info.gameType, info.gameMode, m.map!), 15_000).catch(() => undefined);
-      if (!isActive(m)) return;
+      if (this.recleanIfEnded(m)) return;
       // Only hand out the Join button once the server has loaded the map and runs this match.
       await this.waitForMatch(s, m, before?.mapLoads ?? null);
       if (!isActive(m)) return;
@@ -1105,7 +1174,7 @@ export class Matchmaking {
       m.status = "Server ready. Join now; the match starts when everyone is in.";
       this.save(m);
     } catch (e) {
-      if (!isActive(m)) return;
+      if (this.recleanIfEnded(m)) return;
       await this.finish(m, "cancelled", `Couldn't start the match: ${(e as Error).message}`);
     }
   }
@@ -1195,10 +1264,10 @@ export class Matchmaking {
           : phase === "cancelled"
             ? "The match was cancelled. Back to the site for the next one."
             : "The match was ended. Back to the site for the next one.";
-      // The server stays reserved until it's empty and unlocked, so a new match can't grab it halfway.
-      await this.unlockServer(m.serverId, reason).catch(() => undefined);
+      // The match is done; the server is handed to the cleanup, and only used again once that has been checked.
       m.released = true;
-      this.freedAt.set(m.serverId, this.now());
+      this.queueCleanup(m.serverId, reason);
+      await this.runCleanup(m.serverId);
     }
     this.d.audit.record(null, `matchmaking.${phase === "over" ? "finished" : phase}`, m.serverId, {
       match: m.id,
@@ -1208,23 +1277,135 @@ export class Matchmaking {
     });
   }
 
-  /** Empties the server (kicking everyone with a reason), then opens it again: no player list, no bot, its own password. */
-  private async unlockServer(serverId: number, kickReason: string | null = null): Promise<void> {
+  // ------------------------------------------------------------- cleanup after a match
+
+  /** Hands a server to the cleanup (or runs it again if it's already waiting). Saved, so a restart picks it up. */
+  private queueCleanup(serverId: number, reason: string): void {
+    const c = this.cleanups.get(serverId);
+    if (c) {
+      c.reason = reason;
+      c.nextAt = 0;
+      if (c.running) c.again = true;
+    } else {
+      this.cleanups.set(serverId, { serverId, reason, attempts: 0, lastError: null, nextAt: 0, running: false, again: false });
+    }
+    this.d.db
+      .prepare(
+        `INSERT INTO mm_cleanup (server_id, reason) VALUES (?, ?)
+         ON CONFLICT(server_id) DO UPDATE SET reason = excluded.reason`,
+      )
+      .run(serverId, reason);
+  }
+
+  /**
+   * A launch, late join or bot vote that was still talking to the server when its match ended may have put
+   * match settings back on it: queue the cleanup again. Returns true when the match has ended.
+   */
+  private recleanIfEnded(m: Match): boolean {
+    if (isActive(m)) return false;
+    if (m.released) this.queueCleanup(m.serverId, "The match was ended. Back to the site for the next one.");
+    return true;
+  }
+
+  /** Runs one cleanup attempt (never two at once for a server). True when the server is clean and free again. */
+  private async runCleanup(serverId: number): Promise<boolean> {
+    const c = this.cleanups.get(serverId);
+    if (!c || c.running) return false;
+    c.running = true;
+    c.again = false;
+    try {
+      await this.cleanServer(serverId, c.reason);
+      if (c.again) {
+        c.nextAt = 0;
+        return false;
+      }
+      this.cleanups.delete(serverId);
+      this.d.db.prepare("DELETE FROM mm_cleanup WHERE server_id = ?").run(serverId);
+      // The bridge has just confirmed nobody is on it: the panel's people count can lag behind for a bit.
+      this.freedAt.set(serverId, this.now());
+      if (c.attempts > 0) this.d.audit.record(null, "matchmaking.cleanup_done", serverId, { attempts: c.attempts + 1 });
+      return true;
+    } catch (e) {
+      c.attempts++;
+      c.lastError = (e as Error).message || String(e);
+      c.nextAt = this.now() + cleanupDelay(c.attempts);
+      this.d.db.prepare("UPDATE mm_cleanup SET attempts = ?, last_error = ? WHERE server_id = ?").run(c.attempts, c.lastError, serverId);
+      console.warn(`matchmaking: cleaning up server ${serverId} failed (attempt ${c.attempts}): ${c.lastError}`);
+      if (c.attempts === 1 || c.attempts % 10 === 0) {
+        this.d.audit.record(null, "matchmaking.cleanup_failed", serverId, { attempts: c.attempts, error: c.lastError });
+      }
+      return false;
+    } finally {
+      c.running = false;
+    }
+  }
+
+  /**
+   * Empties a match server and checks it, so the next match gets a clean server. Throws when an essential
+   * step fails or can't be confirmed; the cleanup is then retried. Safe to run again and again.
+   *
+   * Essential (checked): everyone kicked and gone; no match in match.json; the bridge has dropped the
+   * match; the server's own password back. Best effort: removing bots and going back to the server's own
+   * game mode and map (nobody is on it, and the next match loads its own mode and map anyway).
+   */
+  private async cleanServer(serverId: number, reason: string): Promise<void> {
     const s = this.d.servers.listRecords().find((x) => x.id === serverId);
-    if (!s) return;
+    if (!s) return; // The server was deleted: nothing to clean.
     const running = (await this.d.host.serviceStatus(s.slug)).state === "active";
-    if (running && kickReason) await this.exec(s, `cs2panel_kick_all "${kickReason.replace(/["\;\r\n]/g, "")}"`).catch(() => undefined);
-    await this.matchFile(s, { version: 1, active: false, players: [] });
-    if (!running) return;
-    await this.exec(s, "cs2panel_match_reload").catch(() => undefined);
+
+    if (running) {
+      // 1. Everyone off, and confirmed gone (a kick that silently didn't happen shows up here).
+      await this.exec(s, `cs2panel_kick_all "${reason.replace(/["\\;\r\n]/g, "")}"`);
+      let st = await this.status(s);
+      for (let i = 0; st.humans !== undefined && st.humans > 0 && i < 4; i++) {
+        await this.sleep(1000);
+        st = await this.status(s);
+      }
+      if (st.humans !== undefined && st.humans > 0) throw new Error(`${st.humans} ${st.humans === 1 ? "person is" : "people are"} still on it after the kick`);
+    }
+
+    // 2. No match for the bridge, also for a stopped server: it's what the bridge reads when it starts.
+    await this.matchFile(s, INACTIVE_MATCH);
+    if (!running) return; // The password and game mode come from the server's own settings when it starts.
+
+    // 3. The bridge has dropped the match (no player list, team lock or match password any more).
+    await this.exec(s, "cs2panel_match_reload");
+    const after = await this.status(s);
+    if (after.active) throw new Error("The CS2 Panel Bridge still has the match loaded");
+
+    // 4. Its own password back, checked through the bridge where it can tell us.
+    const own = (s.password ?? "").replace(/["\\;\r\n]/g, "");
+    await this.exec(s, `sv_password "${own}"`);
+    const pw = await this.status(s);
+    if (pw.password !== undefined && pw.password !== own) throw new Error("The server's own password didn't come back");
+
+    // 5. Best effort.
     await this.exec(s, "bot_quota 0; bot_kick; bot_join_team any").catch(() => undefined);
-    await this.exec(s, `sv_password "${(s.password ?? "").replace(/["\\;\r\n]/g, "")}"`).catch(() => undefined);
-    // Back to the server's own game mode and map, which also clears the lobby's rules config (e.g. 1v1).
     try {
       await this.exec(s, gameModeLine(s.gameType, s.gameMode, s.map), 15_000).catch(() => undefined);
     } catch {
       // The server's own map isn't one we can load by command; it keeps the match's map until its next change.
     }
+  }
+
+  /** Admin: try a server's cleanup again now. */
+  async retryCleanup(serverId: number, actorId: number): Promise<void> {
+    if (!this.cleanups.has(serverId)) throw badRequest("That server isn't waiting to be cleaned up.");
+    this.d.audit.record(actorId, "matchmaking.cleanup_retry", serverId, {});
+    await this.runCleanup(serverId);
+  }
+
+  /** Admin: the server has been sorted out by hand (e.g. restarted); free it without the cleanup. */
+  async releaseServer(serverId: number, actorId: number): Promise<void> {
+    const c = this.cleanups.get(serverId);
+    if (!c) throw badRequest("That server isn't waiting to be cleaned up.");
+    if (c.running) throw badRequest("The cleanup is running right now. Try again in a moment.");
+    const s = this.d.servers.listRecords().find((x) => x.id === serverId);
+    // At least make sure the bridge won't load the old match again.
+    if (s) await this.matchFile(s, INACTIVE_MATCH);
+    this.cleanups.delete(serverId);
+    this.d.db.prepare("DELETE FROM mm_cleanup WHERE server_id = ?").run(serverId);
+    this.d.audit.record(actorId, "matchmaking.cleanup_skipped", serverId, { attempts: c.attempts, error: c.lastError });
   }
 
   private save(m: Match, note: string | null = null): void {
@@ -1346,6 +1527,7 @@ export class Matchmaking {
       const captain = this.displayName(this.player(teamKey === "a" ? m.captainA : m.captainB));
       const line = `${joiner.name} is joining ${captain}'s team${replacesBot ? " in place of the bot" : ""}`.replace(/[";\r\n]/g, "");
       await this.exec(s, `say ${line}`).catch(() => undefined);
+      this.recleanIfEnded(m);
     }
     return teamKey;
   }
@@ -1363,6 +1545,7 @@ export class Matchmaking {
     const s = this.d.servers.require(m.serverId);
     await this.matchFile(s, this.matchFileContent(m));
     await this.exec(s, "cs2panel_match_reload").catch(() => undefined);
+    this.recleanIfEnded(m);
   }
 
   setLateJoins(by: string, matchId: number, allow: boolean): void {
@@ -1570,6 +1753,10 @@ export function parseMatchStatus(output: string): {
   mapLoads?: number;
   map?: string;
   overSeconds?: number;
+  /** Everyone on the server (bridge 1.8.0 and newer). */
+  humans?: number;
+  /** The server's current sv_password (bridge 1.8.0 and newer). */
+  password?: string;
 } {
   const line = output.split(/\r?\n/).find((l) => l.includes(MATCH_MARKER));
   if (!line) throw new Error("The bridge didn't answer. Is it up to date?");
@@ -1586,5 +1773,7 @@ export function parseMatchStatus(output: string): {
     mapLoads: num(v.mapLoads),
     map: str(v.map),
     overSeconds: num(v.overSeconds),
+    humans: num(v.humans),
+    password: str(v.password),
   };
 }

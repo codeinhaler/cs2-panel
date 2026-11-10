@@ -62,6 +62,15 @@ export function MatchmakingPage() {
   const pageUrl = data.site.port ? `http://${window.location.hostname}:${data.site.port}` : null;
   const poolServers = data.servers.filter((s) => form.serverIds.includes(s.id));
   const missingBridge = poolServers.filter((s) => !s.hasBridge);
+  const cleanup = async (serverId: number, action: "retry" | "release") => {
+    if (
+      action === "release" &&
+      !window.confirm("Free this server for matches without the cleanup? Only do this after checking it by hand (nobody on it, its own password).")
+    )
+      return;
+    await run(() => api.matchmakingCleanup(serverId, action), action === "retry" ? "Tried the cleanup again." : "Server freed for matches.");
+    void refresh();
+  };
   const stateOf = (name: string) => data.state.serverStates?.find((x) => x.name === name);
 
   return (
@@ -137,10 +146,25 @@ export function MatchmakingPage() {
                   {form.serverIds.includes(s.id) && !form.casual.serverIds.includes(s.id) && stateOf(s.name) && (
                     <span
                       className="state-pill"
-                      data-state={{ free: "active", "no-bridge": "failed" }[stateOf(s.name)!.state] ?? "activating"}
+                      data-state={{ free: "active", "no-bridge": "failed", "cleanup-failed": "failed" }[stateOf(s.name)!.state] ?? "activating"}
                       style={{ marginLeft: 10 }}
                     >
                       {stateOf(s.name)!.label}
+                    </span>
+                  )}
+                  {stateOf(s.name)?.state === "cleanup-failed" && moderate && (
+                    <span className="row-actions" style={{ marginLeft: 8, display: "inline-flex" }}>
+                      <button type="button" className="btn small" onClick={() => void cleanup(s.id, "retry")}>
+                        Try again now
+                      </button>
+                      <button
+                        type="button"
+                        className="btn ghost small"
+                        title="Only after you've checked the server by hand (e.g. restarted it): frees it for matches without the cleanup."
+                        onClick={() => void cleanup(s.id, "release")}
+                      >
+                        It's clean: free it
+                      </button>
                     </span>
                   )}
                   {form.casual.serverIds.includes(s.id) ? (

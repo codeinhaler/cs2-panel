@@ -171,7 +171,9 @@ export async function buildPublicApp(d: PublicDeps): Promise<FastifyInstance> {
       }),
       discord: s.casual.discord,
     };
-    return { ...s, casual, matches: s.matches.map((m) => withJoin(req, m)) };
+    // Players don't need the error details of a failed cleanup; the panel shows them.
+    const serverStates = s.serverStates.map((x) => (x.state === "cleanup-failed" ? { ...x, state: "freeing", label: "Being emptied after a match" } : x));
+    return { ...s, serverStates, casual, matches: s.matches.map((m) => withJoin(req, m)) };
   });
 
   // ------------------------------------------------------------- lobby

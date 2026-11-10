@@ -1317,6 +1317,16 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     return { ok: true };
   });
 
+  // A match server whose cleanup keeps failing: try again now, or free it after sorting it out by hand.
+  app.post("/api/matchmaking/servers/:id/cleanup", async (req) => {
+    const user = requirePerm(req, "players.moderate");
+    const { id } = idParam.parse(req.params);
+    const { action } = z.object({ action: z.enum(["retry", "release"]) }).parse(req.body ?? {});
+    if (action === "retry") await matchmaking.retryCleanup(id, user.id);
+    else await matchmaking.releaseServer(id, user.id);
+    return { ok: true };
+  });
+
   // ------------------------------------------------------------- HTTPS for the matchmaking site
 
   app.get("/api/tls", async (req) => {

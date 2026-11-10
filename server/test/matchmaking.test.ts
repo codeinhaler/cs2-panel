@@ -12,7 +12,7 @@ import { choosePlayers, rankSplits } from "../src/matchmaking/balance.js";
 import { parseProfile } from "../src/matchmaking/leetify.js";
 import { hostOnly } from "../src/matchmaking/public-app.js";
 import { imageType, inkOn, themeCss } from "../src/matchmaking/look.js";
-import { parseMatchStatus } from "../src/matchmaking/service.js";
+import { cleanupDelay, parseMatchStatus } from "../src/matchmaking/service.js";
 
 describe("team balancing", () => {
   it("tries every split once and puts the most even first", () => {
@@ -102,10 +102,22 @@ let rconLog: string[];
 let statusReply: string;
 let leetifyCalls: number;
 let mapLoads: number;
+/** The fake server: people on it, its sv_password, and commands that fail (like an RCON timeout). */
+let humansOn: number;
+let serverPassword: string;
+let failRcon: RegExp | null;
+let kickWorks: boolean;
+/** When set, a matching RCON command waits for the promise first (to make two things overlap). */
+let rconGate: { match: RegExp; wait: Promise<void> } | null;
+let passwordSticks: boolean;
+let config: Config;
+/** Kept across a restart: the game servers keep running when the panel restarts. */
+let host: FakeHost;
+let fetchFn: typeof fetch;
 
 async function setup() {
   dir = mkdtempSync(path.join(tmpdir(), "cs2panel-mm-"));
-  const config: Config = {
+  config = {
     host: "127.0.0.1",
     port: 0,
     ownerSteamId: OWNER,
@@ -129,8 +141,14 @@ async function setup() {
   rconLog = [];
   leetifyCalls = 0;
   mapLoads = 0;
+  humansOn = 0;
+  serverPassword = "";
+  failRcon = null;
+  kickWorks = true;
+  rconGate = null;
+  passwordSticks = true;
   statusReply = `CS2PANEL_MATCH {"active":true,"phase":"warmup","connected":0,"scoreA":0,"scoreB":0}`;
-  const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
+  fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
     const u = new URL(String(url));
     if (u.hostname === "api-public.cs-prod.leetify.com") {
       leetifyCalls++;
@@ -152,16 +170,27 @@ async function setup() {
     }
     return new Response("<profile></profile>");
   }) as typeof fetch;
+  host = new FakeHost(config.cs2Root, config.instanceEnvDir);
+  await boot();
+}
+
+/** Builds the panel on this test's files and database; called again to act like a restart. */
+async function boot() {
   app = await buildApp({
     config,
     db: openDb(path.join(dir, "panel.db")),
-    host: new FakeHost(config.cs2Root, config.instanceEnvDir),
+    host,
     fetchFn,
     logLevel: "silent",
     pluginCheckDelayMs: 0,
     matchmakingClock: { now: () => now, sleep: async (ms) => void (now += ms), random: () => 0 },
     rcon: async (o, cmd) => {
       rconLog.push(cmd);
+      if (rconGate?.match.test(cmd)) await rconGate.wait;
+      if (failRcon?.test(cmd)) throw new Error("RCON timed out");
+      if (cmd.startsWith("cs2panel_kick_all") && kickWorks) humansOn = 0;
+      const pw = /^sv_password "(.*)"$/.exec(cmd);
+      if (pw && passwordSticks) serverPassword = pw[1]!;
       if (cmd === "cs2panel_version") return "cs2panel bridge 1.1.0, 0 bans";
       if (/^game_type \d+; game_mode \d+; map /.test(cmd)) mapLoads++;
       if (cmd === "cs2panel_match_status") {
@@ -169,7 +198,11 @@ async function setup() {
         const v = JSON.parse(statusReply.slice("CS2PANEL_MATCH ".length));
         const file = findFile(dir, "match.json")[0];
         const loaded = file ? JSON.parse(readFileSync(file, "utf8")) : null;
+        // The bridge has whatever match.json held at its last reload; tests that don't care get the file's state.
+        v.active = !!loaded?.active;
         if (v.matchId === undefined) v.matchId = loaded?.active ? loaded.matchId : "";
+        v.humans = humansOn;
+        v.password = serverPassword;
         if (v.mapLoads === undefined) v.mapLoads = mapLoads;
         return `CS2PANEL_MATCH ${JSON.stringify(v)}`;
       }
@@ -474,11 +507,14 @@ describe("matchmaking site", () => {
     now += 25_000;
     await app.services.matchmaking.tick();
     expect(JSON.parse(readFileSync(matchFile!, "utf8")).active).toBe(false);
-    expect(rconLog.at(-2)).toBe('sv_password ""');
+    // Everyone kicked first, then the bridge drops the match, then the server's own password; each checked.
+    const at = (cmd: string) => rconLog.lastIndexOf(cmd);
+    const kick = at('cs2panel_kick_all "Match over, thanks for playing! Back to the site for the next match."');
+    expect(kick).toBeGreaterThanOrEqual(0);
+    expect(at("cs2panel_match_reload")).toBeGreaterThan(kick);
+    expect(at('sv_password ""')).toBeGreaterThan(at("cs2panel_match_reload"));
     // And back to its own mode and map, which also drops the lobby's rules config.
     expect(rconLog.at(-1)).toMatch(/^game_type \d+; game_mode \d+; map /);
-    // Everyone was kicked first, so the server is really free for the next match.
-    expect(rconLog).toContain('cs2panel_kick_all "Match over, thanks for playing! Back to the site for the next match."');
 
     const panel = (await admin(owner, "GET", "/api/matchmaking")).body;
     expect(panel.history[0]).toMatchObject({ status: "over", map: "de_mirage", scoreA: 13, scoreB: 9 });
@@ -928,6 +964,290 @@ describe("matchmaking site", () => {
     expect(cfg).toContain("mp_maxrounds 30\nmp_startmoney 16000\n");
     expect(cfg).not.toMatch(/sv_password|bot_quota|mp_warmup_end|mp_restartgame|first to/);
     expect(JSON.parse(readFileSync(findFile(dir, "match.json")[0]!, "utf8"))).toMatchObject({ exec: "cs2panel_match.cfg", keepWeapons: true });
+  });
+
+  // ------------------------------------------------------------- cleanup after a match
+
+  describe("server cleanup after a match", () => {
+    let owner: string;
+    let serverId: number;
+    let cookies: string[];
+
+    const db = () => (app.services.servers as any).store.db;
+    const cleanupRows = () => db().prepare("SELECT server_id, attempts, last_error FROM mm_cleanup").all() as any[];
+    const serverState = async () => (await admin(owner, "GET", "/api/matchmaking")).body.state.serverStates[0];
+    const matchJson = () => JSON.parse(readFileSync(findFile(dir, "match.json")[0]!, "utf8"));
+    const kicks = () => rconLog.filter((c) => c.startsWith("cs2panel_kick_all")).length;
+
+    /** These two make teams and start a 1v1 (anyone else leaves the lobby). Returns the failing reply if there's no server. */
+    async function startDuel(cs: string[]) {
+      for (const c of cookies) if (!cs.includes(c)) await play(c, "POST", "/api/lobby/leave");
+      for (const c of cs) await play(c, "POST", "/api/lobby/join", { mode: "duel" });
+      let draft = (await play(cs[0]!, "GET", "/api/state")).body.drafts[0];
+      if (!draft) {
+        const teams = await play(cs[0]!, "POST", "/api/teams");
+        if (teams.status !== 200) return teams;
+        draft = (await play(cs[0]!, "GET", "/api/state")).body.drafts[0];
+      }
+      return play(cs[0]!, "POST", `/api/teams/${draft.id}/start`);
+    }
+
+    /** A live 1v1 on the one match server, with both players on it. */
+    async function liveDuel(): Promise<number> {
+      owner = await adminCookie();
+      serverId = await setupServer(owner);
+      await enable(owner, [serverId]);
+      cookies = await Promise.all(P.slice(0, 4).map((id, i) => playerCookie(id, ["Alpha", "Bravo", "Charlie", "Delta"][i]!)));
+      const { matchId } = (await startDuel(cookies.slice(0, 2))).body;
+      expect(matchId).toBeTypeOf("number");
+      const m = await toLive(cookies, P, matchId);
+      expect(m.phase).toBe("live");
+      expect(serverPassword).toBe(m.joinInfo.password);
+      humansOn = 2;
+      return matchId;
+    }
+
+    /** The key check: the server can't go to another match. */
+    async function expectNotAssignable() {
+      expect((await admin(owner, "GET", "/api/matchmaking")).body.state.freeServers).toBe(0);
+      const res = await startDuel(cookies.slice(2, 4));
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/busy/);
+    }
+
+    async function retryAfter(ms: number) {
+      now += ms;
+      await app.services.matchmaking.tick();
+      await settle(async () => cleanupRows().every((r) => !app.services.matchmaking["cleanups"].get(r.server_id)?.running));
+    }
+
+    async function expectCleanAndFree() {
+      expect(cleanupRows()).toEqual([]);
+      expect(await serverState()).toMatchObject({ state: "free" });
+      expect(matchJson().active).toBe(false);
+      expect(serverPassword).toBe("");
+      expect(humansOn).toBe(0);
+    }
+
+    it("cleans up, checks it, and frees the server", async () => {
+      const id = await liveDuel();
+      await play(cookies[0]!, "POST", `/api/matches/${id}/cancel`);
+      await expectCleanAndFree();
+      expect(kicks()).toBe(1);
+      expect((await startDuel(cookies.slice(2, 4))).status).toBe(200);
+    });
+
+    it("keeps the server out after an RCON timeout, and retries with growing delays", async () => {
+      const id = await liveDuel();
+      failRcon = /^cs2panel_kick_all/;
+      await play(cookies[0]!, "POST", `/api/matches/${id}/cancel`);
+      expect(cleanupRows()).toMatchObject([{ server_id: serverId, attempts: 1, last_error: "RCON timed out" }]);
+      expect(await serverState()).toMatchObject({ state: "cleanup-failed", label: expect.stringMatching(/RCON timed out.*Trying again in 5 s/) });
+      await expectNotAssignable();
+
+      // Not before the delay is up; then 5 s, 10 s.
+      await retryAfter(4_000);
+      expect(kicks()).toBe(1);
+      await retryAfter(1_000);
+      expect(kicks()).toBe(2);
+      expect(cleanupRows()[0].attempts).toBe(2);
+      await retryAfter(9_000);
+      expect(kicks()).toBe(2);
+      failRcon = null;
+      await retryAfter(1_000);
+      await expectCleanAndFree();
+      expect((await startDuel(cookies.slice(2, 4))).status).toBe(200);
+    });
+
+    it("doesn't trust a kick that didn't empty the server", async () => {
+      const id = await liveDuel();
+      kickWorks = false;
+      await play(cookies[0]!, "POST", `/api/matches/${id}/cancel`);
+      expect(cleanupRows()[0].last_error).toBe("2 people are still on it after the kick");
+      // The match settings stay on while people are still there.
+      expect(matchJson().active).toBe(true);
+      await expectNotAssignable();
+      kickWorks = true;
+      await retryAfter(5_000);
+      await expectCleanAndFree();
+    });
+
+    it("keeps the server out when the bridge doesn't drop the match", async () => {
+      const id = await liveDuel();
+      failRcon = /^cs2panel_match_reload$/;
+      await play(cookies[0]!, "POST", `/api/matches/${id}/cancel`);
+      expect(cleanupRows()[0].last_error).toBe("RCON timed out");
+      await expectNotAssignable();
+      failRcon = null;
+      await retryAfter(5_000);
+      await expectCleanAndFree();
+    });
+
+    it("keeps the server out until its own password is back", async () => {
+      const id = await liveDuel();
+      failRcon = /^sv_password ""$/;
+      await play(cookies[0]!, "POST", `/api/matches/${id}/cancel`);
+      expect(cleanupRows()[0].last_error).toBe("RCON timed out");
+      // The command goes through but the password doesn't change: caught by the bridge's check.
+      failRcon = null;
+      passwordSticks = false;
+      await retryAfter(5_000);
+      expect(cleanupRows()[0]).toMatchObject({ attempts: 2, last_error: "The server's own password didn't come back" });
+      await expectNotAssignable();
+      passwordSticks = true;
+      await retryAfter(10_000);
+      await expectCleanAndFree();
+    });
+
+    it("keeps the server out when match.json can't be written", async () => {
+      const id = await liveDuel();
+      const file = findFile(dir, "match.json")[0]!;
+      rmSync(file);
+      mkdirSync(file); // Something in the way: the write fails.
+      await play(cookies[0]!, "POST", `/api/matches/${id}/cancel`);
+      expect(cleanupRows()[0].attempts).toBe(1);
+      await expectNotAssignable();
+      rmSync(file, { recursive: true });
+      await retryAfter(5_000);
+      await expectCleanAndFree();
+    });
+
+    it("finishes the cleanup without RCON when the server stops in the middle", async () => {
+      const id = await liveDuel();
+      failRcon = /./;
+      await play(cookies[0]!, "POST", `/api/matches/${id}/cancel`);
+      expect(await serverState()).toMatchObject({ state: "cleanup-failed" });
+      await expectNotAssignable();
+      expect((await admin(owner, "POST", `/api/servers/${serverId}/stop`)).status).toBe(200);
+      rconLog = [];
+      await retryAfter(5_000);
+      // A stopped server needs no RCON: match.json is all the bridge reads when it starts.
+      expect(rconLog).toEqual([]);
+      expect(cleanupRows()).toEqual([]);
+      expect(matchJson().active).toBe(false);
+      expect(await serverState()).toMatchObject({ state: "free" });
+    });
+
+    it("cleans up a stopped server from its files alone", async () => {
+      const id = await liveDuel();
+      await admin(owner, "POST", `/api/servers/${serverId}/stop`);
+      rconLog = [];
+      await play(cookies[0]!, "POST", `/api/matches/${id}/cancel`);
+      expect(rconLog).toEqual([]);
+      expect(matchJson().active).toBe(false);
+      expect(cleanupRows()).toEqual([]);
+      expect(await serverState()).toMatchObject({ state: "free" });
+    });
+
+    it("picks up pending cleanups and running matches after a restart", async () => {
+      const id = await liveDuel();
+      failRcon = /./;
+      // The panel restarts while the match runs and RCON is down.
+      await site.close();
+      await app.fastify.close();
+      await boot();
+      await app.services.matchmaking.recover();
+      const rows = cleanupRows();
+      expect(rows).toMatchObject([{ server_id: serverId, attempts: 1 }]);
+      expect(db().prepare("SELECT status FROM mm_matches WHERE id = ?").get(id).status).toBe("abandoned");
+      expect(await serverState()).toMatchObject({ state: "cleanup-failed" });
+      expect((await admin(owner, "GET", "/api/matchmaking")).body.state.freeServers).toBe(0);
+
+      // And again, with the cleanup still pending from before.
+      await site.close();
+      await app.fastify.close();
+      await boot();
+      await app.services.matchmaking.recover();
+      expect(cleanupRows()[0].attempts).toBe(2);
+      failRcon = null;
+      await retryAfter(10_000);
+      await expectCleanAndFree();
+    });
+
+    it("never runs two cleanups of a server at once", async () => {
+      const id = await liveDuel();
+      let open!: () => void;
+      rconGate = { match: /^cs2panel_kick_all/, wait: new Promise<void>((r) => (open = r)) };
+      const cancelling = play(cookies[0]!, "POST", `/api/matches/${id}/cancel`);
+      await settle(async () => kicks() === 1);
+      // Meanwhile: the timer, an admin's "try again", and a restart-style recover.
+      now += 60_000;
+      await app.services.matchmaking.tick();
+      await admin(owner, "POST", `/api/matchmaking/servers/${serverId}/cleanup`, { action: "retry" });
+      expect(kicks()).toBe(1);
+      expect(await serverState()).toMatchObject({ state: "freeing" });
+      open();
+      await cancelling;
+      expect(kicks()).toBe(1);
+      await expectCleanAndFree();
+    });
+
+    it("cleans up again when a match is cancelled while the server is still starting it", async () => {
+      owner = await adminCookie();
+      serverId = await setupServer(owner);
+      await enable(owner, [serverId]);
+      cookies = await Promise.all(P.slice(0, 4).map((id, i) => playerCookie(id, ["Alpha", "Bravo", "Charlie", "Delta"][i]!)));
+      // The launch hangs just before it sets the match password.
+      let open!: () => void;
+      rconGate = { match: /^sv_password "[^"]+"$/, wait: new Promise<void>((r) => (open = r)) };
+      const { matchId } = (await startDuel(cookies.slice(0, 2))).body;
+      let m = (await play(cookies[0]!, "GET", "/api/state")).body.matches[0];
+      await play(cookies[P.indexOf(m.sidePicker === "a" ? m.captainA : m.captainB)]!, "POST", `/api/matches/${matchId}/side`, { side: "ct" });
+      await settle(async () => rconLog.some((c) => /^sv_password "[^"]+"$/.test(c)));
+
+      // Cancelled now: the cleanup runs and passes...
+      await play(cookies[0]!, "POST", `/api/matches/${matchId}/cancel`);
+      expect(cleanupRows()).toEqual([]);
+      // ...then the launch carries on and puts the match password on the server.
+      open();
+      await settle(async () => cleanupRows().length > 0);
+      expect(await serverState()).toMatchObject({ state: "freeing" });
+      await expectNotAssignable();
+      await retryAfter(1_000);
+      await expectCleanAndFree();
+      m = (await play(cookies[0]!, "GET", "/api/state")).body.matches[0];
+      expect(m.phase).toBe("cancelled");
+    });
+
+    it("never gives one server to two teams starting at the same moment", async () => {
+      owner = await adminCookie();
+      serverId = await setupServer(owner);
+      await enable(owner, [serverId]);
+      cookies = await Promise.all(P.slice(0, 4).map((id, i) => playerCookie(id, ["Alpha", "Bravo", "Charlie", "Delta"][i]!)));
+      for (const c of cookies.slice(0, 2)) await play(c, "POST", "/api/lobby/join", { mode: "duel" });
+      for (const c of cookies.slice(2, 4)) await play(c, "POST", "/api/lobby/join", { mode: "wingman" });
+      await play(cookies[0]!, "POST", "/api/teams");
+      await play(cookies[2]!, "POST", "/api/teams");
+      const drafts = (await play(cookies[0]!, "GET", "/api/state")).body.drafts as { id: number; mode: string }[];
+      const draftOf = (mode: string) => drafts.find((d) => d.mode === mode)!.id;
+      const [a, b] = await Promise.all([
+        play(cookies[0]!, "POST", `/api/teams/${draftOf("duel")}/start`),
+        play(cookies[2]!, "POST", `/api/teams/${draftOf("wingman")}/start`),
+      ]);
+      expect([a.status, b.status].sort()).toEqual([200, 400]);
+      expect((a.status === 400 ? a : b).body.error).toMatch(/busy/);
+    });
+
+    it("lets an admin free a server by hand", async () => {
+      const id = await liveDuel();
+      failRcon = /./;
+      await play(cookies[0]!, "POST", `/api/matches/${id}/cancel`);
+      expect((await admin(owner, "POST", `/api/matchmaking/servers/${serverId}/cleanup`, { action: "release" })).status).toBe(200);
+      expect(cleanupRows()).toEqual([]);
+      expect(matchJson().active).toBe(false);
+      expect(await serverState()).toMatchObject({ state: "free" });
+    });
+  });
+});
+
+describe("cleanup retries", () => {
+  it("backs off from 5 seconds to at most 5 minutes", () => {
+    expect([1, 2, 3, 4, 7, 8, 20].map(cleanupDelay)).toEqual([5_000, 10_000, 20_000, 40_000, 300_000, 300_000, 300_000]);
+    expect(parseMatchStatus(`CS2PANEL_MATCH {"active":false,"humans":0,"password":"hunter2"}`)).toMatchObject({
+      active: false,
+      humans: 0,
+      password: "hunter2",
+    });
   });
 });
 

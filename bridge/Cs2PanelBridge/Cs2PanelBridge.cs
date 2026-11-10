@@ -30,7 +30,7 @@ namespace Cs2PanelBridge;
 public class Cs2PanelBridge : BasePlugin
 {
     public override string ModuleName => "CS2 Panel Bridge";
-    public override string ModuleVersion => "1.7.4";
+    public override string ModuleVersion => "1.8.0";
     public override string ModuleAuthor => "cs2-panel";
     public override string ModuleDescription => "Enforces cs2-panel bans, locks matchmaking matches and reports players to the panel.";
 
@@ -201,7 +201,10 @@ public class Cs2PanelBridge : BasePlugin
         {
             Logger.LogWarning(e, "cs2panel: could not read team scores");
         }
-        var status = new MatchStatus(_match != null, _match?.MatchId ?? "", phase, MatchPlayersOnline().Count(), _matchPlayers.Count, scoreA, scoreB, _mapLoads, Server.MapName, _matchOver ? Math.Round(Server.CurrentTime - _matchOverAt, 1) : 0);
+        var status = new MatchStatus(_match != null, _match?.MatchId ?? "", phase, MatchPlayersOnline().Count(), _matchPlayers.Count, scoreA, scoreB, _mapLoads, Server.MapName, _matchOver ? Math.Round(Server.CurrentTime - _matchOverAt, 1) : 0,
+            // For the panel's check after a match: is everyone gone, and is the server's own password back?
+            Utilities.GetPlayers().Count(p => p is { IsValid: true, IsBot: false, IsHLTV: false } && p.Connected == PlayerConnectedState.PlayerConnected),
+            ConVar.Find("sv_password")?.StringValue ?? "");
         command.ReplyToCommand(MatchMarker + JsonSerializer.Serialize(status, Json));
     }
 
@@ -721,7 +724,9 @@ public record MatchStatus(
     [property: JsonPropertyName("scoreB")] int ScoreB,
     [property: JsonPropertyName("mapLoads")] int MapLoads,
     [property: JsonPropertyName("map")] string Map,
-    [property: JsonPropertyName("overSeconds")] double OverSeconds);
+    [property: JsonPropertyName("overSeconds")] double OverSeconds,
+    [property: JsonPropertyName("humans")] int Humans,
+    [property: JsonPropertyName("password")] string Password);
 
 public class MatchFile
 {

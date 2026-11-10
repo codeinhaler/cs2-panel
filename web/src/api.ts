@@ -572,6 +572,8 @@ export const api = {
     request<{ preset: Preset }>("POST", `/api/servers/${serverId}/save-preset`, { name, description }),
   mapCycle: (serverId: number) =>
     request<{ mapCycle: MapCycle; casual: boolean; bridge: boolean; next: string | null }>("GET", `/api/servers/${serverId}/map-cycle`),
+  matchmakingCleanup: (serverId: number, action: "retry" | "release") =>
+    request<{ ok: true }>("POST", `/api/matchmaking/servers/${serverId}/cleanup`, { action }),
   setMapCycle: (serverId: number, cycle: MapCycle) => request<{ mapCycle: MapCycle }>("PUT", `/api/servers/${serverId}/map-cycle`, cycle),
   setExecConfigs: (serverId: number, configs: string[]) => request<{ execConfigs: string[] }>("PUT", `/api/servers/${serverId}/exec-configs`, { configs }),
   checkPort: (port: number, serverId?: number) => request<{ problem: string | null }>("GET", `/api/ports/check?${q({ port, serverId })}`),

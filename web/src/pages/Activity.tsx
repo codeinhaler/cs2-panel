@@ -76,6 +76,14 @@ function describe(e: AuditEntry): string {
         : `set the matchmaking rating of ${str("name") || str("steamId")} to ${str("rating")}`;
     case "matchmaking.kick":
       return `removed ${str("name") || str("steamId")} from the matchmaking lobby`;
+    case "matchmaking.cleanup_failed":
+      return `couldn't empty the server after a match (tried ${String(d.attempts)}×: ${String(d.error ?? "")}), retrying`;
+    case "matchmaking.cleanup_done":
+      return `emptied the server after a match (after ${String(d.attempts)} tries)`;
+    case "matchmaking.cleanup_retry":
+      return "retried emptying a match server";
+    case "matchmaking.cleanup_skipped":
+      return "freed a match server by hand, without the cleanup";
     case "matchmaking.cancel":
       return `cancelled matchmaking match ${str("match")}`;
     case "matchmaking.match":
