@@ -30,7 +30,7 @@ namespace Cs2PanelBridge;
 public class Cs2PanelBridge : BasePlugin
 {
     public override string ModuleName => "CS2 Panel Bridge";
-    public override string ModuleVersion => "1.7.3";
+    public override string ModuleVersion => "1.7.4";
     public override string ModuleAuthor => "cs2-panel";
     public override string ModuleDescription => "Enforces cs2-panel bans, locks matchmaking matches and reports players to the panel.";
 
@@ -84,6 +84,7 @@ public class Cs2PanelBridge : BasePlugin
         RegisterListener<Listeners.OnMapStart>(_ =>
         {
             _mapLoads++;
+            _warmupSlain.Clear();
             // Loading a map runs the game mode's config and server.cfg, which reset the password
             // and bots. Put the match's own settings back once those have run.
             AddTimer(2.0f, () =>
@@ -104,6 +105,7 @@ public class Cs2PanelBridge : BasePlugin
         RegisterEventHandler<EventItemPurchase>(OnItemPurchase);
         RegisterEventHandler<EventPlayerDeath>(OnPlayerDeath);
         RegisterEventHandler<EventPlayerSpawn>(OnPlayerSpawn);
+        RegisterEventHandler<EventPlayerDisconnect>(OnPlayerDisconnect);
         AddCommandListener("jointeam", OnJoinTeam);
         // Tell people in warmup who the match is still waiting for.
         AddTimer(30.0f, AnnounceMissing, TimerFlags.REPEAT);
@@ -357,12 +359,39 @@ public class Cs2PanelBridge : BasePlugin
     private HookResult OnPlayerSpawn(EventPlayerSpawn @event, GameEventInfo info)
     {
         var player = @event.Userid;
-        if ((_match != null || _casual) && player is { IsValid: true, IsBot: false }) AddTimer(0.5f, () => FixNoclip(player));
+        if ((_match != null || _casual) && player is { IsValid: true, IsBot: false })
+        {
+            AddTimer(0.5f, () => FixNoclip(player));
+            SlayOnceInWarmup(player);
+        }
         if (!KeepWeapons || player is not { IsValid: true, IsBot: false }) return HookResult.Continue;
         var id = player.SteamID;
         if (!_died.Remove(id) || !_loadouts.TryGetValue(id, out var loadout)) return HookResult.Continue;
         // After the game has handed out the default pistol.
         AddTimer(0.3f, () => RestoreLoadout(player, loadout));
+        return HookResult.Continue;
+    }
+
+    /// <summary>Players already slain once in this map's warmup.</summary>
+    private readonly HashSet<ulong> _warmupSlain = new();
+
+    /// <summary>
+    /// A player's first spawn in warmup can come out broken (stuck in the map, or invisible but on the radar).
+    /// Dying fixes it: warmup respawns them normally on one of the map's spawns. So each player is slain once,
+    /// a moment after their first warmup spawn on this map.
+    /// </summary>
+    private void SlayOnceInWarmup(CCSPlayerController player)
+    {
+        if (!IsWarmup() || !_warmupSlain.Add(player.SteamID)) return;
+        AddTimer(1.0f, () =>
+        {
+            if (player.IsValid && player.PawnIsAlive && IsWarmup()) player.PlayerPawn.Value?.CommitSuicide(false, true);
+        });
+    }
+
+    private HookResult OnPlayerDisconnect(EventPlayerDisconnect @event, GameEventInfo info)
+    {
+        if (@event.Userid is { IsValid: true } p) _warmupSlain.Remove(p.SteamID);
         return HookResult.Continue;
     }
 
