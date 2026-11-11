@@ -1733,3 +1733,10 @@ details.inline-form[open] > summary {
   display: inline-flex;
   gap: 4px;
 }
+
+.mm-lobby-servers {
+  margin-top: 10px;
+}
+.mm-lobby-servers .exec-list {
+  margin-bottom: 4px;
+}

@@ -966,6 +966,58 @@ describe("matchmaking site", () => {
     expect(JSON.parse(readFileSync(findFile(dir, "match.json")[0]!, "utf8"))).toMatchObject({ exec: "cs2panel_match.cfg", keepWeapons: true });
   });
 
+  // ------------------------------------------------------------- servers per lobby
+
+  it("runs each lobby on its own servers", async () => {
+    const owner = await adminCookie();
+    const comp = await setupServer(owner, { name: "Comp #1", port: 27015 });
+    const duel = await setupServer(owner, { name: "1v1 #1", port: 27020 });
+    await enable(owner, [], {
+      modes: {
+        competitive: { enabled: true, maps: ["de_mirage"], serverIds: [comp] },
+        wingman: { enabled: false, maps: ["de_vertigo"], serverIds: [] },
+        duel: { enabled: true, maps: ["de_vertigo"], serverIds: [duel] },
+      },
+    });
+    const settings = (await admin(owner, "GET", "/api/matchmaking")).body.settings;
+    // The shared list is every lobby's servers together (Discord channels, cleanup and so on use it).
+    expect(settings.serverIds.sort()).toEqual([comp, duel].sort());
+    expect(settings.modes.duel.serverIds).toEqual([duel]);
+
+    const cookies = await Promise.all(P.slice(0, 4).map((id, i) => playerCookie(id, ["Alpha", "Bravo", "Charlie", "Delta"][i]!)));
+    for (const c of cookies.slice(0, 2)) await play(c, "POST", "/api/lobby/join", { mode: "duel" });
+    await play(cookies[0]!, "POST", "/api/teams");
+    const draft = (await play(cookies[0]!, "GET", "/api/state")).body.drafts[0];
+    expect((await play(cookies[0]!, "POST", `/api/teams/${draft.id}/start`)).status).toBe(200);
+    const state = (await play(cookies[0]!, "GET", "/api/state")).body;
+    expect(state.matches[0].serverName).toBe("1v1 #1");
+    // The 1v1 server is taken; the Competitive one is still free, but only for Competitive.
+    const lobby = (mode: string) => state.lobbies.find((l: { mode: string }) => l.mode === mode);
+    expect(lobby("duel")).toMatchObject({ freeServers: 0, matchServers: 1 });
+    expect(lobby("competitive")).toMatchObject({ freeServers: 1, matchServers: 1 });
+    for (const c of cookies.slice(2, 4)) await play(c, "POST", "/api/lobby/join", { mode: "duel" });
+    const busy = await play(cookies[2]!, "POST", "/api/teams");
+    expect(busy.status).toBe(400);
+    expect(busy.body.error).toBe("Every 1v1 server is busy. Wait for a match to finish.");
+  });
+
+  it("keeps a casual server out of every lobby, and gives old settings all match servers per lobby", async () => {
+    const owner = await adminCookie();
+    const a = await setupServer(owner, { name: "Match #1", port: 27015 });
+    const b = await setupServer(owner, { name: "Casual #1", port: 27020 });
+    // Saved before lobbies had their own servers: every lobby uses the shared list.
+    (app.services.matchmaking as any).d.settings.set("matchmaking", { enabled: false, serverIds: [a, b] });
+    let settings = (await admin(owner, "GET", "/api/matchmaking")).body.settings;
+    expect(settings.modes.competitive.serverIds).toEqual([a, b]);
+    expect(settings.modes.duel.serverIds).toEqual([a, b]);
+
+    settings.casual = { name: "Casual", serverIds: [b] };
+    expect((await admin(owner, "PUT", "/api/matchmaking", { settings })).status).toBe(200);
+    settings = (await admin(owner, "GET", "/api/matchmaking")).body.settings;
+    expect(settings.modes.competitive.serverIds).toEqual([a]);
+    expect(settings.serverIds).toEqual([a]);
+  });
+
   // ------------------------------------------------------------- cleanup after a match
 
   describe("server cleanup after a match", () => {

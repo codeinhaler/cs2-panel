@@ -79,6 +79,8 @@ const ModeSettings = z.object({
   config: z.string().max(20_000, "The config is too long (20,000 characters at most).").default(""),
   /** Players get the weapons they bought back after dying (the bridge gives them on respawn). */
   keepWeapons: z.boolean().default(false),
+  /** The servers this lobby's matches run on. Missing in settings saved before per-lobby servers: then all match servers. */
+  serverIds: z.array(z.number().int().positive()).max(20).optional(),
 });
 const DiscordChannel = z
   .string()
@@ -351,7 +353,7 @@ export interface StateView {
     ready: boolean;
     leetifyUrl: string;
   } | null;
-  lobbies: { mode: Mode; label: string; teamSize: number; maps: string[]; players: number; ready: number }[];
+  lobbies: { mode: Mode; label: string; teamSize: number; maps: string[]; players: number; ready: number; freeServers: number; matchServers: number }[];
   lobby: LobbyView[];
   drafts: DraftView[];
   matches: MatchView[];
@@ -436,6 +438,8 @@ export class Matchmaking {
     const { maps: legacyMaps, ...rest } = stored;
     const modes = { ...DEFAULT_SETTINGS.modes };
     for (const k of MODES) if (stored.modes?.[k]) modes[k] = { ...DEFAULT_SETTINGS.modes[k], ...stored.modes[k] };
+    // Before each lobby had its own servers, every lobby used all the match servers.
+    for (const k of MODES) if (!modes[k].serverIds) modes[k] = { ...modes[k], serverIds: [...((rest as { serverIds?: number[] }).serverIds ?? [])] };
     // A saved copy of an earlier built-in 1v1 config follows the current default.
     if (OLD_DUEL_CONFIGS.includes(modes.duel.config)) modes.duel = { ...modes.duel, config: DUEL_CONFIG };
     // Before lobbies there was one map pool, for Competitive.
@@ -472,8 +476,12 @@ export class Matchmaking {
     const next = MatchmakingSettingsSchema.parse(raw);
     const known = new Set(this.d.servers.listRecords().map((s) => s.id));
     next.casual.serverIds = [...new Set(next.casual.serverIds)].filter((id) => known.has(id));
-    // A casual server is never used for matches.
-    next.serverIds = [...new Set(next.serverIds)].filter((id) => known.has(id) && !next.casual.serverIds.includes(id));
+    // Each lobby's servers; a casual server is never used for matches. All of them together are the match servers.
+    for (const m of MODES) {
+      // Sent without per-lobby servers (an older page or script): the lobby uses the shared list.
+      next.modes[m].serverIds = [...new Set(next.modes[m].serverIds ?? next.serverIds)].filter((id) => known.has(id) && !next.casual.serverIds.includes(id));
+    }
+    next.serverIds = [...new Set(MODES.flatMap((m) => next.modes[m].serverIds!))];
     for (const id of next.casual.serverIds) {
       if (this.matches.some((m) => m.serverId === id && (isActive(m) || !m.released)) || this.cleanups.has(id)) {
         throw badRequest(`${this.d.servers.require(id).name} is running a match right now. Make it casual when the match is over.`);
@@ -742,9 +750,10 @@ export class Matchmaking {
 
   // ------------------------------------------------------------- servers
 
-  private poolRecords(): ServerRecord[] {
+  /** The match servers, or only one lobby's. */
+  private poolRecords(mode?: Mode): ServerRecord[] {
     const c = this.config();
-    const ids = new Set(c.serverIds.filter((id) => !c.casual.serverIds.includes(id)));
+    const ids = new Set((mode ? (c.modes[mode].serverIds ?? []) : c.serverIds).filter((id) => !c.casual.serverIds.includes(id)));
     return this.d.servers.listRecords().filter((s) => ids.has(s.id));
   }
 
@@ -851,7 +860,8 @@ export class Matchmaking {
    * Free match servers, best first: running ones that have been idle a while,
    * then stopped ones (they need starting), then the ones just freed.
    */
-  private async freeServers(): Promise<ServerRecord[]> {
+  /** Free servers for a lobby's next match, best first. */
+  private async freeServers(mode: Mode): Promise<ServerRecord[]> {
     const t = this.now();
     const free: { s: ServerRecord; rank: number; freed: number }[] = [];
     const ok = new Set(
@@ -859,7 +869,7 @@ export class Matchmaking {
         .filter((x) => x.state === "free")
         .map((x) => x.id),
     );
-    for (const s of this.poolRecords()) {
+    for (const s of this.poolRecords(mode)) {
       if (!ok.has(s.id)) continue;
       const running = (await this.d.host.serviceStatus(s.slug)).state === "active";
       const freed = this.freedAt.get(s.id) ?? 0;
@@ -869,8 +879,9 @@ export class Matchmaking {
     return free.sort((x, y) => x.rank - y.rank || x.freed - y.freed).map((x) => x.s);
   }
 
-  private freeCountSync(): number {
-    return this.serverStates().filter((x) => x.state === "free").length;
+  private freeCountSync(mode?: Mode): number {
+    const ids = mode ? new Set(this.poolRecords(mode).map((s) => s.id)) : null;
+    return this.serverStates().filter((x) => x.state === "free" && (!ids || ids.has(x.id))).length;
   }
 
   // ------------------------------------------------------------- making teams
@@ -898,9 +909,10 @@ export class Matchmaking {
     // An odd number of players plays with a bot on the short team, so nobody waits.
     const chosen = choosePlayers(this.available(mode), size * 2, size > 1);
     if (chosen.length < 2) throw badRequest("At least 2 ready players are needed to make teams.");
-    if ((await this.freeServers()).length === 0) {
-      if (!this.poolRecords().some((s) => this.d.hasBridge(s.id))) throw badRequest("No server is set up for matches yet. Ask the organiser.");
-      throw badRequest("Every matchmaking server is busy. Wait for a match to finish.");
+    if ((await this.freeServers(mode)).length === 0) {
+      if (!this.poolRecords(mode).some((s) => this.d.hasBridge(s.id)))
+        throw badRequest(`No server is set up for ${MODE_INFO[mode].label} yet. Ask the organiser.`);
+      throw badRequest(`Every ${MODE_INFO[mode].label} server is busy. Wait for a match to finish.`);
     }
 
     const players = await Promise.all(chosen.map((e) => this.member(e.steamId)));
@@ -946,7 +958,7 @@ export class Matchmaking {
     const c = this.requireEnabled();
     const d = this.requireDraft(by, draftId);
     const split = d.splits[d.index]!;
-    const candidates = await this.freeServers();
+    const candidates = await this.freeServers(d.mode);
     if (this.drafts.get(d.mode) !== d) throw badRequest("Those teams aren't up any more.");
     // Checked again without waiting in between, so two teams starting at once can't get the same server.
     const stillFree = new Set(
@@ -1676,6 +1688,8 @@ export class Matchmaking {
       maps: c.modes[mode].maps,
       players: lobby.filter((p) => p.mode === mode).length,
       ready: lobby.filter((p) => p.mode === mode && p.status === "ready").length,
+      freeServers: this.freeCountSync(mode),
+      matchServers: this.poolRecords(mode).filter((s) => this.d.hasBridge(s.id)).length,
     }));
     return {
       title: c.title,

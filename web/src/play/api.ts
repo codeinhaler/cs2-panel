@@ -94,7 +94,7 @@ export interface State {
     ready: boolean;
     leetifyUrl: string;
   } | null;
-  lobbies: { mode: Mode; label: string; teamSize: number; maps: string[]; players: number; ready: number }[];
+  lobbies: { mode: Mode; label: string; teamSize: number; maps: string[]; players: number; ready: number; freeServers: number; matchServers: number }[];
   lobby: LobbyPlayer[];
   drafts: Draft[];
   matches: Match[];

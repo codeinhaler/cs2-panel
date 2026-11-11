@@ -285,7 +285,9 @@ function LobbyCard({ state, busy, act }: { state: State; busy: boolean; act: Act
   const draft = state.drafts.find((d) => d.mode === me.mode);
   const size = lobby?.teamSize ?? 5;
   const max = size * 2;
-  const canMake = myStatus === "ready" && available.length >= 2 && !draft && state.freeServers > 0;
+  // This lobby's servers only: a busy Wingman server doesn't stop a Competitive match.
+  const free = lobby?.freeServers ?? state.freeServers;
+  const canMake = myStatus === "ready" && available.length >= 2 && !draft && free > 0;
   const n = Math.min(available.length, max);
   const reason =
     myStatus === "in-match"
@@ -294,10 +296,10 @@ function LobbyCard({ state, busy, act }: { state: State; busy: boolean; act: Act
         ? "Mark yourself ready to make teams."
         : available.length < 2
           ? "Waiting for more ready players."
-          : state.matchServers === 0
-            ? "No server is set up for matches yet. Ask the organiser."
-            : state.freeServers === 0
-              ? "All match servers are busy; teams can be made when one is free."
+          : (lobby?.matchServers ?? state.matchServers) === 0
+            ? `No server is set up for ${lobby?.label ?? "matches"} yet. Ask the organiser.`
+            : free === 0
+              ? `All ${lobby?.label ?? "match"} servers are busy; teams can be made when one is free.`
               : draft
                 ? null
                 : available.length > max

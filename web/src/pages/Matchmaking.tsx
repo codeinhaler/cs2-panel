@@ -60,8 +60,68 @@ export function MatchmakingPage() {
   };
 
   const pageUrl = data.site.port ? `http://${window.location.hostname}:${data.site.port}` : null;
-  const poolServers = data.servers.filter((s) => form.serverIds.includes(s.id));
+  // The match servers: every server ticked in one of the lobbies (never a casual one).
+  const matchIds = [...new Set(MODES.flatMap((m) => form.modes[m].serverIds ?? []))].filter((id) => !form.casual.serverIds.includes(id));
+  const poolServers = data.servers.filter((s) => matchIds.includes(s.id));
   const missingBridge = poolServers.filter((s) => !s.hasBridge);
+  /** One lobby's server tick boxes, with each ticked server's state (free, in a match, being emptied …). */
+  const lobbyServers = (mode: (typeof MODES)[number]) => {
+    const ids = form.modes[mode].serverIds ?? [];
+    const setIds = (next: number[]) => set("modes", { ...form.modes, [mode]: { ...form.modes[mode], serverIds: next } });
+    if (data.servers.length === 0) return <p className="hint">No servers yet.</p>;
+    return (
+      <div className="exec-list" style={{ marginTop: 4 }}>
+        {data.servers.map((s) => {
+          const casual = form.casual.serverIds.includes(s.id);
+          const on = ids.includes(s.id) && !casual;
+          const st = on ? stateOf(s.name) : undefined;
+          return (
+            <label key={s.id} className="check">
+              <input
+                type="checkbox"
+                checked={on}
+                onChange={(e) => setIds(e.target.checked ? [...ids, s.id] : ids.filter((x) => x !== s.id))}
+                disabled={!manage || casual}
+              />
+              <span>
+                <Link to={`/servers/${s.id}`}>{s.name}</Link> <span className="hint">port {s.port}</span>
+                {st && (
+                  <span
+                    className="state-pill"
+                    data-state={{ free: "active", "no-bridge": "failed", "cleanup-failed": "failed" }[st.state] ?? "activating"}
+                    style={{ marginLeft: 10 }}
+                  >
+                    {st.label}
+                  </span>
+                )}
+                {st?.state === "cleanup-failed" && moderate && (
+                  <span className="row-actions" style={{ marginLeft: 8, display: "inline-flex" }}>
+                    <button type="button" className="btn small" onClick={() => void cleanup(s.id, "retry")}>
+                      Try again now
+                    </button>
+                    <button
+                      type="button"
+                      className="btn ghost small"
+                      title="Only after you've checked the server by hand (e.g. restarted it): frees it for matches without the cleanup."
+                      onClick={() => void cleanup(s.id, "release")}
+                    >
+                      It's clean: free it
+                    </button>
+                  </span>
+                )}
+                {casual ? (
+                  <span className="hint"> · casual server, not used for matches</span>
+                ) : (
+                  !s.hasBridge && !st && <span className="hint"> · needs CounterStrikeSharp (with CS2 Panel Bridge) installed</span>
+                )}
+              </span>
+            </label>
+          );
+        })}
+      </div>
+    );
+  };
+
   const cleanup = async (serverId: number, action: "retry" | "release") => {
     if (
       action === "release" &&
@@ -126,65 +186,6 @@ export function MatchmakingPage() {
         </div>
 
         <div className="panel">
-          <h2 style={{ marginBottom: 6 }}>Servers for matches</h2>
-          <p className="hint" style={{ marginTop: 0 }}>
-            A free server from these is used for each match: started if it's stopped, set to Competitive on the voted map, locked to the match's players with a
-            password, and opened again when the match ends. Pick servers nobody else plays on during the event.
-          </p>
-          <div className="exec-list">
-            {data.servers.length === 0 && <span className="hint">No servers yet.</span>}
-            {data.servers.map((s) => (
-              <label key={s.id} className="check">
-                <input
-                  type="checkbox"
-                  checked={form.serverIds.includes(s.id) && !form.casual.serverIds.includes(s.id)}
-                  onChange={(e) => set("serverIds", e.target.checked ? [...form.serverIds, s.id] : form.serverIds.filter((x) => x !== s.id))}
-                  disabled={!manage || form.casual.serverIds.includes(s.id)}
-                />
-                <span>
-                  <Link to={`/servers/${s.id}`}>{s.name}</Link> <span className="hint">port {s.port}</span>
-                  {form.serverIds.includes(s.id) && !form.casual.serverIds.includes(s.id) && stateOf(s.name) && (
-                    <span
-                      className="state-pill"
-                      data-state={{ free: "active", "no-bridge": "failed", "cleanup-failed": "failed" }[stateOf(s.name)!.state] ?? "activating"}
-                      style={{ marginLeft: 10 }}
-                    >
-                      {stateOf(s.name)!.label}
-                    </span>
-                  )}
-                  {stateOf(s.name)?.state === "cleanup-failed" && moderate && (
-                    <span className="row-actions" style={{ marginLeft: 8, display: "inline-flex" }}>
-                      <button type="button" className="btn small" onClick={() => void cleanup(s.id, "retry")}>
-                        Try again now
-                      </button>
-                      <button
-                        type="button"
-                        className="btn ghost small"
-                        title="Only after you've checked the server by hand (e.g. restarted it): frees it for matches without the cleanup."
-                        onClick={() => void cleanup(s.id, "release")}
-                      >
-                        It's clean: free it
-                      </button>
-                    </span>
-                  )}
-                  {form.casual.serverIds.includes(s.id) ? (
-                    <span className="hint"> · casual server, not used for matches</span>
-                  ) : (
-                    !s.hasBridge && <span className="hint"> · needs CounterStrikeSharp (with CS2 Panel Bridge) installed</span>
-                  )}
-                </span>
-              </label>
-            ))}
-          </div>
-          {missingBridge.length > 0 && (
-            <p className="notice warn" style={{ marginTop: 12 }}>
-              {missingBridge.map((s) => s.name).join(", ")} can't be used until CounterStrikeSharp is installed on its Plugins tab. The CS2 Panel Bridge comes
-              with it and keeps strangers off the server during a match.
-            </p>
-          )}
-        </div>
-
-        <div className="panel">
           <h2 style={{ marginBottom: 6 }}>Discord</h2>
           <p className="hint" style={{ marginTop: 0 }}>
             Players in a match get a <b>Join Discord channel</b> button for their own team's voice channel. Make two voice channels per match server
@@ -200,7 +201,7 @@ export function MatchmakingPage() {
             />
           </label>
           {data.servers
-            .filter((s) => form.serverIds.includes(s.id) && !form.casual.serverIds.includes(s.id))
+            .filter((s) => matchIds.includes(s.id))
             .map((s) => {
               const ch = form.discord.channels[String(s.id)] ?? { a: "", b: "" };
               const setCh = (team: "a" | "b", v: string) => {
@@ -224,7 +225,7 @@ export function MatchmakingPage() {
                 </div>
               );
             })}
-          {form.serverIds.filter((id) => !form.casual.serverIds.includes(id)).length === 0 && <p className="hint">Tick servers for matches first.</p>}
+          {matchIds.length === 0 && <p className="hint">Tick servers for the lobbies first.</p>}
           <label className="field" style={{ maxWidth: 480, marginTop: 16 }}>
             <span>1v1 voice channel (one for everyone in 1v1 matches; the team channels above aren't used for 1v1)</span>
             <input
@@ -286,6 +287,17 @@ export function MatchmakingPage() {
             Players pick one of the open lobbies when they come to the page. Each has its own map pool: the captains take turns banning from it until one is
             left, like on FACEIT, and the team that didn't make the last ban picks its side.
           </p>
+          <p className="hint">
+            Tick the servers each lobby runs on. A free one is started if it's stopped, set to the lobby's game mode on the voted map, locked to the match's
+            players with a password, and emptied when the match ends. A server can serve more than one lobby; pick servers nobody else plays on during the
+            event.
+          </p>
+          {missingBridge.length > 0 && (
+            <p className="notice warn">
+              {missingBridge.map((s) => s.name).join(", ")} can't be used until CounterStrikeSharp is installed on its Plugins tab. The CS2 Panel Bridge comes
+              with it and keeps strangers off the server during a match.
+            </p>
+          )}
           <div className="mm-lobbies">
             {MODES.map((mode) => (
               <LobbySettings
@@ -297,6 +309,7 @@ export function MatchmakingPage() {
                 names={names}
                 onChange={(v) => set("modes", { ...form.modes, [mode]: v })}
                 onTitle={(map, title) => setTitles((t) => ({ ...t, [map]: title }))}
+                servers={lobbyServers(mode)}
               />
             ))}
           </div>
@@ -392,14 +405,17 @@ function LobbySettings({
   names,
   onChange,
   onTitle,
+  servers,
 }: {
   mode: (typeof MODES)[number];
-  value: { enabled: boolean; maps: string[]; config: string; keepWeapons: boolean };
+  value: { enabled: boolean; maps: string[]; config: string; keepWeapons: boolean; serverIds: number[] };
   stock: string[];
   manage: boolean;
   names: Record<string, string>;
-  onChange: (v: { enabled: boolean; maps: string[]; config: string; keepWeapons: boolean }) => void;
+  onChange: (v: { enabled: boolean; maps: string[]; config: string; keepWeapons: boolean; serverIds: number[] }) => void;
   onTitle: (map: string, title: string) => void;
+  /** The server tick boxes for this lobby, built by the page (they need the live server states). */
+  servers: React.ReactNode;
 }) {
   const [workshop, setWorkshop] = useState("");
   // Same check as the map picker on a server's page: ask Steam about the item as it's typed.
@@ -423,6 +439,11 @@ function LobbySettings({
       </label>
       {value.enabled && (
         <>
+          <div className="mm-lobby-servers">
+            <b>Servers</b> <span className="hint">· a free one of these is used for each match</span>
+            {servers}
+          </div>
+          <b style={{ display: "block", marginTop: 10 }}>Maps</b>
           <div className="mm-maps">
             {choices.map((m) => (
               <label key={m} className="check">
