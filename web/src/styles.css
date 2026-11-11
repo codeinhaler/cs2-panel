@@ -2058,3 +2058,37 @@ details.inline-form[open] > summary {
 .text-fail {
   color: var(--fail);
 }
+
+/* Tabs as buttons (e.g. the Matchmaking page) look like the link tabs. */
+.tab-button {
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.tab-button.active {
+  border-bottom-color: var(--accent);
+}
+.tab-note {
+  align-self: center;
+  margin-left: auto;
+  padding: 0 8px;
+  font-size: 0.85rem;
+  color: var(--busy);
+  white-space: nowrap;
+}
+.mm-savebar {
+  margin: 16px 0;
+}
+.mm-savebar.dirty {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  box-shadow: 0 -4px 14px rgba(0, 0, 0, 0.08);
+}

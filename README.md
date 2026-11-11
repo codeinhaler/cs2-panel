@@ -4,6 +4,8 @@ A web panel for running CS2 community servers on one Debian machine: create serv
 
 The design is in [docs/DESIGN.md](docs/DESIGN.md).
 
+The Matchmaking page has tabs: **Overview** (site status, lobbies, matches now, history), **Lobbies**, **Discord** (channel links and the bot), **Casual** and **Site** (name, port, look, HTTPS, Leetify); one Save covers the settings on all tabs and stays in view while there are changes.
+
 The menu: **Monitor** (the home page), **Game servers** (Servers, Game update, Presets, Shared settings), **Matchmaking**, and **CS2 Panel** (Team, Backups, Notifications, Activity, Settings). The two groups fold open when clicked, and on their own when you're on one of their pages. The server list is at `/servers`; old `/monitor` links go to the home page.
 
 ## What's in Phase 1

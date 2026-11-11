@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { DiscordBotPanel } from "./DiscordBot";
 import { api, type MatchmakingInfo, type MatchmakingSettings, type MmRating } from "../api";
 import { useAction, useApp, usePolling } from "../app-context";
@@ -24,8 +24,21 @@ const mapLabel = (m: string, names: Record<string, string> = {}) => (m.startsWit
 const utc = (t: string) => new Date(`${t.replace(" ", "T")}Z`);
 
 /** The matchmaking site for players: settings, who's in the lobby, matches. */
+const TABS = [
+  { key: "overview", label: "Overview" },
+  { key: "lobbies", label: "Lobbies" },
+  { key: "discord", label: "Discord" },
+  { key: "casual", label: "Casual" },
+  { key: "site", label: "Site" },
+] as const;
+type Tab = (typeof TABS)[number]["key"];
+
 export function MatchmakingPage() {
   const { can, toast } = useApp();
+  // The open tab lives in the address (?tab=discord), so it survives a reload and can be bookmarked.
+  const [params, setParams] = useSearchParams();
+  const tab: Tab = (TABS.find((t) => t.key === params.get("tab"))?.key ?? "overview") as Tab;
+  const setTab = (t: Tab) => setParams(t === "overview" ? {} : { tab: t }, { replace: true });
   const { busy, run } = useAction();
   const { data, refresh } = usePolling(() => api.matchmaking(), 4000);
   const [form, setForm] = useState<MatchmakingSettings | null>(null);
@@ -156,239 +169,275 @@ export function MatchmakingPage() {
         </div>
       </div>
 
-      <SiteStatus info={data} pageUrl={pageUrl} />
+      <nav className="tabs" aria-label="Matchmaking sections">
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            className={`tab tab-button${tab === t.key ? " active" : ""}`}
+            aria-current={tab === t.key ? "page" : undefined}
+            onClick={() => setTab(t.key)}
+          >
+            {t.label}
+          </button>
+        ))}
+        {dirty && (
+          <span className="tab-note" role="status">
+            Unsaved changes
+          </span>
+        )}
+      </nav>
+
+      {tab === "overview" && (
+        <>
+          <SiteStatus info={data} pageUrl={pageUrl} />
+          <LiveSection info={data} moderate={moderate} refresh={refresh} />
+          <HistorySection info={data} />
+        </>
+      )}
 
       <form onSubmit={(e) => save(e)}>
-        <div className="panel">
-          <h2 style={{ marginBottom: 14 }}>Settings</h2>
-          <div className="form-grid">
-            <label className="check wide">
-              <input type="checkbox" checked={form.enabled} onChange={(e) => set("enabled", e.target.checked)} disabled={!manage} />
-              <span>
-                <b>Matchmaking site is open</b>
-                <br />
-                <span className="hint">When it's off, the page isn't served at all. Running matches finish either way.</span>
-              </span>
-            </label>
-            <label className="field">
-              <span>Name on the page</span>
-              <input value={form.title} onChange={(e) => set("title", e.target.value)} maxLength={60} disabled={!manage} />
-            </label>
-            <label className="field">
-              <span>Port</span>
-              <input type="number" min={1024} max={65535} value={form.port} onChange={(e) => set("port", Number(e.target.value))} disabled={!manage} />
-              <small>Players open the page on this port. Forward it (TCP) on your router to let people outside your network in.</small>
-            </label>
-            <label className="field">
-              <span>Address players connect to</span>
-              <input value={form.gameAddress} onChange={(e) => set("gameAddress", e.target.value)} placeholder="Same as the page" disabled={!manage} />
-              <small>Leave empty to use the address people opened the page with. Set it if they reach the page through another name than the servers.</small>
-            </label>
-            <label className="field">
-              <span>Seconds per ban</span>
-              <input
-                type="number"
-                min={10}
-                max={120}
-                value={form.vetoSeconds}
-                onChange={(e) => set("vetoSeconds", Number(e.target.value))}
-                disabled={!manage}
-              />
-              <small>A captain who runs out of time bans a random map. Also the time to pick a side.</small>
-            </label>
-          </div>
-        </div>
-
-        <div className="panel">
-          <h2 style={{ marginBottom: 6 }}>Discord</h2>
-          <p className="hint" style={{ marginTop: 0 }}>
-            Players get a <b>Join Discord channel</b> button for their voice channel. Right-click a voice channel in Discord, pick <b>Copy Link</b> and paste it
-            here. The lists follow the servers ticked in the lobbies above and the casual servers below; an empty field shows no button.
-          </p>
-          <label className="field" style={{ maxWidth: 480 }}>
-            <span>Invite link (shown as "Not on our Discord? Join here")</span>
-            <input
-              value={form.discord.invite}
-              placeholder="https://discord.gg/…"
-              onChange={(e) => set("discord", { ...form.discord, invite: e.target.value.trim() })}
-              disabled={!manage}
-            />
-          </label>
-
-          <h3 className="mm-discord-head">1v1</h3>
-          <p className="hint" style={{ marginTop: 0 }}>
-            One channel for everyone in 1v1 matches. Every 1v1 server uses it, unless you give a server its own.
-          </p>
-          <label className="field" style={{ maxWidth: 480 }}>
-            <span>Shared 1v1 voice channel</span>
-            <input
-              value={form.discord.duel}
-              placeholder="https://discord.com/channels/…"
-              onChange={(e) => setDiscord("duel", e.target.value)}
-              disabled={!manage}
-            />
-          </label>
-          {serversIn("duel").map((s) => (
-            <label key={s.id} className="field mm-discord-row">
-              <span>
-                {s.name}{" "}
-                <span className="hint">
-                  · {(form.discord.duelServers ?? {})[String(s.id)] ? "own channel" : form.discord.duel ? "uses the shared channel" : "no channel yet"}
-                </span>
-              </span>
-              <input
-                value={(form.discord.duelServers ?? {})[String(s.id)] ?? ""}
-                placeholder="Optional: its own channel instead of the shared one"
-                onChange={(e) => setServerChannel("duelServers", s.id, e.target.value)}
-                disabled={!manage}
-              />
-            </label>
-          ))}
-          {serversIn("duel").length === 0 && <p className="hint">No servers ticked for 1v1.</p>}
-
-          <h3 className="mm-discord-head">Competitive and Wingman</h3>
-          <p className="hint" style={{ marginTop: 0 }}>
-            Two channels per server, one per team. A server in both lobbies is listed once.
-          </p>
-          {teamServers.map((s) => {
-            const ch = form.discord.channels[String(s.id)] ?? { a: "", b: "" };
-            const setCh = (team: "a" | "b", v: string) => {
-              const next = { ...ch, [team]: v.trim() };
-              const channels = { ...form.discord.channels };
-              if (!next.a && !next.b) delete channels[String(s.id)];
-              else channels[String(s.id)] = next;
-              set("discord", { ...form.discord, channels });
-            };
-            const lobbies = (["competitive", "wingman"] as const).filter((m) => (form.modes[m].serverIds ?? []).includes(s.id)).map((m) => MODE_TEXT[m].label);
-            return (
-              <div key={s.id} style={{ marginTop: 10 }}>
-                <b>{s.name}</b> <span className="hint">· {lobbies.join(" and ")}</span>
-                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 4, maxWidth: 980 }}>
-                  {(["a", "b"] as const).map((t) => (
-                    <label key={t} className="field" style={{ flex: "1 1 280px" }}>
-                      <span>Team {t === "a" ? 1 : 2} voice channel</span>
-                      <input value={ch[t]} placeholder="https://discord.com/channels/…" onChange={(e) => setCh(t, e.target.value)} disabled={!manage} />
-                    </label>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-          {teamServers.length === 0 && <p className="hint">No servers ticked for Competitive or Wingman.</p>}
-
-          <h3 className="mm-discord-head">Casual</h3>
-          <label className="field" style={{ maxWidth: 480 }}>
-            <span>Shared casual voice channel</span>
-            <input
-              value={form.discord.casual}
-              placeholder="https://discord.com/channels/…"
-              onChange={(e) => setDiscord("casual", e.target.value)}
-              disabled={!manage}
-            />
-          </label>
-          {casualServers.map((s) => (
-            <label key={s.id} className="field mm-discord-row">
-              <span>
-                {s.name}{" "}
-                <span className="hint">
-                  · {(form.discord.casualServers ?? {})[String(s.id)] ? "own channel" : form.discord.casual ? "uses the shared channel" : "no channel"}
-                </span>
-              </span>
-              <input
-                value={(form.discord.casualServers ?? {})[String(s.id)] ?? ""}
-                placeholder="Optional: its own channel instead of the shared one"
-                onChange={(e) => setServerChannel("casualServers", s.id, e.target.value)}
-                disabled={!manage}
-              />
-            </label>
-          ))}
-          {casualServers.length === 0 && <p className="hint">No casual servers ticked.</p>}
-        </div>
-
-        <div className="panel">
-          <h2 style={{ marginBottom: 6 }}>Casual servers</h2>
-          <p className="hint" style={{ marginTop: 0 }}>
-            Shown on the site to everyone, signed in or not, with a button to join. No ratings, no teams made by the site and no map voting: people join any
-            time and are put on the smaller team, and can switch teams afterwards. The server's password (if it has one) is shown on the site.
-          </p>
-          <label className="field" style={{ maxWidth: 320 }}>
-            <span>Name on the site</span>
-            <input value={form.casual.name} onChange={(e) => set("casual", { ...form.casual, name: e.target.value })} maxLength={40} disabled={!manage} />
-          </label>
-          <div className="exec-list" style={{ marginTop: 12 }}>
-            {data.servers.map((s) => (
-              <label key={s.id} className="check">
-                <input
-                  type="checkbox"
-                  checked={form.casual.serverIds.includes(s.id)}
-                  onChange={(e) =>
-                    set("casual", {
-                      ...form.casual,
-                      serverIds: e.target.checked ? [...form.casual.serverIds, s.id] : form.casual.serverIds.filter((x) => x !== s.id),
-                    })
-                  }
-                  disabled={!manage}
-                />
+        {tab === "site" && (
+          <div className="panel">
+            <h2 style={{ marginBottom: 14 }}>Settings</h2>
+            <div className="form-grid">
+              <label className="check wide">
+                <input type="checkbox" checked={form.enabled} onChange={(e) => set("enabled", e.target.checked)} disabled={!manage} />
                 <span>
-                  <Link to={`/servers/${s.id}`}>{s.name}</Link> <span className="hint">port {s.port}</span>
-                  {!s.hasBridge && form.casual.serverIds.includes(s.id) && (
-                    <span className="hint"> · without CounterStrikeSharp, CS2's own auto-balance picks teams instead</span>
-                  )}
+                  <b>Matchmaking site is open</b>
+                  <br />
+                  <span className="hint">When it's off, the page isn't served at all. Running matches finish either way.</span>
                 </span>
               </label>
-            ))}
+              <label className="field">
+                <span>Name on the page</span>
+                <input value={form.title} onChange={(e) => set("title", e.target.value)} maxLength={60} disabled={!manage} />
+              </label>
+              <label className="field">
+                <span>Port</span>
+                <input type="number" min={1024} max={65535} value={form.port} onChange={(e) => set("port", Number(e.target.value))} disabled={!manage} />
+                <small>Players open the page on this port. Forward it (TCP) on your router to let people outside your network in.</small>
+              </label>
+              <label className="field">
+                <span>Address players connect to</span>
+                <input value={form.gameAddress} onChange={(e) => set("gameAddress", e.target.value)} placeholder="Same as the page" disabled={!manage} />
+                <small>Leave empty to use the address people opened the page with. Set it if they reach the page through another name than the servers.</small>
+              </label>
+              <label className="field">
+                <span>Seconds per ban</span>
+                <input
+                  type="number"
+                  min={10}
+                  max={120}
+                  value={form.vetoSeconds}
+                  onChange={(e) => set("vetoSeconds", Number(e.target.value))}
+                  disabled={!manage}
+                />
+                <small>A captain who runs out of time bans a random map. Also the time to pick a side.</small>
+              </label>
+            </div>
           </div>
-        </div>
+        )}
 
-        <div className="panel">
-          <h2 style={{ marginBottom: 6 }}>Lobbies</h2>
-          <p className="hint" style={{ marginTop: 0 }}>
-            Players pick one of the open lobbies when they come to the page. Each has its own map pool: the captains take turns banning from it until one is
-            left, like on FACEIT, and the team that didn't make the last ban picks its side.
-          </p>
-          <p className="hint">
-            Tick the servers each lobby runs on. A free one is started if it's stopped, set to the lobby's game mode on the voted map, locked to the match's
-            players with a password, and emptied when the match ends. A server can serve more than one lobby; pick servers nobody else plays on during the
-            event.
-          </p>
-          {missingBridge.length > 0 && (
-            <p className="notice warn">
-              {missingBridge.map((s) => s.name).join(", ")} can't be used until CounterStrikeSharp is installed on its Plugins tab. The CS2 Panel Bridge comes
-              with it and keeps strangers off the server during a match.
+        {tab === "discord" && (
+          <div className="panel">
+            <h2 style={{ marginBottom: 6 }}>Discord</h2>
+            <p className="hint" style={{ marginTop: 0 }}>
+              Players get a <b>Join Discord channel</b> button for their voice channel. Right-click a voice channel in Discord, pick <b>Copy Link</b> and paste
+              it here. The lists follow the servers ticked on the Lobbies and Casual tabs; an empty field shows no button.
             </p>
-          )}
-          <div className="mm-lobbies">
-            {MODES.map((mode) => (
-              <LobbySettings
-                key={mode}
-                mode={mode}
-                value={form.modes[mode]}
-                stock={data.maps}
-                manage={manage}
-                names={names}
-                onChange={(v) => set("modes", { ...form.modes, [mode]: v })}
-                onTitle={(map, title) => setTitles((t) => ({ ...t, [map]: title }))}
-                servers={lobbyServers(mode)}
+            <label className="field" style={{ maxWidth: 480 }}>
+              <span>Invite link (shown as "Not on our Discord? Join here")</span>
+              <input
+                value={form.discord.invite}
+                placeholder="https://discord.gg/…"
+                onChange={(e) => set("discord", { ...form.discord, invite: e.target.value.trim() })}
+                disabled={!manage}
               />
+            </label>
+
+            <h3 className="mm-discord-head">1v1</h3>
+            <p className="hint" style={{ marginTop: 0 }}>
+              One channel for everyone in 1v1 matches. Every 1v1 server uses it, unless you give a server its own.
+            </p>
+            <label className="field" style={{ maxWidth: 480 }}>
+              <span>Shared 1v1 voice channel</span>
+              <input
+                value={form.discord.duel}
+                placeholder="https://discord.com/channels/…"
+                onChange={(e) => setDiscord("duel", e.target.value)}
+                disabled={!manage}
+              />
+            </label>
+            {serversIn("duel").map((s) => (
+              <label key={s.id} className="field mm-discord-row">
+                <span>
+                  {s.name}{" "}
+                  <span className="hint">
+                    · {(form.discord.duelServers ?? {})[String(s.id)] ? "own channel" : form.discord.duel ? "uses the shared channel" : "no channel yet"}
+                  </span>
+                </span>
+                <input
+                  value={(form.discord.duelServers ?? {})[String(s.id)] ?? ""}
+                  placeholder="Optional: its own channel instead of the shared one"
+                  onChange={(e) => setServerChannel("duelServers", s.id, e.target.value)}
+                  disabled={!manage}
+                />
+              </label>
             ))}
+            {serversIn("duel").length === 0 && <p className="hint">No servers ticked for 1v1.</p>}
+
+            <h3 className="mm-discord-head">Competitive and Wingman</h3>
+            <p className="hint" style={{ marginTop: 0 }}>
+              Two channels per server, one per team. A server in both lobbies is listed once.
+            </p>
+            {teamServers.map((s) => {
+              const ch = form.discord.channels[String(s.id)] ?? { a: "", b: "" };
+              const setCh = (team: "a" | "b", v: string) => {
+                const next = { ...ch, [team]: v.trim() };
+                const channels = { ...form.discord.channels };
+                if (!next.a && !next.b) delete channels[String(s.id)];
+                else channels[String(s.id)] = next;
+                set("discord", { ...form.discord, channels });
+              };
+              const lobbies = (["competitive", "wingman"] as const)
+                .filter((m) => (form.modes[m].serverIds ?? []).includes(s.id))
+                .map((m) => MODE_TEXT[m].label);
+              return (
+                <div key={s.id} style={{ marginTop: 10 }}>
+                  <b>{s.name}</b> <span className="hint">· {lobbies.join(" and ")}</span>
+                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 4, maxWidth: 980 }}>
+                    {(["a", "b"] as const).map((t) => (
+                      <label key={t} className="field" style={{ flex: "1 1 280px" }}>
+                        <span>Team {t === "a" ? 1 : 2} voice channel</span>
+                        <input value={ch[t]} placeholder="https://discord.com/channels/…" onChange={(e) => setCh(t, e.target.value)} disabled={!manage} />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+            {teamServers.length === 0 && <p className="hint">No servers ticked for Competitive or Wingman.</p>}
+
+            <h3 className="mm-discord-head">Casual</h3>
+            <label className="field" style={{ maxWidth: 480 }}>
+              <span>Shared casual voice channel</span>
+              <input
+                value={form.discord.casual}
+                placeholder="https://discord.com/channels/…"
+                onChange={(e) => setDiscord("casual", e.target.value)}
+                disabled={!manage}
+              />
+            </label>
+            {casualServers.map((s) => (
+              <label key={s.id} className="field mm-discord-row">
+                <span>
+                  {s.name}{" "}
+                  <span className="hint">
+                    · {(form.discord.casualServers ?? {})[String(s.id)] ? "own channel" : form.discord.casual ? "uses the shared channel" : "no channel"}
+                  </span>
+                </span>
+                <input
+                  value={(form.discord.casualServers ?? {})[String(s.id)] ?? ""}
+                  placeholder="Optional: its own channel instead of the shared one"
+                  onChange={(e) => setServerChannel("casualServers", s.id, e.target.value)}
+                  disabled={!manage}
+                />
+              </label>
+            ))}
+            {casualServers.length === 0 && <p className="hint">No casual servers ticked.</p>}
           </div>
-          <label className="field" style={{ marginTop: 16, maxWidth: 320 }}>
-            <span>Bot for odd numbers</span>
-            <select value={form.botDifficulty} onChange={(e) => set("botDifficulty", Number(e.target.value))} disabled={!manage}>
-              {BOT_LEVELS.map((b, i) => (
-                <option key={b.label} value={i}>
-                  {b.label} (counts as {b.rating.toLocaleString("en")})
-                </option>
+        )}
+
+        {tab === "casual" && (
+          <div className="panel">
+            <h2 style={{ marginBottom: 6 }}>Casual servers</h2>
+            <p className="hint" style={{ marginTop: 0 }}>
+              Shown on the site to everyone, signed in or not, with a button to join. No ratings, no teams made by the site and no map voting: people join any
+              time and are put on the smaller team, and can switch teams afterwards. The server's password (if it has one) is shown on the site.
+            </p>
+            <label className="field" style={{ maxWidth: 320 }}>
+              <span>Name on the site</span>
+              <input value={form.casual.name} onChange={(e) => set("casual", { ...form.casual, name: e.target.value })} maxLength={40} disabled={!manage} />
+            </label>
+            <div className="exec-list" style={{ marginTop: 12 }}>
+              {data.servers.map((s) => (
+                <label key={s.id} className="check">
+                  <input
+                    type="checkbox"
+                    checked={form.casual.serverIds.includes(s.id)}
+                    onChange={(e) =>
+                      set("casual", {
+                        ...form.casual,
+                        serverIds: e.target.checked ? [...form.casual.serverIds, s.id] : form.casual.serverIds.filter((x) => x !== s.id),
+                      })
+                    }
+                    disabled={!manage}
+                  />
+                  <span>
+                    <Link to={`/servers/${s.id}`}>{s.name}</Link> <span className="hint">port {s.port}</span>
+                    {!s.hasBridge && form.casual.serverIds.includes(s.id) && (
+                      <span className="hint"> · without CounterStrikeSharp, CS2's own auto-balance picks teams instead</span>
+                    )}
+                  </span>
+                </label>
               ))}
-            </select>
-            <small>With an odd number of players in Competitive or Wingman, a bot joins the smaller team so nobody sits out.</small>
-          </label>
-        </div>
+            </div>
+          </div>
+        )}
 
-        <LookSettings info={data} look={form.look} manage={manage} onChange={(look) => set("look", look)} onImages={() => void refresh()} />
+        {tab === "lobbies" && (
+          <div className="panel">
+            <h2 style={{ marginBottom: 6 }}>Lobbies</h2>
+            <p className="hint" style={{ marginTop: 0 }}>
+              Players pick one of the open lobbies when they come to the page. Each has its own map pool: the captains take turns banning from it until one is
+              left, like on FACEIT, and the team that didn't make the last ban picks its side.
+            </p>
+            <p className="hint">
+              Tick the servers each lobby runs on. A free one is started if it's stopped, set to the lobby's game mode on the voted map, locked to the match's
+              players with a password, and emptied when the match ends. A server can serve more than one lobby; pick servers nobody else plays on during the
+              event.
+            </p>
+            {missingBridge.length > 0 && (
+              <p className="notice warn">
+                {missingBridge.map((s) => s.name).join(", ")} can't be used until CounterStrikeSharp is installed on its Plugins tab. The CS2 Panel Bridge comes
+                with it and keeps strangers off the server during a match.
+              </p>
+            )}
+            <div className="mm-lobbies">
+              {MODES.map((mode) => (
+                <LobbySettings
+                  key={mode}
+                  mode={mode}
+                  value={form.modes[mode]}
+                  stock={data.maps}
+                  manage={manage}
+                  names={names}
+                  onChange={(v) => set("modes", { ...form.modes, [mode]: v })}
+                  onTitle={(map, title) => setTitles((t) => ({ ...t, [map]: title }))}
+                  servers={lobbyServers(mode)}
+                />
+              ))}
+            </div>
+            <label className="field" style={{ marginTop: 16, maxWidth: 320 }}>
+              <span>Bot for odd numbers</span>
+              <select value={form.botDifficulty} onChange={(e) => set("botDifficulty", Number(e.target.value))} disabled={!manage}>
+                {BOT_LEVELS.map((b, i) => (
+                  <option key={b.label} value={i}>
+                    {b.label} (counts as {b.rating.toLocaleString("en")})
+                  </option>
+                ))}
+              </select>
+              <small>With an odd number of players in Competitive or Wingman, a bot joins the smaller team so nobody sits out.</small>
+            </label>
+          </div>
+        )}
 
-        {manage && (
-          <div className="row-actions" style={{ margin: "16px 0" }}>
+        {tab === "site" && <LookSettings info={data} look={form.look} manage={manage} onChange={(look) => set("look", look)} onImages={() => void refresh()} />}
+
+        {/* One Save for all settings tabs; it stays in view at the bottom while there are changes. */}
+        {manage && tab !== "overview" && (
+          <div className={`row-actions mm-savebar${dirty ? " dirty" : ""}`}>
             <button className="btn primary" disabled={busy || !dirty}>
               Save
             </button>
@@ -402,45 +451,44 @@ export function MatchmakingPage() {
       </form>
 
       {/* Its own form (it saves on its own), so outside the settings form. */}
-      <DiscordBotPanel />
-      <HttpsSettings manage={manage} />
+      {tab === "discord" && <DiscordBotPanel />}
+      {tab === "site" && <HttpsSettings manage={manage} />}
 
-      <div className="panel">
-        <h2 style={{ marginBottom: 6 }}>Leetify</h2>
-        <p className="hint" style={{ marginTop: 0 }}>
-          Premier ratings come from Leetify's public API; players Leetify doesn't know can type in their own. It works without a key, but a key from{" "}
-          <a href="https://leetify.com/app/developer" target="_blank" rel="noreferrer">
-            leetify.com/app/developer
-          </a>{" "}
-          gets higher limits. Leetify's data isn't stored, as their rules ask; it's looked up again when needed.
-        </p>
-        {manage ? (
-          <form className="row-actions" onSubmit={(e) => save(e, key)}>
-            <input
-              type="password"
-              autoComplete="off"
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-              placeholder={data.leetifyKeyHint ? `Key set (${data.leetifyKeyHint})` : "Leetify API key"}
-              style={{ maxWidth: 320 }}
-              aria-label="Leetify API key"
-            />
-            <button className="btn" disabled={busy || !key.trim()}>
-              {data.leetifyKeyHint ? "Replace key" : "Save key"}
-            </button>
-            {data.leetifyKeyHint && (
-              <button type="button" className="btn ghost danger" disabled={busy} onClick={(e) => save(e, null)}>
-                Remove key
+      {tab === "site" && (
+        <div className="panel">
+          <h2 style={{ marginBottom: 6 }}>Leetify</h2>
+          <p className="hint" style={{ marginTop: 0 }}>
+            Premier ratings come from Leetify's public API; players Leetify doesn't know can type in their own. It works without a key, but a key from{" "}
+            <a href="https://leetify.com/app/developer" target="_blank" rel="noreferrer">
+              leetify.com/app/developer
+            </a>{" "}
+            gets higher limits. Leetify's data isn't stored, as their rules ask; it's looked up again when needed.
+          </p>
+          {manage ? (
+            <form className="row-actions" onSubmit={(e) => save(e, key)}>
+              <input
+                type="password"
+                autoComplete="off"
+                value={key}
+                onChange={(e) => setKey(e.target.value)}
+                placeholder={data.leetifyKeyHint ? `Key set (${data.leetifyKeyHint})` : "Leetify API key"}
+                style={{ maxWidth: 320 }}
+                aria-label="Leetify API key"
+              />
+              <button className="btn" disabled={busy || !key.trim()}>
+                {data.leetifyKeyHint ? "Replace key" : "Save key"}
               </button>
-            )}
-          </form>
-        ) : (
-          <p className="hint">{data.leetifyKeyHint ? `A key is set (${data.leetifyKeyHint}).` : "No key set."}</p>
-        )}
-      </div>
-
-      <LiveSection info={data} moderate={moderate} refresh={refresh} />
-      <HistorySection info={data} />
+              {data.leetifyKeyHint && (
+                <button type="button" className="btn ghost danger" disabled={busy} onClick={(e) => save(e, null)}>
+                  Remove key
+                </button>
+              )}
+            </form>
+          ) : (
+            <p className="hint">{data.leetifyKeyHint ? `A key is set (${data.leetifyKeyHint}).` : "No key set."}</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -587,7 +635,7 @@ function SiteStatus({ info, pageUrl }: { info: MatchmakingInfo; pageUrl: string 
   if (!info.settings.enabled)
     return (
       <div className="notice info" style={{ marginBottom: 16 }}>
-        The matchmaking site is closed. Tick "open" below and save to start it.
+        The matchmaking site is closed. Open it on the Site tab ("Matchmaking site is open") and save.
       </div>
     );
   if (!info.site.listening)
