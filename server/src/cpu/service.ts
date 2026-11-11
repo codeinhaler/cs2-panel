@@ -277,10 +277,13 @@ export class CpuService implements CpuHooks {
     };
   }
 
-  /** Two /proc/stat snapshots; on the very first call it waits a moment for the second. */
+  private primed = false;
+
+  /** Two /proc/stat snapshots; only the very first call waits a moment for the second (not every call when /proc/stat can't be read). */
   private async usageSnapshot() {
     let u = await this.sampler.sample();
-    if (!u) {
+    if (!u && !this.primed) {
+      this.primed = true;
       await new Promise((r) => setTimeout(r, 300));
       u = await this.sampler.sample();
     }
