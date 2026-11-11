@@ -43,7 +43,10 @@ export function NewServerPage() {
       setPresets(r.presets);
       setPresetId((p) => p ?? r.presets[0]?.id ?? null);
     });
-    void api.catalog().then((r) => setCatalog(r.plugins)).catch(() => undefined);
+    void api
+      .catalog()
+      .then((r) => setCatalog(r.plugins))
+      .catch(() => undefined);
     void api.host().then((h) => {
       setHost(h);
       setCpu(String(h.suggestedCpu));
@@ -146,12 +149,7 @@ export function NewServerPage() {
             <MapPicker value={map} onChange={setMap} placeholder={preset?.defaultMap ?? "de_dust2"} gsltSet={!!gslt.trim()} />
             <label className="field">
               <span>Max players</span>
-              <input
-                inputMode="numeric"
-                value={maxPlayers}
-                onChange={(e) => setMaxPlayers(e.target.value)}
-                placeholder={String(preset?.maxPlayers ?? 10)}
-              />
+              <input inputMode="numeric" value={maxPlayers} onChange={(e) => setMaxPlayers(e.target.value)} placeholder={String(preset?.maxPlayers ?? 10)} />
             </label>
           </div>
         </div>
@@ -213,20 +211,31 @@ export function NewServerPage() {
                             {p.name}
                             <small className="hint">
                               {" — "}
-                              {neededBy.length ? `needed by ${neededBy.join(", ")}` : hostOn && !picked.includes(p.id) ? `comes with ${host!.name}` : p.description}
+                              {neededBy.length
+                                ? `needed by ${neededBy.join(", ")}`
+                                : hostOn && !picked.includes(p.id)
+                                  ? `comes with ${host!.name}`
+                                  : p.description}
                             </small>
                           </span>
                         </label>
                       );
                     })}
                 </div>
-                <small className="hint">Optional. Installed right after the server is created, along with anything they need. You can also add them later on the Plugins tab.</small>
+                <small className="hint">
+                  Optional. Installed right after the server is created, along with anything they need. You can also add them later on the Plugins tab.
+                </small>
               </fieldset>
             )}
             {can("server.rawargs") && (
               <label className="field wide">
                 <span>Extra launch arguments</span>
-                <input value={extraArgs} onChange={(e) => setExtraArgs(e.target.value)} placeholder="Optional, e.g. +sv_visiblemaxplayers 12" spellCheck={false} />
+                <input
+                  value={extraArgs}
+                  onChange={(e) => setExtraArgs(e.target.value)}
+                  placeholder="Optional, e.g. +sv_visiblemaxplayers 12"
+                  spellCheck={false}
+                />
               </label>
             )}
           </div>
@@ -252,7 +261,7 @@ export function NewServerPage() {
           <button className="btn primary" disabled={busy || !preset || !name || !port}>
             {busy ? "Creating…" : "Create server"}
           </button>
-          <Link to="/" className="btn ghost">
+          <Link to="/servers" className="btn ghost">
             Cancel
           </Link>
         </div>

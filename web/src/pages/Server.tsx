@@ -24,7 +24,7 @@ export function ServerPage() {
   if (error && !data) {
     return (
       <div className="notice error">
-        {error} <Link to="/">Back to servers</Link>
+        {error} <Link to="/servers">Back to servers</Link>
       </div>
     );
   }
@@ -123,7 +123,7 @@ function Overview({ server: s }: { server: Server }) {
           </div>
           <div>
             <dt>Join password</dt>
-            <dd>{s.password ? (can("server.manage") ? <code>{s.password}</code> : "Set") : "None"}</dd>
+            <dd>{s.password ? can("server.manage") ? <code>{s.password}</code> : "Set" : "None"}</dd>
           </div>
           <div>
             <dt>Public listing</dt>
@@ -151,7 +151,9 @@ function Overview({ server: s }: { server: Server }) {
           )}
           <div>
             <dt>Created</dt>
-            <dd><span title={fullTime(s.createdAt)}>{timeAgo(s.createdAt)}</span></dd>
+            <dd>
+              <span title={fullTime(s.createdAt)}>{timeAgo(s.createdAt)}</span>
+            </dd>
           </div>
         </dl>
         <p className="hint" style={{ marginTop: 18, marginBottom: 0 }}>

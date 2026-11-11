@@ -207,7 +207,7 @@ function DeletePanel({ server: s }: { server: Server }) {
   const remove = async (e: React.FormEvent) => {
     e.preventDefault();
     const r = await run(() => api.deleteServer(s.id, confirm), `Deleted ${s.name}.`);
-    if (r) navigate("/");
+    if (r) navigate("/servers");
   };
 
   return (

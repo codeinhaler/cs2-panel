@@ -4,6 +4,8 @@ A web panel for running CS2 community servers on one Debian machine: create serv
 
 The design is in [docs/DESIGN.md](docs/DESIGN.md).
 
+The menu: **Monitor** (the home page), **Game servers** (Servers, Game update, Presets, Shared settings), **Matchmaking**, and **CS2 Panel** (Team, Backups, Notifications, Activity). The two groups fold open when clicked, and on their own when you're on one of their pages. The server list is at `/servers`; old `/monitor` links go to the home page.
+
 ## What's in Phase 1
 
 - Sign in with Steam. One Owner, who adds Admins and Moderators in the panel.
