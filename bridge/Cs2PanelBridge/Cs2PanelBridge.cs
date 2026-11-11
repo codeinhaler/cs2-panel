@@ -30,7 +30,7 @@ namespace Cs2PanelBridge;
 public class Cs2PanelBridge : BasePlugin
 {
     public override string ModuleName => "CS2 Panel Bridge";
-    public override string ModuleVersion => "1.8.0";
+    public override string ModuleVersion => "1.8.1";
     public override string ModuleAuthor => "cs2-panel";
     public override string ModuleDescription => "Enforces cs2-panel bans, locks matchmaking matches and reports players to the panel.";
 
@@ -106,6 +106,8 @@ public class Cs2PanelBridge : BasePlugin
         RegisterEventHandler<EventPlayerDeath>(OnPlayerDeath);
         RegisterEventHandler<EventPlayerSpawn>(OnPlayerSpawn);
         RegisterEventHandler<EventPlayerDisconnect>(OnPlayerDisconnect);
+        RegisterEventHandler<EventRoundStart>((_, _) => { _roundOver = false; return HookResult.Continue; });
+        RegisterEventHandler<EventRoundEnd>((_, _) => { _roundOver = true; return HookResult.Continue; });
         AddCommandListener("jointeam", OnJoinTeam);
         // Tell people in warmup who the match is still waiting for.
         AddTimer(30.0f, AnnounceMissing, TimerFlags.REPEAT);
@@ -290,7 +292,29 @@ public class Cs2PanelBridge : BasePlugin
             if (player.IsValid) Place(player);
             CheckEveryoneIn();
         });
+        // A 1v1 player who comes back mid-round would sit dead until the next round.
+        AddTimer(2.5f, () => RespawnRejoined(player));
         return HookResult.Continue;
+    }
+
+    /// <summary>Between a round's end and the next round's start.</summary>
+    private bool _roundOver;
+
+    /// <summary>A 1v1: one match player per team (the other may be the bot).</summary>
+    private bool IsDuel => _match != null && !_matchOver && _matchPlayers.Count is >= 1 and <= 2;
+
+    /// <summary>
+    /// In a live 1v1 round, a match player who rejoined (e.g. after a timeout) is respawned straight away,
+    /// with the weapons they bought, instead of waiting out the round with nobody to play against.
+    /// </summary>
+    private void RespawnRejoined(CCSPlayerController player)
+    {
+        if (!IsDuel || _roundOver || IsWarmup() || !player.IsValid || player.PawnIsAlive) return;
+        if (!_matchPlayers.ContainsKey(player.SteamID)) return;
+        if ((CsTeam)player.TeamNum is not (CsTeam.Terrorist or CsTeam.CounterTerrorist)) return;
+        if (KeepWeapons) _died.Add(player.SteamID);
+        player.Respawn();
+        player.PrintToChat(" Welcome back! You've been respawned.");
     }
 
     private HookResult OnPlayerTeam(EventPlayerTeam @event, GameEventInfo info)
