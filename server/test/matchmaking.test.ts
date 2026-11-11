@@ -1471,8 +1471,9 @@ describe("lobby rules config", () => {
     expect(winRoundsFromConfig("mp_maxrounds 30")).toBe(16);
     expect(winRoundsFromConfig('mp_maxrounds "24"\nmp_maxrounds 16')).toBe(9);
     expect(winRoundsFromConfig("mp_freezetime 2")).toBeNull();
-    // The built-in 1v1 rules: 10-minute rounds; earlier built-ins are recognised so saved copies follow along.
-    expect(DUEL_CONFIG).toContain("mp_roundtime 10\n");
-    expect(OLD_DUEL_CONFIGS[0]).toContain("mp_roundtime 1\n");
+    // The built-in 1v1 rules: 90-second rounds; earlier built-ins are recognised so saved copies follow along.
+    expect(DUEL_CONFIG).toContain("mp_roundtime 1.5\n");
+    expect(OLD_DUEL_CONFIGS.some((c) => c.includes("mp_roundtime 10\n"))).toBe(true);
+    expect(OLD_DUEL_CONFIGS.some((c) => c.includes("mp_roundtime 1\n"))).toBe(true);
   });
 });

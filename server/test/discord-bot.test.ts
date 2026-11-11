@@ -317,6 +317,12 @@ describe("Discord bot: moving players", () => {
     await bot.matchLive(comp(2, [1], [], 2));
     expect(discord.voice.get(DISC[0]!)).toBe(T1);
     expect(bot.recentActions().some((a) => /stays put: match 1/.test(a.text))).toBe(true);
+    // A new link is moved automatically by default; re-linking keeps the choice.
+    bot.link(STEAM[3]!, { id: DISC[3]!, username: "P3" });
+    expect(bot.playerView(STEAM[3]!)).toMatchObject({ autoMove: true });
+    bot.setPrefs(STEAM[3]!, { autoMove: false, autoReturn: true });
+    bot.link(STEAM[3]!, { id: DISC[3]!, username: "P3" });
+    expect(bot.playerView(STEAM[3]!)).toMatchObject({ autoMove: false });
     // The same Discord user's choices are shared by both Steam accounts.
     expect(bot.playerView(STEAM[1]!)).toMatchObject({ linked: { username: "P0" }, autoMove: true });
   });

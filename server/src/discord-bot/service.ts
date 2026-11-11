@@ -666,7 +666,8 @@ export class DiscordBot {
     const name = user.global_name || user.username;
     this.d.db
       .prepare(
-        `INSERT INTO discord_users (discord_id, username) VALUES (?, ?)
+        // New players are moved automatically unless they switch it off; a re-link keeps their choice.
+        `INSERT INTO discord_users (discord_id, username, auto_move) VALUES (?, ?, 1)
          ON CONFLICT(discord_id) DO UPDATE SET username = excluded.username, updated_at = datetime('now')`,
       )
       .run(user.id, name);

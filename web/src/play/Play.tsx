@@ -179,7 +179,7 @@ const inTeams = (m: { teamA: Member[]; teamB: Member[] }, id: string) => [...m.t
 
 // ------------------------------------------------------------- Discord (optional)
 
-/** Link Discord once; then opt in to being moved into your match's voice channel. Never needed to play. */
+/** Link Discord once; being moved into your match's voice channel is then on by default (each player can switch it off). Never needed to play. */
 function DiscordCard() {
   const [d, setD] = useState<DiscordMe | null>(null);
   const [busy, setBusy] = useState(false);
