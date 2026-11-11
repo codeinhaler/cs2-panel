@@ -33,6 +33,7 @@ import { ExecConfigService, withBlock } from "./servers/exec-configs.js";
 import { MapCycleService, isCasual } from "./servers/map-cycle.js";
 import { BridgeAutoUpdate } from "./plugins/bridge-autoupdate.js";
 import { CpuService } from "./cpu/service.js";
+import { DiscordBot } from "./discord-bot/service.js";
 import { sysReader, type SysReader } from "./cpu/topology.js";
 import { SharedConfigService, withoutSharedBlock } from "./servers/shared-config.js";
 import { WorkshopLookup, workshopBlocks } from "./game/workshop.js";
@@ -101,6 +102,7 @@ export interface App {
     matchmaking: Matchmaking;
     publicSite: PublicSite;
     tls: TlsService;
+    discordBot: DiscordBot;
   };
 }
 
@@ -238,10 +240,22 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     ...(deps.tls ?? {}),
   });
   await tls.load();
+  // The Discord bot: optional voice automation for matches. Never holds up matchmaking.
+  const discordBot = new DiscordBot({
+    db,
+    settings,
+    box,
+    audit,
+    fetchFn,
+    configured: () => matchmaking.config().discord,
+    isMatchActive: (id) => matchmaking.isMatchActive(id),
+  });
+  matchmaking.voice = discordBot;
   const publicSite = new PublicSite(
     (https) =>
       buildPublicApp({
         https,
+        discordBot,
         mm: matchmaking,
         players: mmPlayers,
         isBanned,
@@ -547,6 +561,48 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     const user = requirePerm(req, "config.edit");
     const { id } = idParam.parse(req.params);
     return { mapCycle: await mapCycles.set(servers.require(id), req.body, user.id) };
+  });
+
+  // ------------------------------------------------------------- Discord bot
+
+  /** The address players come back to after Discord sign-in (to register in the Discord Developer Portal). */
+  const discordRedirect = () => {
+    const h = tls.https();
+    return h.enabled && h.domain ? `https://${h.domain}/api/discord/callback` : null;
+  };
+
+  app.get("/api/discord-bot", async (req) => {
+    requirePerm(req, "view");
+    return {
+      settings: discordBot.view(),
+      status: discordBot.getStatus(),
+      guildId: discordBot.guildId(),
+      inviteUrl: discordBot.inviteUrl(),
+      redirectUri: discordRedirect(),
+      ...discordBot.monitoring(),
+    };
+  });
+
+  app.put("/api/discord-bot", async (req) => {
+    const user = requirePerm(req, "server.manage");
+    return { settings: await discordBot.save(req.body, user.id) };
+  });
+
+  app.post("/api/discord-bot/check", async (req) => {
+    requirePerm(req, "server.manage");
+    return discordBot.check();
+  });
+
+  // Moves only the admin who presses it (their own linked Discord), to a test channel and back.
+  app.post("/api/discord-bot/test-move", async (req) => {
+    const user = requirePerm(req, "server.manage");
+    return discordBot.testMove(user.steamId);
+  });
+
+  app.post("/api/discord-bot/reconcile", async (req) => {
+    requirePerm(req, "server.manage");
+    await discordBot.reconcile();
+    return { ok: true };
   });
 
   // ------------------------------------------------------------- CPU Management
@@ -1473,6 +1529,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       matchmaking,
       publicSite,
       tls,
+      discordBot,
     },
   };
 }

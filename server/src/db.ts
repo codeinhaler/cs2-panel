@@ -237,6 +237,46 @@ const MIGRATIONS: string[] = [
   ALTER TABLE servers ADD COLUMN cpu_set TEXT;
   ALTER TABLE servers ADD COLUMN cpu_mode TEXT NOT NULL DEFAULT 'manual';
   `,
+  /* 14: Discord bot: linked accounts, players' choices, voice sessions and the channels it made */ `
+  CREATE TABLE discord_users (
+    discord_id  TEXT PRIMARY KEY,
+    username    TEXT NOT NULL,
+    auto_move   INTEGER NOT NULL DEFAULT 0,
+    auto_return INTEGER NOT NULL DEFAULT 1,
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE discord_links (
+    steam_id    TEXT PRIMARY KEY,
+    discord_id  TEXT NOT NULL REFERENCES discord_users(discord_id),
+    linked_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX discord_links_user ON discord_links(discord_id);
+  CREATE TABLE discord_sessions (
+    discord_id  TEXT PRIMARY KEY,
+    match_id    INTEGER NOT NULL,
+    steam_id    TEXT NOT NULL,
+    channel_id  TEXT NOT NULL,
+    origin_id   TEXT,
+    moved_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE discord_moves (
+    match_id    INTEGER NOT NULL,
+    discord_id  TEXT NOT NULL,
+    result      TEXT NOT NULL,
+    at          TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (match_id, discord_id)
+  );
+  CREATE TABLE discord_channels (
+    channel_id  TEXT PRIMARY KEY,
+    match_id    INTEGER NOT NULL,
+    team        TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    ended_at    TEXT,
+    deleted_at  TEXT
+  );
+  CREATE INDEX discord_channels_match ON discord_channels(match_id);
+  `,
 ];
 
 export function openDb(file: string): Db {

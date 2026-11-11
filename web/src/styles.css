@@ -2036,3 +2036,25 @@ details.inline-form[open] > summary {
   max-width: 480px;
   margin-top: 8px;
 }
+
+.mm-bot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px 14px;
+  margin-top: 8px;
+}
+.mm-check-list {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 0;
+  font-size: 0.9rem;
+}
+.mm-check-list li {
+  padding: 2px 0;
+}
+.mm-check-list li.bad {
+  color: var(--fail);
+}
+.text-fail {
+  color: var(--fail);
+}

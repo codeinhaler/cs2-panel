@@ -653,3 +653,10 @@
 .play-discord-browser:hover {
   opacity: 1;
 }
+
+.play-discord-card .play-discord-prefs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0 10px;
+}

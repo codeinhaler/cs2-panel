@@ -1094,6 +1094,37 @@ describe("matchmaking site", () => {
     });
   });
 
+  it("tells the Discord bot when a match goes live and ends, and carries on when the bot fails", async () => {
+    const owner = await adminCookie();
+    await enable(owner, [await setupServer(owner)]);
+    const calls: string[] = [];
+    app.services.matchmaking.voice = {
+      matchLive: async (m) => {
+        calls.push(`live ${m.id} ${m.mode} a=${m.teams.a.length} b=${m.teams.b.length}`);
+        throw new Error("Discord is down");
+      },
+      matchEnded: async (id) => {
+        calls.push(`ended ${id}`);
+        throw new Error("Discord is down");
+      },
+      channelLinkFor: (_id, steamId) => (steamId === P[0] ? "https://discord.com/channels/1/2" : null),
+    };
+    const cookies = await Promise.all(P.slice(0, 2).map((id, i) => playerCookie(id, ["Alpha", "Bravo"][i]!)));
+    for (const c of cookies) await play(c, "POST", "/api/lobby/join", { mode: "duel" });
+    await play(cookies[0]!, "POST", "/api/teams");
+    const draft = (await play(cookies[0]!, "GET", "/api/state")).body.drafts[0];
+    const { matchId } = (await play(cookies[0]!, "POST", `/api/teams/${draft.id}/start`)).body;
+    const m = await toLive(cookies, P, matchId);
+    expect(m.phase).toBe("live");
+    expect(calls).toEqual([`live ${matchId} duel a=1 b=1`]);
+    // A linked player sees the bot's temporary channel; the other keeps the configured one (none here).
+    expect((await play(cookies[0]!, "GET", "/api/state")).body.matches[0].discord).toEqual({ channel: "https://discord.com/channels/1/2", invite: null });
+    expect((await play(cookies[1]!, "GET", "/api/state")).body.matches[0].discord).toBeNull();
+    expect((await play(cookies[0]!, "POST", `/api/matches/${matchId}/cancel`)).status).toBe(200);
+    expect(calls).toContain(`ended ${matchId}`);
+    expect((await play(cookies[0]!, "GET", "/api/state")).body.matches[0].phase).toBe("cancelled");
+  });
+
   // ------------------------------------------------------------- servers per lobby
 
   it("runs each lobby on its own servers", async () => {

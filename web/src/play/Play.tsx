@@ -7,6 +7,7 @@ import {
   mapName,
   play,
   teamsLabel,
+  type DiscordMe,
   type Draft,
   type LobbyPlayer,
   type Match,
@@ -155,6 +156,7 @@ export function Play() {
             ))}
           {!me.inLobby && !myMatch && casualOpen && state.casual.servers.length > 0 && <CasualCard state={state} />}
           <RatingCard state={state} busy={busy} act={act} />
+          <DiscordCard />
         </>
       )}
 
@@ -174,6 +176,89 @@ type Act = (fn: () => Promise<unknown>) => Promise<void>;
 
 const isActive = (m: Match) => ["veto", "side", "starting", "live"].includes(m.phase);
 const inTeams = (m: { teamA: Member[]; teamB: Member[] }, id: string) => [...m.teamA, ...m.teamB].some((p) => p.steamId === id);
+
+// ------------------------------------------------------------- Discord (optional)
+
+/** Link Discord once; then opt in to being moved into your match's voice channel. Never needed to play. */
+function DiscordCard() {
+  const [d, setD] = useState<DiscordMe | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const justLinked = useRef(new URLSearchParams(window.location.search).get("discord") === "linked");
+  useEffect(() => {
+    void play
+      .discord()
+      .then(setD)
+      .catch(() => undefined);
+    if (justLinked.current) window.history.replaceState(null, "", window.location.pathname);
+  }, []);
+  if (!d || !d.available) return null;
+  const run = async (fn: () => Promise<DiscordMe | unknown>) => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await fn();
+      setD(await play.discord());
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="panel play-discord-card">
+      <div className="panel-head">
+        <h2>Discord</h2>
+        {d.linked && <span className="hint">Linked as {d.linked.username}</span>}
+      </div>
+      {err && <p className="notice error">{err}</p>}
+      {!d.linked ? (
+        <>
+          <p className="hint">
+            Link your Discord account once{d.botOn ? " and the bot can move you into your team's voice channel when your match starts" : ""}. Optional: you can
+            always play without it.
+          </p>
+          <a className="btn play-discord-btn" href={`${API}/discord/link`}>
+            Link Discord account
+          </a>
+        </>
+      ) : (
+        <>
+          {justLinked.current && <p className="notice info">Discord linked.</p>}
+          {d.botOn ? (
+            <div className="play-discord-prefs">
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={d.autoMove}
+                  disabled={busy}
+                  onChange={(e) => void run(() => play.discordPrefs({ autoMove: e.target.checked, autoReturn: d.autoReturn }))}
+                />
+                <span>
+                  Move me to my match's voice channel <span className="hint">· when I'm in the waiting room on Discord</span>
+                </span>
+              </label>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={d.autoReturn}
+                  disabled={busy || !d.autoMove}
+                  onChange={(e) => void run(() => play.discordPrefs({ autoMove: d.autoMove, autoReturn: e.target.checked }))}
+                />
+                <span>Move me back to the waiting room after the match</span>
+              </label>
+            </div>
+          ) : (
+            <p className="hint">Automatic voice moving isn't switched on for this event; the Join Discord channel button works as always.</p>
+          )}
+          <button type="button" className="btn ghost small" disabled={busy} onClick={() => void run(() => play.discordUnlink())}>
+            Unlink Discord
+          </button>
+        </>
+      )}
+    </section>
+  );
+}
 
 // ------------------------------------------------------------- your rating
 

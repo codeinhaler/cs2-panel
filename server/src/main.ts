@@ -23,6 +23,11 @@ const { fastify, services } = await buildApp({ config, db, host });
 services.players.startPolling();
 services.automation.start();
 await services.matchmaking.recover();
+// Discord bot: check the connection, close sessions and channels of matches that ended while the panel was down.
+void services.discordBot.healthCheck().then(() => services.discordBot.reconcile());
+setInterval(() => {
+  void services.discordBot.healthCheck().then(() => services.discordBot.reconcile());
+}, 10 * 60_000).unref();
 services.tls.start();
 services.matchmaking.start();
 

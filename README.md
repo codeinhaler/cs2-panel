@@ -53,6 +53,26 @@ The menu: **Monitor** (the home page), **Game servers** (Servers, Game update, P
 - **Shared settings** (Shared settings page): a hostname prefix, server-browser tags and any cvars for every server. The panel writes them into `cfg/cs2panel_shared.cfg` in each server and runs it at the top of `server.cfg`, so a server's own `server.cfg` can override any shared value; a server can also opt out completely. Saving applies to running servers right away. Passwords, hostname, game mode and map commands are refused there because the panel sets them.
 - Automatic actions show up in Activity as "System", with the reason.
 
+## Discord bot (optional)
+
+On the Matchmaking page, under **Discord bot**. Players who link their Discord account on the matchmaking site and switch on "Move me to my match's voice channel" are moved from the waiting room into their match's channel when the match goes live, and back after it. Everyone else keeps the **Join Discord channel** button. Matchmaking never waits for Discord: if the bot is off, misconfigured or Discord is down, matches start and run as normal.
+
+- **Runs inside the panel**: no extra service, port or library. It uses Discord's REST API (moving members, reading a member's voice state, creating and deleting channels need no Gateway connection), with a queue that waits out Discord's rate limits. Discord shows the bot as offline in the member list; the panel shows its real status (Ready, Error, Not set up, Off, last success, last problem).
+- **Channels**: Competitive and Wingman use the Team 1/Team 2 channels from the Discord section, or temporary channels per team ("Match #42 · Team 1"). 1v1 uses the shared 1v1 channel (or a server's own), or a temporary channel per match ("1v1 #101"). Temporary channels go in a category you choose, are private to that team's linked players by default, and are removed once the panel's players have left after the match. Configured channels are never deleted.
+- **Rules**: only players in a waiting-room channel are moved (never out of other conversations); each player is moved at most once per match, so someone who leaves isn't pulled back; after the match only players still in the match's channel are moved back, to the waiting room they came from. One Discord user on several Steam accounts: the match that moved them first keeps their voice. A late joiner is let into the private channel and moved.
+- **Restarts**: sessions and channels are stored in the database. At start and every 10 minutes the panel closes those of matches that aren't running, and (if allowed) removes panel-named channels left in the category by a crash (older than 10 minutes, matches not running).
+- **Linking**: Discord OAuth2 with only the `identify` scope; the state is tied to the player's Steam session; the access token is used once to read the user ID and thrown away. Several Steam accounts can link to one Discord user (each signs in with Discord itself); the choices belong to the Discord user.
+
+**Setup (once)**:
+1. In the [Discord Developer Portal](https://discord.com/developers/applications) create an application. Copy the **Application ID**.
+2. **Bot** tab: reset and copy the token. No privileged gateway intents are needed.
+3. **OAuth2** tab: copy the **Client Secret**, and add the redirect `https://<your matchmaking site>/api/discord/callback` (the Discord bot panel shows the exact address once HTTPS is on).
+4. Paste the three into the Discord bot panel, add the waiting-room voice channel link(s) and, for temporary channels, the category's link. Save.
+5. Invite the bot with the link the panel shows. It asks for View Channels, Connect, Move Members and Manage Channels (only needed for temporary channels), not Administrator. If you use private temporary channels, the bot's role needs these permissions on the category too.
+6. Press **Check permissions**, then **Test: move me** (link your own Steam account on the matchmaking site first and sit in any voice channel).
+
+The token and client secret are stored encrypted in the panel's database and never shown again or logged.
+
 ## CPU Management
 
 Under **CS2 Panel → Settings**. Each server runs on a set of CPUs (`taskset -c` in its systemd service), shown and changed here or on the server's Settings tab (same data, same save).

@@ -330,6 +330,14 @@ export interface MatchView extends TeamsView {
   canJoin: { team: TeamKey | null; reason: string | null } | null;
 }
 
+/** A match as the Discord bot needs it. */
+export interface VoiceMatchInfo {
+  id: number;
+  mode: Mode;
+  serverId: number;
+  teams: { a: string[]; b: string[] };
+}
+
 export interface CasualView {
   id: number;
   name: string;
@@ -1199,6 +1207,7 @@ export class Matchmaking {
       m.readyAt = this.now();
       m.status = "Server ready. Join now; the match starts when everyone is in.";
       this.save(m);
+      this.voiceLive(m);
     } catch (e) {
       if (this.recleanIfEnded(m)) return;
       await this.finish(m, "cancelled", `Couldn't start the match: ${(e as Error).message}`);
@@ -1275,6 +1284,7 @@ export class Matchmaking {
 
   /** Ends a match and gives the server back: no player list, no password. */
   private async finish(m: Match, phase: "over" | "cancelled" | "abandoned", note: string | null): Promise<void> {
+    const wasActive = isActive(m);
     m.phase = phase;
     m.deadline = null;
     m.endedAt = this.now();
@@ -1283,6 +1293,8 @@ export class Matchmaking {
       if (phase !== "over") m.error = note;
     } else if (phase === "over") m.status = "Match over";
     this.save(m, note);
+    // Discord: back to the waiting room, temporary channels removed (in the background).
+    if (wasActive || m.readyAt) void this.voice?.matchEnded(m.id).catch(() => undefined);
     if (!m.released) {
       const reason =
         phase === "over"
@@ -1305,6 +1317,24 @@ export class Matchmaking {
 
   // ------------------------------------------------------------- cleanup after a match
 
+  /** The Discord bot, when there is one. Never awaited: Discord can't hold up or fail a match. */
+  voice: {
+    matchLive(m: VoiceMatchInfo): Promise<void>;
+    matchEnded(matchId: number): Promise<void>;
+    channelLinkFor(matchId: number, steamId: string, team: TeamKey, mode: Mode): string | null;
+  } | null = null;
+
+  private voiceLive(m: Match): void {
+    if (!this.voice) return;
+    const humans = (team: Member[]) => team.filter((p) => p.steamId !== BOT_ID).map((p) => p.steamId);
+    void this.voice.matchLive({ id: m.id, mode: m.mode, serverId: m.serverId, teams: { a: humans(m.teamA), b: humans(m.teamB) } }).catch(() => undefined);
+  }
+
+  /** A match that's still going (not ended), for the Discord bot's tidy-up. */
+  isMatchActive(matchId: number): boolean {
+    return this.matches.some((m) => m.id === matchId && isActive(m));
+  }
+
   /** Matchmaking is using the server: a match on it, its scoreboard time, or its cleanup afterwards. */
   inUse(serverId: number): boolean {
     return this.matches.some((m) => m.serverId === serverId && (isActive(m) || !m.released)) || this.cleanups.has(serverId);
@@ -1314,7 +1344,10 @@ export class Matchmaking {
    * The voice channel for a player's team, by the match's lobby (not the server's game mode: 1v1 runs in
    * Wingman mode, and one server can serve several lobbies). 1v1: the server's own channel, else the shared one.
    */
-  private discordChannel(m: Match, team: TeamKey): string {
+  private discordChannel(m: Match, team: TeamKey, steamId?: string): string {
+    // The bot's temporary channel for this match, when the player is linked (and so allowed in).
+    const temp = steamId ? this.voice?.channelLinkFor(m.id, steamId, team, m.mode) : null;
+    if (temp) return temp;
     const d = this.config().discord;
     const id = String(m.serverId);
     if (m.mode === "duel") return d.duelServers?.[id] || d.duel;
@@ -1572,6 +1605,8 @@ export class Matchmaking {
       await this.exec(s, `say ${line}`).catch(() => undefined);
       this.recleanIfEnded(m);
     }
+    // A late joiner gets moved too (players already handled aren't touched again).
+    this.voiceLive(m);
     return teamKey;
   }
 
@@ -1624,7 +1659,7 @@ export class Matchmaking {
     const myTeam: TeamKey | null = !member ? null : m.teamA.some((p) => p.steamId === viewer) ? "a" : "b";
     const channels = this.config().discord.channels[String(m.serverId)];
     // 1v1: one shared channel for everyone; other lobbies: the player's own team's channel on this server.
-    const channel = !myTeam ? "" : this.discordChannel(m, myTeam);
+    const channel = !myTeam ? "" : this.discordChannel(m, myTeam, viewer ?? undefined);
     return {
       ...this.teamsView(shown(m.teamA), shown(m.teamB)),
       bots: m.bot ? { team: m.bot, on: showBot, votes: { ...m.botVotes } } : null,

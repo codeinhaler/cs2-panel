@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { DiscordBotPanel } from "./DiscordBot";
 import { api, type MatchmakingInfo, type MatchmakingSettings, type MmRating } from "../api";
 import { useAction, useApp, usePolling } from "../app-context";
 import { formatDateTime } from "../format";
@@ -400,6 +401,8 @@ export function MatchmakingPage() {
         )}
       </form>
 
+      {/* Its own form (it saves on its own), so outside the settings form. */}
+      <DiscordBotPanel />
       <HttpsSettings manage={manage} />
 
       <div className="panel">

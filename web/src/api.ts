@@ -155,6 +155,51 @@ export interface CpuOverview {
   usageAvailable: boolean;
 }
 
+// ------------------------------------------------------------- Discord bot
+
+export interface DiscordBotSettings {
+  enabled: boolean;
+  applicationId: string;
+  guildId: string;
+  waitingChannels: string[];
+  category: string;
+  teamMode: "configured" | "temporary";
+  duelMode: "shared" | "temporary";
+  privateChannels: boolean;
+  returnAfter: boolean;
+  orphanCleanup: boolean;
+  hasToken: boolean;
+  hasSecret: boolean;
+}
+
+export interface DiscordBotInfo {
+  settings: DiscordBotSettings;
+  status: {
+    state: "off" | "not-set-up" | "checking" | "ready" | "error";
+    guildName: string | null;
+    botUser: string | null;
+    lastOk: number | null;
+    lastError: string | null;
+  };
+  guildId: string | null;
+  inviteUrl: string | null;
+  redirectUri: string | null;
+  sessions: { discord_id: string; username: string | null; match_id: number; steam_id: string; channel_id: string; moved_at: string }[];
+  channels: { channel_id: string; match_id: number; team: string; name: string; created_at: string; ended_at: string | null }[];
+  linked: number;
+  optedIn: number;
+  actions: { at: number; matchId: number | null; ok: boolean; text: string }[];
+}
+
+export type DiscordBotInput = Omit<DiscordBotSettings, "hasToken" | "hasSecret"> & {
+  token?: string;
+  clientSecret?: string;
+  clearToken?: boolean;
+  clearSecret?: boolean;
+};
+
+export type CheckResult = { ok: boolean; items: { ok: boolean; text: string }[] };
+
 export interface Preset {
   id: number;
   key: string;
@@ -618,6 +663,11 @@ export const api = {
   audit: (params: { before?: number; serverId?: number; limit?: number } = {}) => request<{ entries: AuditEntry[] }>("GET", `/api/audit?${q(params)}`),
 
   host: () => request<HostInfo>("GET", "/api/host"),
+  discordBot: () => request<DiscordBotInfo>("GET", "/api/discord-bot"),
+  saveDiscordBot: (v: DiscordBotInput) => request<{ settings: DiscordBotSettings }>("PUT", "/api/discord-bot", v),
+  checkDiscordBot: () => request<CheckResult>("POST", "/api/discord-bot/check", {}),
+  testDiscordMove: () => request<CheckResult>("POST", "/api/discord-bot/test-move", {}),
+  reconcileDiscordBot: () => request<{ ok: true }>("POST", "/api/discord-bot/reconcile", {}),
   cpu: (refresh = false) => request<CpuOverview>("GET", `/api/cpu${refresh ? "?refresh=1" : ""}`),
   cpuUsage: () => request<{ available: boolean; cpus: Record<number, number | null>; blocks: Record<string, number | null> }>("GET", "/api/cpu/usage"),
   cpuSuggest: () => request<{ mode: "auto" | "manual"; cpus: string; warnings: string[]; policy: CpuPolicy["mode"] }>("GET", "/api/cpu/suggest"),

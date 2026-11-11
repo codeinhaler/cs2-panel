@@ -10,6 +10,9 @@ import { fetchProfile } from "../auth/steam-profile.js";
 import { MM_MAX_AGE_MS, MM_SESSION_COOKIE, type MmPlayerStore } from "./players.js";
 import { MODES, type Matchmaking, type MatchView } from "./service.js";
 import { themeCss } from "./look.js";
+import { randomBytes } from "node:crypto";
+import type { DiscordBot } from "../discord-bot/service.js";
+import { authorizeUrl, verifiedUser } from "../discord-bot/rest.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -27,6 +30,8 @@ export interface PublicDeps {
   logLevel: string;
   /** Certificate and key when the site runs on HTTPS. */
   https?: { cert: string; key: string } | null;
+  /** Optional Discord account linking and voice automation. */
+  discordBot?: DiscordBot;
 }
 
 /** What a player in the match needs to join. */
@@ -122,6 +127,64 @@ export async function buildPublicApp(d: PublicDeps): Promise<FastifyInstance> {
       return reply.redirect("/");
     });
   }
+
+  // ------------------------------------------------------------- Discord (optional)
+
+  // Sign-in states waiting for Discord's answer: tied to the player who started it, valid 10 minutes.
+  const discordStates = new Map<string, { steamId: string; exp: number }>();
+  const bot = d.discordBot;
+  const discordCallback = (req: FastifyRequest) => `${baseUrl(req)}/api/discord/callback`;
+
+  app.get("/api/discord", async (req) => {
+    const me = requirePlayer(req);
+    return bot ? bot.playerView(me) : { available: false, botOn: false, linked: null, autoMove: false, autoReturn: true };
+  });
+
+  app.get("/api/discord/link", async (req, reply) => {
+    const me = req.mmPlayer;
+    if (!me) return reply.redirect(`/?error=${encodeURIComponent("Sign in with Steam first.")}`);
+    const client = bot?.oauthClient();
+    if (!client) return reply.redirect(`/?error=${encodeURIComponent("Discord linking isn't set up on this site.")}`);
+    const now = Date.now();
+    for (const [k, v] of discordStates) if (v.exp < now) discordStates.delete(k);
+    const state = randomBytes(24).toString("base64url");
+    discordStates.set(state, { steamId: me, exp: now + 10 * 60_000 });
+    return reply.redirect(authorizeUrl(client.clientId, discordCallback(req), state));
+  });
+
+  app.get("/api/discord/callback", async (req, reply) => {
+    const q = z.object({ code: z.string().max(200).optional(), state: z.string().max(100).optional(), error: z.string().max(100).optional() }).parse(req.query);
+    const fail = (msg: string) => reply.redirect(`/?error=${encodeURIComponent(msg)}`);
+    const pending = q.state ? discordStates.get(q.state) : undefined;
+    if (q.state) discordStates.delete(q.state);
+    // The state must be one this site handed out, still valid, to the same signed-in player.
+    if (!pending || pending.exp < Date.now() || !req.mmPlayer || pending.steamId !== req.mmPlayer)
+      return fail("That Discord sign-in expired or wasn't yours. Try again.");
+    if (q.error || !q.code) return fail("Discord linking was cancelled.");
+    const client = bot?.oauthClient();
+    if (!client || !bot) return fail("Discord linking isn't set up on this site.");
+    try {
+      const user = await verifiedUser(d.fetchFn, { ...client, code: q.code, redirectUri: discordCallback(req) });
+      bot.link(req.mmPlayer, user);
+    } catch (e) {
+      return fail((e as Error).message);
+    }
+    return reply.redirect("/?discord=linked");
+  });
+
+  app.post("/api/discord/unlink", async (req) => {
+    const me = requirePlayer(req);
+    bot?.unlink(me);
+    return { ok: true };
+  });
+
+  app.put("/api/discord/prefs", async (req) => {
+    const me = requirePlayer(req);
+    const p = z.object({ autoMove: z.boolean(), autoReturn: z.boolean() }).parse(req.body);
+    if (!bot) throw new HttpError(400, "Discord isn't set up on this site.");
+    bot.setPrefs(me, p);
+    return bot.playerView(me);
+  });
 
   app.post("/api/auth/logout", async (req, reply) => {
     const me = req.mmPlayer;

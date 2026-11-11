@@ -483,7 +483,12 @@ describe("CPU Management in the panel", () => {
     await app.fastify.close();
     // Back to the database as it was before CPU lists (migration 12).
     const old = new DatabaseSync(path.join(dir, "panel.db"));
-    old.exec("ALTER TABLE servers DROP COLUMN cpu_set; ALTER TABLE servers DROP COLUMN cpu_mode; PRAGMA user_version = 12;");
+    old.exec(
+      "ALTER TABLE servers DROP COLUMN cpu_set; ALTER TABLE servers DROP COLUMN cpu_mode;" +
+        // And without the later tables (migration 14 on), as a database from then was.
+        "DROP TABLE discord_links; DROP TABLE discord_users; DROP TABLE discord_sessions; DROP TABLE discord_moves; DROP TABLE discord_channels;" +
+        "PRAGMA user_version = 12;",
+    );
     old.close();
     await boot();
     const c2 = await login();

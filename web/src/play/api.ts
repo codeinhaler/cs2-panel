@@ -136,7 +136,20 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return data as T;
 }
 
+export interface DiscordMe {
+  /** The site can link Discord accounts (the organiser set it up). */
+  available: boolean;
+  /** The bot moves players (otherwise linking only shows your name). */
+  botOn: boolean;
+  linked: { username: string } | null;
+  autoMove: boolean;
+  autoReturn: boolean;
+}
+
 export const play = {
+  discord: () => request<DiscordMe>("GET", "/discord"),
+  discordPrefs: (p: { autoMove: boolean; autoReturn: boolean }) => request<DiscordMe>("PUT", "/discord/prefs", p),
+  discordUnlink: () => request<{ ok: true }>("POST", "/discord/unlink", {}),
   state: () => request<State>("GET", "/state"),
   logout: () => request<{ ok: true }>("POST", "/auth/logout", {}),
   join: (mode: Mode) => request<{ ok: true }>("POST", "/lobby/join", { mode }),

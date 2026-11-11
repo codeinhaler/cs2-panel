@@ -131,6 +131,12 @@ function describe(e: AuditEntry): string {
       const list = Array.isArray(d.configs) ? (d.configs as string[]) : [];
       return list.length ? `set configs to run on every map start: ${list.join(", ")}` : "stopped running extra configs on map start";
     }
+    case "discord.bot":
+      return `${d.enabled ? "switched on" : "saved (off)"} the Discord bot (teams: ${str("teamMode")}, 1v1: ${str("duelMode")})`;
+    case "discord.link":
+      return `linked Steam ${str("steamId")} to Discord ${str("discordUser")}`;
+    case "discord.unlink":
+      return `unlinked Discord from Steam ${str("steamId")}`;
     case "server.cpu":
       return `changed the CPUs from ${str("from")} to ${str("to")} (${d.mode === "auto" ? "automatic" : "manual"})`;
     case "cpu.policy":
