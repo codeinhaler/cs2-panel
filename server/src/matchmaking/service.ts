@@ -1541,6 +1541,8 @@ export class Matchmaking {
     if (!this.lateJoinsOpen(m)) return no("The captains have closed this match to new players.");
     if (m.score && Math.max(m.score.a, m.score.b) >= this.winRounds(m.mode) - LATE_JOIN_CUTOFF) return no("Too late to join: the match is nearly over.");
     if (room.length === 1) return { team: room[0]!, reason: null };
+    // A team playing with the bot gets the player first, in the bot's place.
+    if (m.bot && room.includes(m.bot)) return { team: m.bot, reason: null };
     // Both have room: the losing team, or on a tie (or before the first round) the team with the lower total rating.
     if (m.score && m.score.a !== m.score.b) return { team: m.score.a < m.score.b ? "a" : "b", reason: null };
     const total = (t: Member[]) => t.reduce((sum, p) => sum + p.effective, 0);
@@ -1578,6 +1580,18 @@ export class Matchmaking {
       m.bot = null;
     }
     team.push(joiner);
+    // Now one player short on the other team (e.g. 2v1 in Wingman): a bot fills in, as when teams are made.
+    let addedBot: TeamKey | null = null;
+    if (!replacesBot && !m.bot) {
+      const [ha, hb] = [humans(m.teamA).length, humans(m.teamB).length];
+      const short: TeamKey | null = ha === hb + 1 ? "b" : hb === ha + 1 ? "a" : null;
+      if (short && humans(short === "a" ? m.teamA : m.teamB).length < MODE_INFO[m.mode].teamSize) {
+        (short === "a" ? m.teamA : m.teamB).push(this.botMember());
+        m.bot = short;
+        m.botVotes = { a: true, b: true };
+        addedBot = short;
+      }
+    }
     const e = this.lobby.get(by);
     if (e) e.sitOuts = 0;
     this.d.db
@@ -1592,6 +1606,7 @@ export class Matchmaking {
       steamId: by,
       name: joiner.name,
       ...(replacesBot ? { replacedBot: true } : {}),
+      ...(addedBot ? { addedBot: true } : {}),
     });
 
     // Already on the server: let them in, and take the bot off if they replace it.
@@ -1601,7 +1616,8 @@ export class Matchmaking {
       await this.exec(s, "cs2panel_match_reload").catch(() => undefined);
       if (replacesBot) await this.exec(s, "bot_quota 0; bot_kick").catch(() => undefined);
       const captain = this.displayName(this.player(teamKey === "a" ? m.captainA : m.captainB));
-      const line = `${joiner.name} is joining ${captain}'s team${replacesBot ? " in place of the bot" : ""}`.replace(/[";\r\n]/g, "");
+      const extra = replacesBot ? " in place of the bot" : addedBot ? ", and a bot joins the other team" : "";
+      const line = `${joiner.name} is joining ${captain}'s team${extra}`.replace(/[";\r\n]/g, "");
       await this.exec(s, `say ${line}`).catch(() => undefined);
       this.recleanIfEnded(m);
     }

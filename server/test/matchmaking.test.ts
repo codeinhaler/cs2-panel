@@ -653,6 +653,38 @@ describe("matchmaking site", () => {
     expect((await play(cookies[4]!, "POST", `/api/matches/${matchId}/join`)).body.error).toBe("Both teams are full.");
   });
 
+  it("adds a bot to the other team when a late player makes it 2v1", async () => {
+    const owner = await adminCookie();
+    await enable(owner, [await setupServer(owner)]);
+    const names = ["Alpha", "Bravo", "Charlie", "Delta", "Echo"];
+    const cookies = await Promise.all(P.map((id, i) => playerCookie(id, names[i]!)));
+    for (const c of cookies.slice(0, 2)) await play(c, "POST", "/api/lobby/join", { mode: "wingman" });
+    await play(cookies[0]!, "POST", "/api/teams");
+    const draft = (await play(cookies[0]!, "GET", "/api/state")).body.drafts[0];
+    const { matchId } = (await play(cookies[0]!, "POST", `/api/teams/${draft.id}/start`)).body;
+    let m = await toLive(cookies, P, matchId);
+    expect([...m.teamA, ...m.teamB].some((p: any) => p.steamId === "BOT")).toBe(false);
+
+    await play(cookies[2]!, "POST", "/api/lobby/join", { mode: "wingman" });
+    rconLog = [];
+    const res = await play(cookies[2]!, "POST", `/api/matches/${matchId}/join`);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const other = res.body.team === "a" ? "b" : "a";
+    m = (await play(cookies[0]!, "GET", "/api/state")).body.matches[0];
+    expect(m.bots).toMatchObject({ team: other, on: true });
+    expect((other === "a" ? m.teamA : m.teamB).some((p: any) => p.steamId === "BOT")).toBe(true);
+    expect(rconLog).toContain("cs2panel_match_reload");
+    const [matchFile] = findFile(dir, "match.json");
+    expect(JSON.parse(readFileSync(matchFile!, "utf8")).bot).not.toBeNull();
+
+    // The next player takes the bot's place: 2v2.
+    await play(cookies[3]!, "POST", "/api/lobby/join", { mode: "wingman" });
+    const res2 = await play(cookies[3]!, "POST", `/api/matches/${matchId}/join`);
+    expect(res2.body.team).toBe(other);
+    m = (await play(cookies[0]!, "GET", "/api/state")).body.matches[0];
+    expect([...m.teamA, ...m.teamB].some((p: any) => p.steamId === "BOT")).toBe(false);
+  });
+
   it("puts late players on the losing team, and the captains can close the match", async () => {
     const owner = await adminCookie();
     await enable(owner, [await setupServer(owner)]);
