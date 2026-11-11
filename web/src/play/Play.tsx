@@ -767,6 +767,7 @@ function DiscordLinks({ discord }: { discord: { channel: string; invite: string 
 }
 
 function CasualCard({ state }: { state: State }) {
+  const ownDiscord = state.casual.servers.some((s) => s.discord && s.discord.channel !== state.casual.discord?.channel);
   return (
     <section className="panel play-casual">
       <div className="panel-head">
@@ -796,10 +797,12 @@ function CasualCard({ state }: { state: State }) {
               label={s.joinInfo.password ? `Or paste in the CS2 console (password ${s.joinInfo.password})` : "Or paste in the CS2 console"}
               text={s.joinInfo.console}
             />
+            {ownDiscord && s.discord && <DiscordLinks discord={s.discord} />}
           </div>
         ))}
       </div>
-      {state.casual.discord && <DiscordLinks discord={state.casual.discord} />}
+      {/* One button for all, unless a server has its own channel: then each server gets its button. */}
+      {!ownDiscord && state.casual.discord && <DiscordLinks discord={state.casual.discord} />}
     </section>
   );
 }

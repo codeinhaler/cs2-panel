@@ -111,12 +111,16 @@ export const MatchmakingSettingsSchema = z.object({
         .max(200)
         .regex(/^$|^https:\/\/(discord\.gg|(www\.)?discord\.com\/invite)\/[\w-]+\/?$/, "The invite must be a link like https://discord.gg/abc123."),
       channels: z.record(z.string().regex(/^\d+$/), z.object({ a: DiscordChannel, b: DiscordChannel })),
-      /** One voice channel for everyone on the casual servers. */
+      /** One voice channel for everyone on the casual servers (each casual server can have its own instead). */
       casual: DiscordChannel.default(""),
-      /** One voice channel for everyone in 1v1 matches, instead of a channel per team. */
+      /** One voice channel for everyone in 1v1 matches, instead of a channel per team (a server can override it). */
       duel: DiscordChannel.default(""),
+      /** Optional own 1v1 channel per server (by server ID); without one, the server uses `duel`. */
+      duelServers: z.record(z.string().regex(/^\d+$/), DiscordChannel).default({}),
+      /** Optional own channel per casual server (by server ID); without one, it uses `casual`. */
+      casualServers: z.record(z.string().regex(/^\d+$/), DiscordChannel).default({}),
     })
-    .default({ invite: "", channels: {}, casual: "", duel: "" }),
+    .default({ invite: "", channels: {}, casual: "", duel: "", duelServers: {}, casualServers: {} }),
   /** Servers anyone can just join from the site: no sign-in, no teams made, no veto. */
   casual: z
     .object({
@@ -147,7 +151,7 @@ export const DEFAULT_SETTINGS: MatchmakingSettings = {
   botDifficulty: 1,
   look: DEFAULT_LOOK,
   casual: { name: "Casual", serverIds: [] },
-  discord: { invite: "", channels: {}, casual: "", duel: "" },
+  discord: { invite: "", channels: {}, casual: "", duel: "", duelServers: {}, casualServers: {} },
   gameAddress: "",
   vetoSeconds: 30,
 };
@@ -336,6 +340,8 @@ export interface CasualView {
   port: number;
   /** Shown to everyone on the site (Sune's choice). */
   password: string;
+  /** Its Discord voice channel: its own, or the casual servers' shared one. */
+  discord?: { channel: string; invite: string | null } | null;
 }
 
 export interface StateView {
@@ -482,6 +488,11 @@ export class Matchmaking {
       next.modes[m].serverIds = [...new Set(next.modes[m].serverIds ?? next.serverIds)].filter((id) => known.has(id) && !next.casual.serverIds.includes(id));
     }
     next.serverIds = [...new Set(MODES.flatMap((m) => next.modes[m].serverIds!))];
+    // Discord links by server ID: drop deleted servers and empty fields. Servers that are only unticked keep theirs.
+    const live = (id: string) => known.has(Number(id));
+    next.discord.channels = Object.fromEntries(Object.entries(next.discord.channels).filter(([id, v]) => live(id) && (v.a || v.b)));
+    next.discord.duelServers = Object.fromEntries(Object.entries(next.discord.duelServers ?? {}).filter(([id, v]) => live(id) && v));
+    next.discord.casualServers = Object.fromEntries(Object.entries(next.discord.casualServers ?? {}).filter(([id, v]) => live(id) && v));
     for (const id of next.casual.serverIds) {
       if (this.matches.some((m) => m.serverId === id && (isActive(m) || !m.released)) || this.cleanups.has(id)) {
         throw badRequest(`${this.d.servers.require(id).name} is running a match right now. Make it casual when the match is over.`);
@@ -1299,6 +1310,18 @@ export class Matchmaking {
     return this.matches.some((m) => m.serverId === serverId && (isActive(m) || !m.released)) || this.cleanups.has(serverId);
   }
 
+  /**
+   * The voice channel for a player's team, by the match's lobby (not the server's game mode: 1v1 runs in
+   * Wingman mode, and one server can serve several lobbies). 1v1: the server's own channel, else the shared one.
+   */
+  private discordChannel(m: Match, team: TeamKey): string {
+    const d = this.config().discord;
+    const id = String(m.serverId);
+    if (m.mode === "duel") return d.duelServers?.[id] || d.duel;
+    const ch = d.channels[id];
+    return ch ? (team === "a" ? ch.a : ch.b) : "";
+  }
+
   /** Hands a server to the cleanup (or runs it again if it's already waiting). Saved, so a restart picks it up. */
   private queueCleanup(serverId: number, reason: string): void {
     const c = this.cleanups.get(serverId);
@@ -1601,7 +1624,7 @@ export class Matchmaking {
     const myTeam: TeamKey | null = !member ? null : m.teamA.some((p) => p.steamId === viewer) ? "a" : "b";
     const channels = this.config().discord.channels[String(m.serverId)];
     // 1v1: one shared channel for everyone; other lobbies: the player's own team's channel on this server.
-    const channel = !myTeam ? "" : m.mode === "duel" ? this.config().discord.duel : channels ? (myTeam === "a" ? channels.a : channels.b) : "";
+    const channel = !myTeam ? "" : this.discordChannel(m, myTeam);
     return {
       ...this.teamsView(shown(m.teamA), shown(m.teamB)),
       bots: m.bot ? { team: m.bot, on: showBot, votes: { ...m.botVotes } } : null,
@@ -1708,7 +1731,14 @@ export class Matchmaking {
       mapNames: this.mapNames(),
       casual: {
         name: c.casual.name,
-        servers: c.casual.serverIds.map((id) => this.casualInfo.get(id)).filter((x): x is CasualView => !!x),
+        // Each casual server's channel: its own, else the shared one.
+        servers: c.casual.serverIds
+          .map((id) => this.casualInfo.get(id))
+          .filter((x): x is CasualView => !!x)
+          .map((x) => {
+            const ch = c.discord.casualServers?.[String(x.id)] || c.discord.casual;
+            return { ...x, discord: ch ? { channel: ch, invite: c.discord.invite || null } : null };
+          }),
         discord: c.discord.casual ? { channel: c.discord.casual, invite: c.discord.invite || null } : null,
       },
       freeServers: this.freeCountSync(),

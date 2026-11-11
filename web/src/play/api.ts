@@ -110,6 +110,8 @@ export interface State {
       maxPlayers: number;
       online: boolean;
       joinInfo: { address: string; password: string; steamUrl: string; console: string };
+      /** Its voice channel: its own, or the casual servers' shared one. */
+      discord?: { channel: string; invite: string | null } | null;
     }[];
     discord: { channel: string; invite: string | null } | null;
   };

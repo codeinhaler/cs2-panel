@@ -196,7 +196,10 @@ async function boot() {
       if (cmd === "cs2panel_match_status") {
         // Like the bridge: the match it has loaded (from match.json) and how many maps it has loaded.
         const v = JSON.parse(statusReply.slice("CS2PANEL_MATCH ".length));
-        const file = findFile(dir, "match.json")[0];
+        // Each server has its own match.json (under its slug); fall back to the first for single-server tests.
+        const rec = app?.services.servers.listRecords().find((r) => r.port === o.port);
+        const files = findFile(dir, "match.json");
+        const file = (rec && files.find((f) => f.includes(`/${rec.slug}/`))) ?? files[0];
         const loaded = file ? JSON.parse(readFileSync(file, "utf8")) : null;
         // The bridge has whatever match.json held at its last reload; tests that don't care get the file's state.
         v.active = !!loaded?.active;
@@ -964,6 +967,131 @@ describe("matchmaking site", () => {
     expect(cfg).toContain("mp_maxrounds 30\nmp_startmoney 16000\n");
     expect(cfg).not.toMatch(/sv_password|bot_quota|mp_warmup_end|mp_restartgame|first to/);
     expect(JSON.parse(readFileSync(findFile(dir, "match.json")[0]!, "utf8"))).toMatchObject({ exec: "cs2panel_match.cfg", keepWeapons: true });
+  });
+
+  // ------------------------------------------------------------- Discord channels by server
+
+  /** Two players make teams in a lobby and start; returns the match as the first player sees it once it's live. */
+  async function liveIn(mode: string, cs: string[], ids: string[]) {
+    for (const c of cs) await play(c, "POST", "/api/lobby/join", { mode });
+    await play(cs[0]!, "POST", "/api/teams");
+    const draft = (await play(cs[0]!, "GET", "/api/state")).body.drafts.find((d: { mode: string }) => d.mode === mode);
+    const { matchId } = (await play(cs[0]!, "POST", `/api/teams/${draft.id}/start`)).body;
+    const m = await toLive(cs, ids, matchId);
+    expect(m.phase, m.error).toBe("live");
+    return m;
+  }
+
+  it("gives new 1v1 servers the shared 1v1 channel with no extra setup, and lets one server have its own", async () => {
+    const owner = await adminCookie();
+    const old = await setupServer(owner, { name: "1v1 #1", port: 27015 });
+    const shared = "https://discord.com/channels/111/500";
+    await enable(owner, [], {
+      modes: {
+        competitive: { enabled: false, maps: ["de_mirage"], serverIds: [] },
+        wingman: { enabled: false, maps: ["de_vertigo"], serverIds: [] },
+        duel: { enabled: true, maps: ["de_vertigo"], serverIds: [old] },
+      },
+      discord: { invite: "", channels: {}, casual: "", duel: shared },
+    });
+    // Two more 1v1 servers, ticked in the lobby: nothing else set up for Discord.
+    const n2 = await setupServer(owner, { name: "1v1 #2", port: 27025 });
+    const n3 = await setupServer(owner, { name: "1v1 #3", port: 27035 });
+    const settings = (await admin(owner, "GET", "/api/matchmaking")).body.settings;
+    settings.modes.duel.serverIds = [n2, n3];
+    expect((await admin(owner, "PUT", "/api/matchmaking", { settings })).status).toBe(200);
+    expect((await admin(owner, "GET", "/api/matchmaking")).body.settings.discord).toMatchObject({ duel: shared, duelServers: {}, channels: {} });
+
+    const cookies = await Promise.all(P.slice(0, 4).map((id, i) => playerCookie(id, ["Alpha", "Bravo", "Charlie", "Delta"][i]!)));
+    const m1 = await liveIn("duel", cookies.slice(0, 2), P.slice(0, 2));
+    expect(["1v1 #2", "1v1 #3"]).toContain(m1.serverName);
+    for (const c of cookies.slice(0, 2)) expect((await play(c, "GET", "/api/state")).body.matches[0].discord).toEqual({ channel: shared, invite: null });
+
+    // The other new server gets its own channel; the shared one stays as it was.
+    const other = m1.serverName === "1v1 #2" ? n3 : n2;
+    const own = "https://discord.com/channels/111/501";
+    const s2 = (await admin(owner, "GET", "/api/matchmaking")).body.settings;
+    s2.discord.duelServers = { [String(other)]: own };
+    await admin(owner, "PUT", "/api/matchmaking", { settings: s2 });
+    const m2 = await liveIn("duel", cookies.slice(2, 4), P.slice(2, 4));
+    expect((await play(cookies[2]!, "GET", "/api/state")).body.matches.find((x: { id: number }) => x.id === m2.id).discord).toEqual({
+      channel: own,
+      invite: null,
+    });
+    expect((await admin(owner, "GET", "/api/matchmaking")).body.settings.discord.duel).toBe(shared);
+  });
+
+  it("picks the channel by the match's lobby when one server serves Wingman and 1v1", async () => {
+    const owner = await adminCookie();
+    const both = await setupServer(owner, { name: "Small #1", port: 27015 });
+    const [t1, t2, duel] = ["600", "601", "602"].map((c) => `https://discord.com/channels/111/${c}`);
+    await enable(owner, [], {
+      modes: {
+        competitive: { enabled: false, maps: ["de_mirage"], serverIds: [] },
+        wingman: { enabled: true, maps: ["de_vertigo"], serverIds: [both] },
+        duel: { enabled: true, maps: ["de_vertigo"], serverIds: [both] },
+      },
+      discord: { invite: "", channels: { [String(both)]: { a: t1!, b: t2! } }, casual: "", duel: duel! },
+    });
+    const cookies = await Promise.all(P.slice(0, 4).map((id, i) => playerCookie(id, ["Alpha", "Bravo", "Charlie", "Delta"][i]!)));
+    // Wingman with 2 players (1v1 in Wingman's lobby): the team channels.
+    const w = await liveIn("wingman", cookies.slice(0, 2), P.slice(0, 2));
+    const seen = await Promise.all(cookies.slice(0, 2).map(async (c) => (await play(c, "GET", "/api/state")).body.matches[0].discord.channel));
+    expect(seen.sort()).toEqual([t1, t2].sort());
+    await play(cookies[0]!, "POST", `/api/matches/${w.id}/cancel`);
+    // The same server in the 1v1 lobby: the shared 1v1 channel.
+    const d = await liveIn("duel", cookies.slice(2, 4), P.slice(2, 4));
+    expect(d.serverName).toBe("Small #1");
+    expect((await play(cookies[2]!, "GET", "/api/state")).body.matches.find((x: { id: number }) => x.id === d.id).discord.channel).toBe(duel);
+  });
+
+  it("gives casual servers the shared channel or their own, and forgets links of deleted servers", async () => {
+    const owner = await adminCookie();
+    const a = await setupServer(owner, { name: "Casual #1", port: 27015 });
+    const b = await setupServer(owner, { name: "Casual #2", port: 27025 });
+    const gone = await setupServer(owner, { name: "Gone", port: 27035 });
+    const [sharedCh, ownCh, goneCh] = ["700", "701", "702"].map((c) => `https://discord.com/channels/111/${c}`);
+    await enable(owner, [gone], {
+      casual: { name: "Fun", serverIds: [a, b] },
+      discord: { invite: "", channels: { [String(gone)]: { a: goneCh!, b: "" } }, casual: sharedCh!, duel: "", casualServers: { [String(b)]: ownCh! } },
+    });
+    await app.services.matchmaking.refreshCasual();
+    const casual = (await play(null, "GET", "/api/state")).body.casual;
+    expect(casual.discord).toEqual({ channel: sharedCh, invite: null });
+    expect(casual.servers.map((x: { name: string; discord: { channel: string } }) => [x.name, x.discord.channel])).toEqual([
+      ["Casual #1", sharedCh],
+      ["Casual #2", ownCh],
+    ]);
+
+    // Deleting a server: its links go on the next save; everyone else's stay.
+    const slug = (await admin(owner, "GET", `/api/servers/${gone}`)).body.server.slug;
+    expect((await admin(owner, "DELETE", `/api/servers/${gone}`, { confirm: slug })).status).toBe(200);
+    const settings = (await admin(owner, "GET", "/api/matchmaking")).body.settings;
+    expect((await admin(owner, "PUT", "/api/matchmaking", { settings })).status).toBe(200);
+    expect((await admin(owner, "GET", "/api/matchmaking")).body.settings.discord).toMatchObject({
+      channels: {},
+      casual: sharedCh,
+      casualServers: { [String(b)]: ownCh },
+    });
+  });
+
+  it("keeps Discord links saved before per-server channels", async () => {
+    const owner = await adminCookie();
+    const id = await setupServer(owner);
+    const ch = "https://discord.com/channels/111/800";
+    (app.services.matchmaking as any).d.settings.set("matchmaking", {
+      enabled: false,
+      serverIds: [id],
+      discord: { invite: "https://discord.gg/fredag", channels: { [String(id)]: { a: ch, b: ch } }, casual: ch, duel: ch },
+    });
+    expect((await admin(owner, "GET", "/api/matchmaking")).body.settings.discord).toEqual({
+      invite: "https://discord.gg/fredag",
+      channels: { [String(id)]: { a: ch, b: ch } },
+      casual: ch,
+      duel: ch,
+      duelServers: {},
+      casualServers: {},
+    });
   });
 
   // ------------------------------------------------------------- servers per lobby

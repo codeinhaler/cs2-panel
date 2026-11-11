@@ -2027,3 +2027,12 @@ details.inline-form[open] > summary {
     font-size: 1.2rem;
   }
 }
+
+.mm-discord-head {
+  margin: 18px 0 4px;
+  font-size: 1rem;
+}
+.mm-discord-row {
+  max-width: 480px;
+  margin-top: 8px;
+}

@@ -64,6 +64,19 @@ export function MatchmakingPage() {
   const matchIds = [...new Set(MODES.flatMap((m) => form.modes[m].serverIds ?? []))].filter((id) => !form.casual.serverIds.includes(id));
   const poolServers = data.servers.filter((s) => matchIds.includes(s.id));
   const missingBridge = poolServers.filter((s) => !s.hasBridge);
+  // Discord: lists built from the servers that exist and are ticked right now (by server ID).
+  const serversIn = (mode: (typeof MODES)[number]) =>
+    data.servers.filter((s) => (form.modes[mode].serverIds ?? []).includes(s.id) && !form.casual.serverIds.includes(s.id));
+  const teamServers = data.servers.filter((s) => serversIn("competitive").includes(s) || serversIn("wingman").includes(s));
+  const casualServers = data.servers.filter((s) => form.casual.serverIds.includes(s.id));
+  const setDiscord = (key: "duel" | "casual", v: string) => set("discord", { ...form.discord, [key]: v.trim() });
+  const setServerChannel = (key: "duelServers" | "casualServers", id: number, v: string) => {
+    const map = { ...(form.discord[key] ?? {}) };
+    if (v.trim()) map[String(id)] = v.trim();
+    else delete map[String(id)];
+    set("discord", { ...form.discord, [key]: map });
+  };
+
   /** One lobby's server tick boxes, with each ticked server's state (free, in a match, being emptied …). */
   const lobbyServers = (mode: (typeof MODES)[number]) => {
     const ids = form.modes[mode].serverIds ?? [];
@@ -188,8 +201,8 @@ export function MatchmakingPage() {
         <div className="panel">
           <h2 style={{ marginBottom: 6 }}>Discord</h2>
           <p className="hint" style={{ marginTop: 0 }}>
-            Players in a match get a <b>Join Discord channel</b> button for their own team's voice channel. Make two voice channels per match server
-            (Competitive and Wingman), right-click each in Discord and pick <b>Copy Link</b>, and paste them here. Leave empty to show no button.
+            Players get a <b>Join Discord channel</b> button for their voice channel. Right-click a voice channel in Discord, pick <b>Copy Link</b> and paste it
+            here. The lists follow the servers ticked in the lobbies above and the casual servers below; an empty field shows no button.
           </p>
           <label className="field" style={{ maxWidth: 480 }}>
             <span>Invite link (shown as "Not on our Discord? Join here")</span>
@@ -200,50 +213,95 @@ export function MatchmakingPage() {
               disabled={!manage}
             />
           </label>
-          {data.servers
-            .filter((s) => matchIds.includes(s.id))
-            .map((s) => {
-              const ch = form.discord.channels[String(s.id)] ?? { a: "", b: "" };
-              const setCh = (team: "a" | "b", v: string) => {
-                const next = { ...ch, [team]: v.trim() };
-                const channels = { ...form.discord.channels };
-                if (!next.a && !next.b) delete channels[String(s.id)];
-                else channels[String(s.id)] = next;
-                set("discord", { ...form.discord, channels });
-              };
-              return (
-                <div key={s.id} style={{ marginTop: 12 }}>
-                  <b>{s.name}</b>
-                  <div className="row" style={{ gap: 12, flexWrap: "wrap", marginTop: 4 }}>
-                    {(["a", "b"] as const).map((t) => (
-                      <label key={t} className="field" style={{ flex: "1 1 280px" }}>
-                        <span>Team {t === "a" ? 1 : 2} voice channel</span>
-                        <input value={ch[t]} placeholder="https://discord.com/channels/…" onChange={(e) => setCh(t, e.target.value)} disabled={!manage} />
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-          {matchIds.length === 0 && <p className="hint">Tick servers for the lobbies first.</p>}
-          <label className="field" style={{ maxWidth: 480, marginTop: 16 }}>
-            <span>1v1 voice channel (one for everyone in 1v1 matches; the team channels above aren't used for 1v1)</span>
+
+          <h3 className="mm-discord-head">1v1</h3>
+          <p className="hint" style={{ marginTop: 0 }}>
+            One channel for everyone in 1v1 matches. Every 1v1 server uses it, unless you give a server its own.
+          </p>
+          <label className="field" style={{ maxWidth: 480 }}>
+            <span>Shared 1v1 voice channel</span>
             <input
               value={form.discord.duel}
               placeholder="https://discord.com/channels/…"
-              onChange={(e) => set("discord", { ...form.discord, duel: e.target.value.trim() })}
+              onChange={(e) => setDiscord("duel", e.target.value)}
               disabled={!manage}
             />
           </label>
-          <label className="field" style={{ maxWidth: 480, marginTop: 16 }}>
-            <span>Casual servers' voice channel (one for everyone on them)</span>
+          {serversIn("duel").map((s) => (
+            <label key={s.id} className="field mm-discord-row">
+              <span>
+                {s.name}{" "}
+                <span className="hint">
+                  · {(form.discord.duelServers ?? {})[String(s.id)] ? "own channel" : form.discord.duel ? "uses the shared channel" : "no channel yet"}
+                </span>
+              </span>
+              <input
+                value={(form.discord.duelServers ?? {})[String(s.id)] ?? ""}
+                placeholder="Optional: its own channel instead of the shared one"
+                onChange={(e) => setServerChannel("duelServers", s.id, e.target.value)}
+                disabled={!manage}
+              />
+            </label>
+          ))}
+          {serversIn("duel").length === 0 && <p className="hint">No servers ticked for 1v1.</p>}
+
+          <h3 className="mm-discord-head">Competitive and Wingman</h3>
+          <p className="hint" style={{ marginTop: 0 }}>
+            Two channels per server, one per team. A server in both lobbies is listed once.
+          </p>
+          {teamServers.map((s) => {
+            const ch = form.discord.channels[String(s.id)] ?? { a: "", b: "" };
+            const setCh = (team: "a" | "b", v: string) => {
+              const next = { ...ch, [team]: v.trim() };
+              const channels = { ...form.discord.channels };
+              if (!next.a && !next.b) delete channels[String(s.id)];
+              else channels[String(s.id)] = next;
+              set("discord", { ...form.discord, channels });
+            };
+            const lobbies = (["competitive", "wingman"] as const).filter((m) => (form.modes[m].serverIds ?? []).includes(s.id)).map((m) => MODE_TEXT[m].label);
+            return (
+              <div key={s.id} style={{ marginTop: 10 }}>
+                <b>{s.name}</b> <span className="hint">· {lobbies.join(" and ")}</span>
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 4, maxWidth: 980 }}>
+                  {(["a", "b"] as const).map((t) => (
+                    <label key={t} className="field" style={{ flex: "1 1 280px" }}>
+                      <span>Team {t === "a" ? 1 : 2} voice channel</span>
+                      <input value={ch[t]} placeholder="https://discord.com/channels/…" onChange={(e) => setCh(t, e.target.value)} disabled={!manage} />
+                    </label>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+          {teamServers.length === 0 && <p className="hint">No servers ticked for Competitive or Wingman.</p>}
+
+          <h3 className="mm-discord-head">Casual</h3>
+          <label className="field" style={{ maxWidth: 480 }}>
+            <span>Shared casual voice channel</span>
             <input
               value={form.discord.casual}
               placeholder="https://discord.com/channels/…"
-              onChange={(e) => set("discord", { ...form.discord, casual: e.target.value.trim() })}
+              onChange={(e) => setDiscord("casual", e.target.value)}
               disabled={!manage}
             />
           </label>
+          {casualServers.map((s) => (
+            <label key={s.id} className="field mm-discord-row">
+              <span>
+                {s.name}{" "}
+                <span className="hint">
+                  · {(form.discord.casualServers ?? {})[String(s.id)] ? "own channel" : form.discord.casual ? "uses the shared channel" : "no channel"}
+                </span>
+              </span>
+              <input
+                value={(form.discord.casualServers ?? {})[String(s.id)] ?? ""}
+                placeholder="Optional: its own channel instead of the shared one"
+                onChange={(e) => setServerChannel("casualServers", s.id, e.target.value)}
+                disabled={!manage}
+              />
+            </label>
+          ))}
+          {casualServers.length === 0 && <p className="hint">No casual servers ticked.</p>}
         </div>
 
         <div className="panel">
