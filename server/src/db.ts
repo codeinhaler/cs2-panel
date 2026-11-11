@@ -233,6 +233,10 @@ const MIGRATIONS: string[] = [
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   `,
+  /* 13: CPU lists per server. NULL keeps the old single CPU in "cpu"; existing servers count as manual. */ `
+  ALTER TABLE servers ADD COLUMN cpu_set TEXT;
+  ALTER TABLE servers ADD COLUMN cpu_mode TEXT NOT NULL DEFAULT 'manual';
+  `,
 ];
 
 export function openDb(file: string): Db {

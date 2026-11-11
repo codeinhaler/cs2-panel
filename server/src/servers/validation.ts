@@ -42,7 +42,7 @@ const displayName = z
   .trim()
   .min(1, "Name is required.")
   .max(64)
-  .regex(/^[^"\\;\r\n]*$/, 'Name can\'t contain " \\ ; or line breaks.');
+  .regex(/^[^"\\;\r\n]*$/, "Name can't contain \" \\ ; or line breaks.");
 const svPassword = z
   .string()
   .max(64)
@@ -64,6 +64,10 @@ export const CreateServerSchema = z.object({
   maxPlayers: z.number().int().min(1).max(64).optional(),
   port: z.number().int(),
   cpu: z.number().int().min(0).max(255).optional(),
+  /** A CPU list ("2,14" or "2-4"); checked against this machine's CPUs by the CPU service. */
+  cpuSet: z.string().trim().max(400).optional(),
+  /** auto: picked by the CPU policy (the default when nothing is given). */
+  cpuMode: z.enum(["auto", "manual"]).optional(),
   gsltToken: gslt.optional().default(""),
   password: svPassword.optional().default(""),
   autostart: z.boolean().default(true),

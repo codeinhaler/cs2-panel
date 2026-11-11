@@ -4,7 +4,7 @@ A web panel for running CS2 community servers on one Debian machine: create serv
 
 The design is in [docs/DESIGN.md](docs/DESIGN.md).
 
-The menu: **Monitor** (the home page), **Game servers** (Servers, Game update, Presets, Shared settings), **Matchmaking**, and **CS2 Panel** (Team, Backups, Notifications, Activity). The two groups fold open when clicked, and on their own when you're on one of their pages. The server list is at `/servers`; old `/monitor` links go to the home page.
+The menu: **Monitor** (the home page), **Game servers** (Servers, Game update, Presets, Shared settings), **Matchmaking**, and **CS2 Panel** (Team, Backups, Notifications, Activity, Settings). The two groups fold open when clicked, and on their own when you're on one of their pages. The server list is at `/servers`; old `/monitor` links go to the home page.
 
 ## What's in Phase 1
 
@@ -52,6 +52,16 @@ The menu: **Monitor** (the home page), **Game servers** (Servers, Game update, P
 - **Backups** (Backups page): each server's own files (configs, plugins and their data, added maps; not the Workshop download cache) plus what the panel knows about it (plugin list, configs to run), and a consistent copy of the panel's database (team, bans, presets, settings, history). Made by hand or nightly at a set time, keeping the last N nights; stored on this machine under `/srv/cs2/backups/servers/` and `/var/lib/cs2-panel/backups/`. Download, delete, or restore a server (it stops, its files go back, it starts again; the state before is backed up first). The panel's database is restored on the server with `sudo /opt/cs2-panel/deploy/restore-db.sh <file>`.
 - **Shared settings** (Shared settings page): a hostname prefix, server-browser tags and any cvars for every server. The panel writes them into `cfg/cs2panel_shared.cfg` in each server and runs it at the top of `server.cfg`, so a server's own `server.cfg` can override any shared value; a server can also opt out completely. Saving applies to running servers right away. Passwords, hostname, game mode and map commands are refused there because the panel sets them.
 - Automatic actions show up in Activity as "System", with the reason.
+
+## CPU Management
+
+Under **CS2 Panel → Settings**. Each server runs on a set of CPUs (`taskset -c` in its systemd service), shown and changed here or on the server's Settings tab (same data, same save).
+
+- **What the machine has**: read from `/sys` and `/proc`: logical CPUs, cores and their SMT threads, sockets, NUMA nodes, shared caches (e.g. AMD CCDs), Intel P- and E-cores, and the CPUs the panel may use (container or cgroup limits). In a virtual machine (VMware, KVM/Proxmox, Hyper-V, cloud) the CPUs are shown as vCPUs, never as physical cores: a VM without SMT is a plain list of vCPUs, and a VM that shows cores/threads is labelled as the VM's own layout. If nothing can be read, plain CPUs are used; detection never stops a server from starting.
+- **Overview**: one block per core (or vCPU) with the servers on it, its CPU IDs and live usage (from `/proc/stat`; a core's threads are counted once). Blocks are marked Free, In use, Shared, Conflict, Reserved, Restart required or Mismatch, with words as well as colours, and grouped by P/E cores, socket, NUMA node or cache when that applies. Click a block for its details and to change the assignment of a server on it. "Free" means no game server is set to it, not that the OS doesn't use it. Inside a VM, usage is the VM's view.
+- **Servers table**: every server with its status, Automatic/Manual, configured and actual CPUs (read from the running CS2 process's `/proc/<pid>/status`), conflicts, missing CPUs and "Restart required".
+- **Allocation policy** (for new servers and servers set to Automatic): **Legacy** (default; one CPU per server, the least used, as before), **Automatic** (topology-aware: each server its own core, never a thread of a core another server uses, P-cores first, never reserved CPUs; shares the least-used core with a warning when none is free) or **Manual** (you pick; a free core is suggested). Options: use the core layout, give a server all threads of its core, prefer P-cores, allow sharing (Shared instead of Conflict), and reserved CPUs (e.g. an E-core vCPU you pinned in ESXi).
+- **Safe by design**: existing servers keep their CPU and count as Manual; nothing is moved in the background. Saving a change on a running server doesn't restart it; it shows Restart required and applies at the next restart. If a server's CPUs are gone (fewer vCPUs after a VM change) it starts on the ones that are left (or all of them) and is flagged. Only Admins and the Owner can change CPUs or the policy; lists are validated and normalised before they reach the launch file.
 
 ## Matchmaking site
 

@@ -16,6 +16,7 @@ import { NotificationsPage } from "./pages/Notifications";
 import { BackupsPage } from "./pages/Backups";
 import { SharedPage } from "./pages/Shared";
 import { MatchmakingPage } from "./pages/Matchmaking";
+import { SettingsPage } from "./pages/Settings";
 
 export function App() {
   const [me, setMe] = useState<Me | null | "loading">("loading");
@@ -53,6 +54,7 @@ export function App() {
             <Route path="backups" element={<BackupsPage />} />
             <Route path="shared" element={<SharedPage />} />
             <Route path="matchmaking" element={<MatchmakingPage />} />
+            <Route path="settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         ) : (
@@ -104,7 +106,7 @@ function Shell() {
         <NavLink to="/matchmaking" className="nav-link">
           Matchmaking
         </NavLink>
-        <NavGroup id="panel" label="CS2 Panel" paths={["/team", "/backups", "/notifications", "/activity"]}>
+        <NavGroup id="panel" label="CS2 Panel" paths={["/team", "/backups", "/notifications", "/activity", "/settings"]}>
           {can("users.manage") && (
             <NavLink to="/team" className="nav-link">
               Team
@@ -120,6 +122,9 @@ function Shell() {
           )}
           <NavLink to="/activity" className="nav-link">
             Activity
+          </NavLink>
+          <NavLink to="/settings" className="nav-link">
+            Settings
           </NavLink>
         </NavGroup>
         <div className="sidebar-version" title={me.version === "dev" ? "Running from source" : `Panel release ${me.version}`}>

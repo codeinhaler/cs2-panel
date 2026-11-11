@@ -48,6 +48,9 @@ export interface Server {
   presetName: string | null;
   port: number;
   cpu: number;
+  /** The CPU list ("2,14"); the same as `cpu` for servers on one CPU. */
+  cpus: string;
+  cpuMode: "auto" | "manual";
   map: string;
   gameType: number;
   gameMode: number;
@@ -62,6 +65,94 @@ export interface Server {
   live: { name: string; map: string; players: number; maxPlayers: number; bots: number; version: string } | null;
   /** Running servers: whether the game answers yet (players can join only when it does). */
   answering: "yes" | "starting" | "no" | null;
+}
+
+// ------------------------------------------------------------- CPU Management
+
+export interface CpuPolicy {
+  mode: "legacy" | "auto" | "manual";
+  includeSmtSiblings: boolean;
+  allowSharing: boolean;
+  /** A CPU list, "" for none. */
+  reserved: string;
+  preferPerformance: boolean;
+  topologyAware: boolean;
+}
+
+export interface CpuServerRow {
+  id: number;
+  name: string;
+  state: ServiceState;
+  mode: "auto" | "manual";
+  configured: number[];
+  configuredText: string;
+  launch: number[];
+  actual: number[] | null;
+  actualText: string | null;
+  verify: "match" | "mismatch" | "unknown" | "stopped";
+  pendingRestart: boolean;
+  missing: number[];
+  conflicts: { serverId: number; name: string; kind: "same-cpu" | "same-core"; cpus: string }[];
+}
+
+export type CpuFlag = "free" | "assigned" | "shared" | "conflict" | "reserved" | "pending" | "mismatch";
+
+export interface CpuBlock {
+  key: string;
+  label: string;
+  cpus: number[];
+  type: "performance" | "efficiency" | null;
+  package: number | null;
+  node: number | null;
+  llc: string | null;
+  servers: { id: number; name: string; cpus: number[] }[];
+  reservedCpus: number[];
+  flags: CpuFlag[];
+  status: CpuFlag;
+  usage: number | null;
+  cpuUsage: Record<number, number | null>;
+}
+
+export interface CpuOverview {
+  topology: {
+    model: string | null;
+    kind: "physical" | "guest" | "logical";
+    virtualization: { detected: boolean; vendor: string | null };
+    smt: boolean;
+    hybrid: boolean;
+    online: string;
+    allowed: string;
+    restricted: boolean;
+    packages: number;
+    nodes: number;
+    llcGroups: number;
+    cpus: {
+      id: number;
+      core: string;
+      package: number | null;
+      siblings: number[];
+      llc: string | null;
+      node: number | null;
+      type: "performance" | "efficiency" | null;
+    }[];
+    notes: string[];
+  };
+  policy: CpuPolicy;
+  summary: {
+    unit: "cores" | "cpus";
+    cores: number | null;
+    logical: number;
+    assigned: number;
+    reserved: number;
+    free: number;
+    conflicts: number;
+    mismatches: number;
+    pending: number;
+    missing: number;
+  };
+  groups: { key: string; label: string; blocks: CpuBlock[] }[];
+  servers: CpuServerRow[];
+  usageAvailable: boolean;
 }
 
 export interface Preset {
@@ -518,6 +609,12 @@ export const api = {
   audit: (params: { before?: number; serverId?: number; limit?: number } = {}) => request<{ entries: AuditEntry[] }>("GET", `/api/audit?${q(params)}`),
 
   host: () => request<HostInfo>("GET", "/api/host"),
+  cpu: (refresh = false) => request<CpuOverview>("GET", `/api/cpu${refresh ? "?refresh=1" : ""}`),
+  cpuUsage: () => request<{ available: boolean; cpus: Record<number, number | null>; blocks: Record<string, number | null> }>("GET", "/api/cpu/usage"),
+  cpuSuggest: () => request<{ mode: "auto" | "manual"; cpus: string; warnings: string[]; policy: CpuPolicy["mode"] }>("GET", "/api/cpu/suggest"),
+  setCpuPolicy: (p: CpuPolicy) => request<{ policy: unknown }>("PUT", "/api/cpu/policy", p),
+  setServerCpu: (id: number, v: { mode: "auto" | "manual"; cpus?: string }) =>
+    request<{ row: CpuServerRow; warnings: string[] }>("PUT", `/api/servers/${id}/cpu`, v),
   gameMode: (id: number) =>
     request<{
       saved: { presetId: number | null; presetName: string | null; gameType: number; gameMode: number; map: string };

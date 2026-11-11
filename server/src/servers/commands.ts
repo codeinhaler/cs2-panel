@@ -61,7 +61,10 @@ export function rconFor(c: Command): string {
       return `bot_quota ${c.count}`;
     case "say": {
       // Quotes, semicolons and line breaks would let a message run other commands.
-      const text = c.text.replace(/[";\r\n\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim();
+      const text = c.text
+        .replace(/[";\r\n\u0000-\u001f]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
       if (!text) throw new CommandError("Write a message first.");
       return `say ${text}`;
     }
@@ -76,7 +79,6 @@ export function rconFor(c: Command): string {
 export function gameModeLine(gameType: number, gameMode: number, map: string): string {
   const spec = parseMapSpec(map);
   if (!spec) throw new CommandError("Enter a map name like de_dust2, or a Workshop map or collection ID.");
-  const load =
-    spec.kind === "stock" ? `map ${spec.map}` : spec.kind === "workshop" ? `host_workshop_map ${spec.id}` : `host_workshop_collection ${spec.id}`;
+  const load = spec.kind === "stock" ? `map ${spec.map}` : spec.kind === "workshop" ? `host_workshop_map ${spec.id}` : `host_workshop_collection ${spec.id}`;
   return `game_type ${gameType}; game_mode ${gameMode}; ${load}`;
 }

@@ -137,7 +137,10 @@ export const PresetInputSchema = z.object({
   configFiles: z
     .record(z.string(), z.string().max(256 * 1024))
     .refine((o) => Object.keys(o).length <= 20, "A preset can hold at most 20 config files.")
-    .refine((o) => Object.keys(o).every((k) => CFG_NAME_RE.test(k) && k !== "cs2panel_generated.cfg"), "Config file names must look like server.cfg or practice.cfg."),
+    .refine(
+      (o) => Object.keys(o).every((k) => CFG_NAME_RE.test(k) && k !== "cs2panel_generated.cfg"),
+      "Config file names must look like server.cfg or practice.cfg.",
+    ),
   execConfigs: z.array(z.string().max(100)).max(10).default([]),
 });
 export type PresetInput = z.infer<typeof PresetInputSchema>;
@@ -165,7 +168,18 @@ export class PresetStore {
         `INSERT INTO presets (key, name, description, builtin, game_type, game_mode, default_map, max_players, config_files, exec_configs, created_by, updated_at)
          VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
       )
-      .run(`custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, p.name, p.description, p.gameType, p.gameMode, p.defaultMap, p.maxPlayers, JSON.stringify(p.configFiles), JSON.stringify(p.execConfigs), actorId);
+      .run(
+        `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+        p.name,
+        p.description,
+        p.gameType,
+        p.gameMode,
+        p.defaultMap,
+        p.maxPlayers,
+        JSON.stringify(p.configFiles),
+        JSON.stringify(p.execConfigs),
+        actorId,
+      );
     return this.byId(Number(r.lastInsertRowid))!;
   }
 

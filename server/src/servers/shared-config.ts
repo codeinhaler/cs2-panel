@@ -59,7 +59,9 @@ export function validateCvars(text: string): string {
     for (const part of line.split(";")) {
       const cmd = part.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
       if (BLOCKED.has(cmd)) {
-        throw badRequest(`Line ${i + 1}: ${cmd} can't be in the shared settings${["map", "changelevel", "host_workshop_map", "host_workshop_collection"].includes(cmd) ? " (it would run on every map start)" : " (the panel sets it)"}.`);
+        throw badRequest(
+          `Line ${i + 1}: ${cmd} can't be in the shared settings${["map", "changelevel", "host_workshop_map", "host_workshop_collection"].includes(cmd) ? " (it would run on every map start)" : " (the panel sets it)"}.`,
+        );
       }
     }
   });
@@ -108,13 +110,17 @@ export class SharedConfigService {
   async set(input: SharedConfig, actorId: number): Promise<{ config: SharedConfig; liveOn: string[] }> {
     const hostnamePrefix = input.hostnamePrefix.replace(/[\r\n]/g, "");
     if (hostnamePrefix.length > 32) throw badRequest("Keep the hostname prefix to 32 characters.");
-    if (/["\\;]/.test(hostnamePrefix)) throw badRequest('The hostname prefix can\'t contain ", \\ or ;.');
+    if (/["\\;]/.test(hostnamePrefix)) throw badRequest("The hostname prefix can't contain \", \\ or ;.");
     const tags = input.tags.trim();
     if (tags.length > 128 || !/^[A-Za-z0-9_\-, ]*$/.test(tags)) throw badRequest("Tags are words separated by commas (letters, numbers, - and _).");
     const known = new Set(this.servers.listRecords().map((s) => s.id));
     const config: SharedConfig = {
       hostnamePrefix,
-      tags: tags.split(",").map((t) => t.trim()).filter(Boolean).join(","),
+      tags: tags
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean)
+        .join(","),
       cvars: validateCvars(input.cvars),
       excluded: [...new Set(input.excluded)].filter((id) => known.has(id)),
     };
@@ -150,9 +156,12 @@ export class SharedConfigService {
     for (const s of this.servers.listRecords()) {
       await this.applyTo(s, actorId);
       if ((await this.host.serviceStatus(s.slug)).state !== "active") continue;
-      const tagsGone = before.tags && (!this.uses(s.id) || !this.get().tags) ? "; sv_tags \"\"" : "";
+      const tagsGone = before.tags && (!this.uses(s.id) || !this.get().tags) ? '; sv_tags ""' : "";
       try {
-        await this.rcon({ port: s.port, password: s.rconPassword, timeoutMs: 4000 }, `hostname "${this.hostnameFor(s)}"${tagsGone}; exec ${SHARED_CFG.replace(/\.cfg$/, "")}`);
+        await this.rcon(
+          { port: s.port, password: s.rconPassword, timeoutMs: 4000 },
+          `hostname "${this.hostnameFor(s)}"${tagsGone}; exec ${SHARED_CFG.replace(/\.cfg$/, "")}`,
+        );
         liveOn.push(s.name);
       } catch {
         /* the files are written; it picks them up on its next map or start */

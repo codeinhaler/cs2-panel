@@ -47,6 +47,16 @@ export interface Actor {
 /** How long a freshly started server may stay silent before the panel calls it "not answering". */
 const STARTUP_GRACE_MS = 90_000;
 
+/** Set by the CPU service, which knows the machine's CPUs and the CPU policy. */
+export interface CpuHooks {
+  /** CPUs for a new server: what the request asks for (one CPU, a list or automatic), else by the CPU policy. */
+  forNew(req: { cpu?: number; cpuSet?: string; cpuMode?: "auto" | "manual" }): Promise<{ cpu: number; cpuSet: string | null; cpuMode: "auto" | "manual" }>;
+  /** The CPU list a server starts on (its CPUs that exist on this machine). */
+  launch(s: ServerRecord): Promise<string>;
+  /** Checks a single CPU set the old way (PATCH with cpu: N). Throws when it doesn't exist here. */
+  checkCpu(cpu: number): Promise<void>;
+}
+
 export interface ServerView {
   id: number;
   slug: string;
@@ -55,6 +65,9 @@ export interface ServerView {
   presetName: string | null;
   port: number;
   cpu: number;
+  /** The CPU list ("2,14"); same as `cpu` for servers set to one CPU. */
+  cpus: string;
+  cpuMode: "auto" | "manual";
   map: string;
   gameType: number;
   gameMode: number;
@@ -92,6 +105,8 @@ export class ServerService {
     private readonly gate: OperationGate,
   ) {}
 
+  cpuHooks: CpuHooks | null = null;
+
   // ------------------------------------------------------------- reading
 
   async list(): Promise<ServerView[]> {
@@ -105,6 +120,11 @@ export class ServerService {
   /** All servers with secrets, for background jobs. */
   listRecords(): ServerRecord[] {
     return this.store.list();
+  }
+
+  /** Saves a server's record as it is (used by CPU Management; the launch file follows on the next start). */
+  saveRecord(s: ServerRecord): void {
+    this.store.update(s);
   }
 
   require(id: number): ServerRecord {
@@ -135,6 +155,8 @@ export class ServerService {
       presetName: s.presetId ? (this.presets.byId(s.presetId)?.name ?? null) : null,
       port: s.port,
       cpu: s.cpu,
+      cpus: s.cpuSet ?? String(s.cpu),
+      cpuMode: s.cpuMode,
       map: s.map,
       gameType: s.gameType,
       gameMode: s.gameMode,
@@ -185,8 +207,9 @@ export class ServerService {
     if (this.store.slugTaken(slug)) throw conflict(`The short name "${slug}" is already used by another server.`);
     const portIssue = await this.checkPort(input.port);
     if (portIssue) throw badRequest(portIssue);
-    const cpu = input.cpu ?? this.suggestCpu();
-    if (cpu >= this.host.cpuCount()) throw badRequest(`This machine has CPU cores 0–${this.host.cpuCount() - 1}.`);
+    const cpuPick = this.cpuHooks ? await this.cpuHooks.forNew(input) : { cpu: input.cpu ?? this.suggestCpu(), cpuSet: null, cpuMode: "manual" as const };
+    const cpu = cpuPick.cpu;
+    if (!this.cpuHooks && cpu >= this.host.cpuCount()) throw badRequest(`This machine has CPU cores 0–${this.host.cpuCount() - 1}.`);
     if (input.startNow && !(await this.files.baseInstalled())) {
       throw badRequest("CS2 isn't installed yet. Install it from the Game update page first, or create the server without starting it.");
     }
@@ -197,6 +220,8 @@ export class ServerService {
       presetId: preset.id,
       port: input.port,
       cpu,
+      cpuSet: cpuPick.cpuSet,
+      cpuMode: cpuPick.cpuMode,
       map: input.map ?? preset.defaultMap,
       gameType: preset.gameType,
       gameMode: preset.gameMode,
@@ -256,9 +281,13 @@ export class ServerService {
       if (issue) throw badRequest(issue);
       s.port = input.port;
     }
-    if (input.cpu !== undefined) {
-      if (input.cpu >= this.host.cpuCount()) throw badRequest(`This machine has CPU cores 0–${this.host.cpuCount() - 1}.`);
+    if (input.cpu !== undefined && (input.cpu !== s.cpu || s.cpuSet !== null)) {
+      // The old way of setting one CPU: that CPU, by hand.
+      if (this.cpuHooks) await this.cpuHooks.checkCpu(input.cpu);
+      else if (input.cpu >= this.host.cpuCount()) throw badRequest(`This machine has CPU cores 0–${this.host.cpuCount() - 1}.`);
       s.cpu = input.cpu;
+      s.cpuSet = null;
+      s.cpuMode = "manual";
     }
     let preset = null;
     if (input.presetId !== undefined && input.presetId !== s.presetId) {
@@ -319,7 +348,7 @@ export class ServerService {
       slug,
       name: input.name,
       port: input.port,
-      cpu: this.suggestCpu(),
+      ...(this.cpuHooks ? await this.cpuHooks.forNew({}) : { cpu: this.suggestCpu(), cpuSet: null, cpuMode: "manual" as const }),
       gsltToken: input.gsltToken || null,
       rconPassword: randomPassword(),
       bridgeToken: randomToken(),
@@ -423,7 +452,7 @@ export class ServerService {
   }
 
   private async writeLaunchFiles(s: ServerRecord): Promise<void> {
-    await this.files.writeLaunchEnv(s.slug, s);
+    await this.files.writeLaunchEnv(s.slug, { ...s, cpuList: this.cpuHooks ? await this.cpuHooks.launch(s) : (s.cpuSet ?? String(s.cpu)) });
     await this.files.writeGeneratedCfg(s.slug, { hostname: this.hostnameFor(s), password: s.password, rconPassword: s.rconPassword });
   }
 }

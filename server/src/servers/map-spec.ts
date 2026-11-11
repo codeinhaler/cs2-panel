@@ -5,10 +5,7 @@
  *   collection:125499818        a Workshop collection (its maps become the rotation)
  *   collection:125499818/3070288532   the same, starting on that map
  */
-export type MapSpec =
-  | { kind: "stock"; map: string }
-  | { kind: "workshop"; id: string }
-  | { kind: "collection"; id: string; startId: string | null };
+export type MapSpec = { kind: "stock"; map: string } | { kind: "workshop"; id: string } | { kind: "collection"; id: string; startId: string | null };
 
 const STOCK_RE = /^[A-Za-z0-9_\-/]{1,64}$/;
 const ID = "(\\d{1,20})";

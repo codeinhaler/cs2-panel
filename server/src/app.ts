@@ -32,6 +32,8 @@ import { MapMenuService } from "./plugins/map-menu.js";
 import { ExecConfigService, withBlock } from "./servers/exec-configs.js";
 import { MapCycleService, isCasual } from "./servers/map-cycle.js";
 import { BridgeAutoUpdate } from "./plugins/bridge-autoupdate.js";
+import { CpuService } from "./cpu/service.js";
+import { sysReader, type SysReader } from "./cpu/topology.js";
 import { SharedConfigService, withoutSharedBlock } from "./servers/shared-config.js";
 import { WorkshopLookup, workshopBlocks } from "./game/workshop.js";
 import { parseMapSpec } from "./servers/map-spec.js";
@@ -71,6 +73,8 @@ export interface AppDeps {
   a2sQuery?: (port: number) => Promise<A2sInfo | null>;
   /** Replaces the waits before scheduled restarts (tests). */
   automationSleep?: (ms: number) => Promise<void>;
+  /** A fake /sys and /proc for the CPU topology (tests). */
+  cpuSys?: SysReader;
   /** Replaces Let's Encrypt and the firewall (tests). */
   tls?: Partial<Pick<import("./tls/service.js").TlsDeps, "issue" | "panRequest" | "probe" | "sleep" | "now">>;
   /** Replaces the clock and waits matchmaking uses (tests). */
@@ -118,6 +122,12 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const gate = new OperationGate();
   const settings = new Settings(db);
   const servers = new ServerService(serverStore, presets, files, configs, host, audit, gate);
+  // CPU Management: picks CPUs for new servers, checks lists, and writes the CPUs a server starts on.
+  // In development, CS2PANEL_DEV_SYS can point at a fake /sys + /proc tree to try other machines.
+  const cpuSys = deps.cpuSys ?? (config.dev && process.env.CS2PANEL_DEV_SYS ? sysReader(process.env.CS2PANEL_DEV_SYS) : undefined);
+  const cpu = new CpuService({ settings, servers, host, audit, ...(cpuSys ? { sys: cpuSys } : {}) });
+  servers.cpuHooks = cpu;
+  servers.beforeStart.push((s) => cpu.noteStart(s));
   const updater = new GameUpdater(host, files, serverStore, audit, gate, rcon);
   const workshop = new WorkshopLookup(fetchFn);
   /** Refuses Workshop maps/collections Steam says are removed, missing, private or not CS2. */
@@ -537,6 +547,36 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     const user = requirePerm(req, "config.edit");
     const { id } = idParam.parse(req.params);
     return { mapCycle: await mapCycles.set(servers.require(id), req.body, user.id) };
+  });
+
+  // ------------------------------------------------------------- CPU Management
+
+  app.get("/api/cpu", async (req) => {
+    requirePerm(req, "view");
+    const { refresh } = z.object({ refresh: z.string().optional() }).parse(req.query);
+    return cpu.overview(refresh === "1");
+  });
+
+  app.get("/api/cpu/usage", async (req) => {
+    requirePerm(req, "view");
+    return cpu.usage();
+  });
+
+  app.get("/api/cpu/suggest", async (req) => {
+    requirePerm(req, "view");
+    return cpu.suggest();
+  });
+
+  app.put("/api/cpu/policy", async (req) => {
+    const user = requirePerm(req, "server.manage");
+    return { policy: await cpu.setPolicy(req.body, user.id) };
+  });
+
+  // The one place a server's CPUs change: CPU Management, its overview and the server's Settings tab all use it.
+  app.put("/api/servers/:id/cpu", async (req) => {
+    const user = requirePerm(req, "server.manage");
+    const { id } = idParam.parse(req.params);
+    return cpu.assign(id, req.body, user.id);
   });
 
   app.get("/api/ports/check", async (req) => {

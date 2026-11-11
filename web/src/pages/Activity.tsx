@@ -131,6 +131,10 @@ function describe(e: AuditEntry): string {
       const list = Array.isArray(d.configs) ? (d.configs as string[]) : [];
       return list.length ? `set configs to run on every map start: ${list.join(", ")}` : "stopped running extra configs on map start";
     }
+    case "server.cpu":
+      return `changed the CPUs from ${str("from")} to ${str("to")} (${d.mode === "auto" ? "automatic" : "manual"})`;
+    case "cpu.policy":
+      return `set the CPU allocation policy to ${str("mode")} (reserved: ${str("reserved")})`;
     case "server.map_cycle":
       return Number(d.maps) >= 2 ? `set a map cycle of ${String(d.maps)} maps${d.random ? ", in random order" : ""}` : "turned off the map cycle";
     case "server.schedule":

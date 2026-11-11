@@ -103,7 +103,13 @@ export class ExecConfigService {
       const before = current?.content ?? "";
       const after = withBlock(before, file === target ? list : []);
       if (after === before || (!current && !after)) continue;
-      await this.configs.save(s, rel, after, actorId, file === target ? "Configs to run on every map start" : "Moved the panel's configs to run to another game mode's file");
+      await this.configs.save(
+        s,
+        rel,
+        after,
+        actorId,
+        file === target ? "Configs to run on every map start" : "Moved the panel's configs to run to another game mode's file",
+      );
     }
   }
 }

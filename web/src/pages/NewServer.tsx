@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, type CatalogPlugin, type HostInfo, type Preset } from "../api";
+import { api, type CatalogPlugin, type CpuOverview, type HostInfo, type Preset } from "../api";
 import { useAction, useApp } from "../app-context";
 import { MapPicker } from "../components/MapPicker";
 import { PortField } from "../components/PortField";
+import { CpuPicker, type CpuChoice } from "../components/CpuAssign";
 
 const slugify = (name: string) =>
   name
@@ -29,7 +30,9 @@ export function NewServerPage() {
   const [map, setMap] = useState("");
   const [maxPlayers, setMaxPlayers] = useState("");
   const [port, setPort] = useState("");
-  const [cpu, setCpu] = useState("");
+  const [cpuChoice, setCpuChoice] = useState<CpuChoice>({ mode: "auto", cpus: "" });
+  const [cpuOverview, setCpuOverview] = useState<CpuOverview | null>(null);
+  const [cpuWarnings, setCpuWarnings] = useState<string[]>([]);
   const [gslt, setGslt] = useState("");
   const [password, setPassword] = useState("");
   const [autostart, setAutostart] = useState(true);
@@ -49,7 +52,15 @@ export function NewServerPage() {
       .catch(() => undefined);
     void api.host().then((h) => {
       setHost(h);
-      setCpu(String(h.suggestedCpu));
+      // What a new server would get now, by the CPU policy (Legacy: the least-used CPU).
+      void api.cpuSuggest().then((sug) => {
+        setCpuChoice({ mode: sug.policy === "legacy" ? "manual" : sug.mode, cpus: sug.cpus });
+        setCpuWarnings(sug.warnings);
+      });
+      void api
+        .cpu()
+        .then(setCpuOverview)
+        .catch(() => undefined);
       if (!h.cs2.installed) setStartNow(false);
     });
   }, []);
@@ -79,7 +90,7 @@ export function NewServerPage() {
           map: map.trim() || undefined,
           maxPlayers: maxPlayers ? Number(maxPlayers) : undefined,
           port: Number(port),
-          cpu: Number(cpu),
+          ...(cpuChoice.mode === "auto" ? { cpuMode: "auto" } : { cpuSet: cpuChoice.cpus }),
           gsltToken: gslt.trim(),
           password,
           autostart,
@@ -158,19 +169,16 @@ export function NewServerPage() {
           <h2 style={{ marginBottom: 14 }}>Network and access</h2>
           <div className="form-grid">
             <PortField value={port} onChange={setPort} host={host} />
-            <label className="field">
-              <span>CPU core</span>
-              <select value={cpu} onChange={(e) => setCpu(e.target.value)}>
-                {Array.from({ length: host?.cpuCount ?? 1 }, (_, i) => (
-                  <option key={i} value={i}>
-                    Core {i}
-                    {i === (host?.cpuCount ?? 1) - 1 ? " (shared with the panel)" : ""}
-                    {i === host?.suggestedCpu ? " (suggested)" : ""}
-                  </option>
-                ))}
-              </select>
-              <small>Each server runs best on its own core.</small>
-            </label>
+            <div className="field" style={{ gridColumn: "1 / -1" }}>
+              <span>CPUs</span>
+              <CpuPicker overview={cpuOverview} value={cpuChoice} onChange={setCpuChoice} />
+              {cpuChoice.mode === "auto" && cpuChoice.cpus && (
+                <small>
+                  Right now that's CPU {cpuChoice.cpus}. {cpuWarnings.join(" ")}
+                </small>
+              )}
+              <small>Each server runs best on its own core. All servers' CPUs: CS2 Panel → Settings.</small>
+            </div>
             <label className="field">
               <span>Steam game server token (GSLT)</span>
               <input value={gslt} onChange={(e) => setGslt(e.target.value)} placeholder="Optional" autoComplete="off" spellCheck={false} />

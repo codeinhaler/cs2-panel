@@ -5,6 +5,7 @@ import { useAction, useApp } from "../../app-context";
 import { PortField } from "../../components/PortField";
 import { MapPicker } from "../../components/MapPicker";
 import { SchedulePanel } from "./Schedule";
+import { ServerCpuPanel } from "../../components/CpuAssign";
 import { ConfigsToRunPanel, MapCyclePanel, SaveAsPresetPanel } from "./SettingsExtras";
 
 export function SettingsTab({ server: s, detail, onSaved }: { server: Server; detail: ServerDetail; onSaved: () => void }) {
@@ -19,7 +20,6 @@ export function SettingsTab({ server: s, detail, onSaved }: { server: Server; de
   const [map, setMap] = useState(s.map);
   const [maxPlayers, setMaxPlayers] = useState(String(s.maxPlayers));
   const [port, setPort] = useState(String(s.port));
-  const [cpu, setCpu] = useState(String(s.cpu));
   const savedGslt = detail.gslt ?? "";
   const [gslt, setGslt] = useState(savedGslt);
   const [showGslt, setShowGslt] = useState(false);
@@ -46,7 +46,6 @@ export function SettingsTab({ server: s, detail, onSaved }: { server: Server; de
     if (map !== s.map) changes.map = map;
     if (Number(maxPlayers) !== s.maxPlayers) changes.maxPlayers = Number(maxPlayers);
     if (Number(port) !== s.port) changes.port = Number(port);
-    if (Number(cpu) !== s.cpu) changes.cpu = Number(cpu);
     if (gslt.trim() !== savedGslt) {
       if (!gslt.trim() && !window.confirm("Remove the GSLT token from this server?")) return;
       changes.gsltToken = gslt.trim();
@@ -102,16 +101,6 @@ export function SettingsTab({ server: s, detail, onSaved }: { server: Server; de
             </label>
             <PortField value={port} onChange={setPort} host={host} serverId={s.id} disabled={running} disabledHint="Stop the server to change its port." />
             <label className="field">
-              <span>CPU core</span>
-              <select value={cpu} onChange={(e) => setCpu(e.target.value)}>
-                {Array.from({ length: host?.cpuCount ?? s.cpu + 1 }, (_, i) => (
-                  <option key={i} value={i}>
-                    Core {i}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
               <span>Steam game server token (GSLT)</span>
               <span className="input-with-button">
                 <input
@@ -154,6 +143,7 @@ export function SettingsTab({ server: s, detail, onSaved }: { server: Server; de
         </div>
       </form>
 
+      <ServerCpuPanel serverId={s.id} canEdit={can("server.manage")} />
       <MapCyclePanel server={s} />
       <ConfigsToRunPanel server={s} current={detail.execConfigs} onSaved={onSaved} />
       <SchedulePanel server={s} />
