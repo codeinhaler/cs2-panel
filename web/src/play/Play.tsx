@@ -118,56 +118,205 @@ export function Play() {
       )}
       {!state.enabled && <div className="notice info">Matchmaking is closed right now. Check back when the event starts.</div>}
 
-      {!me ? (
-        <>
-          {state.casual.servers.length > 0 && <CasualCard state={state} />}
-          <section className="panel play-signin">
-            <h2>Play with even teams</h2>
-            {state.casual.servers.length > 0 && (
-              <p className="play-signin-note">
-                <b>{state.casual.name}</b> needs no sign-in: just press Join above. For{" "}
-                {state.lobbies
-                  .map((l) => l.label)
-                  .join(", ")
-                  .replace(/, ([^,]*)$/, " and $1") || "Competitive"}{" "}
-                matches, sign in through Steam.
-              </p>
-            )}
-            <p>
-              Sign in with Steam and pick a lobby: {state.lobbies.map((l) => `${l.label}`).join(", ") || "Competitive"}. Teams are made from everyone's Premier
-              rating so both sides are about equal, and a bot fills in when the numbers are odd. The captains then ban maps until one is left, and you get a
-              button to join the server.
-            </p>
-            <a className="btn primary play-steam" href={`${API}/auth/steam`}>
-              Sign in through Steam
-            </a>
-            <p className="hint">Steam only tells this site your SteamID, name and avatar. Your password stays with Steam.</p>
-          </section>
-        </>
+      {state.look.layout === "board" ? (
+        <BoardHome state={state} myMatch={myMatch} myDraft={myDraft} otherMatches={otherMatches} skew={skew.current} busy={busy} act={act} />
       ) : (
         <>
-          {myMatch && <MatchCard match={myMatch} meId={me.steamId} skew={skew.current} busy={busy} act={act} mine />}
-          {myDraft && <DraftCard draft={myDraft} state={state} busy={busy} act={act} />}
-          {state.enabled &&
-            (me.inLobby ? (
-              <LobbyCard state={state} busy={busy} act={act} />
-            ) : (
-              <LobbyPicker state={state} busy={busy} act={act} casualOpen={casualOpen} onCasual={() => setCasualOpen((v) => !v)} />
-            ))}
-          {!me.inLobby && !myMatch && casualOpen && state.casual.servers.length > 0 && <CasualCard state={state} />}
-          <RatingCard state={state} busy={busy} act={act} />
-          <DiscordCard />
+          {!me ? (
+            <>
+              {state.casual.servers.length > 0 && <CasualCard state={state} />}
+              <section className="panel play-signin">
+                <h2>Play with even teams</h2>
+                {state.casual.servers.length > 0 && (
+                  <p className="play-signin-note">
+                    <b>{state.casual.name}</b> needs no sign-in: just press Join above. For{" "}
+                    {state.lobbies
+                      .map((l) => l.label)
+                      .join(", ")
+                      .replace(/, ([^,]*)$/, " and $1") || "Competitive"}{" "}
+                    matches, sign in through Steam.
+                  </p>
+                )}
+                <p>
+                  Sign in with Steam and pick a lobby: {state.lobbies.map((l) => `${l.label}`).join(", ") || "Competitive"}. Teams are made from everyone's
+                  Premier rating so both sides are about equal, and a bot fills in when the numbers are odd. The captains then ban maps until one is left, and
+                  you get a button to join the server.
+                </p>
+                <a className="btn primary play-steam" href={`${API}/auth/steam`}>
+                  Sign in through Steam
+                </a>
+                <p className="hint">Steam only tells this site your SteamID, name and avatar. Your password stays with Steam.</p>
+              </section>
+            </>
+          ) : (
+            <>
+              {myMatch && <MatchCard match={myMatch} meId={me.steamId} skew={skew.current} busy={busy} act={act} mine />}
+              {myDraft && <DraftCard draft={myDraft} state={state} busy={busy} act={act} />}
+              {state.enabled &&
+                (me.inLobby ? (
+                  <LobbyCard state={state} busy={busy} act={act} />
+                ) : (
+                  <LobbyPicker state={state} busy={busy} act={act} casualOpen={casualOpen} onCasual={() => setCasualOpen((v) => !v)} />
+                ))}
+              {!me.inLobby && !myMatch && casualOpen && state.casual.servers.length > 0 && <CasualCard state={state} />}
+              <RatingCard state={state} busy={busy} act={act} />
+              <DiscordCard />
+            </>
+          )}
+
+          {otherMatches.length > 0 && (
+            <section className="play-section">
+              <h2 className="play-section-title">Matches</h2>
+              {otherMatches.map((m) => (
+                <MatchCard key={m.id} match={m} meId={me?.steamId ?? null} skew={skew.current} busy={busy} act={act} />
+              ))}
+            </section>
+          )}
         </>
       )}
+    </div>
+  );
+}
 
-      {otherMatches.length > 0 && (
-        <section className="play-section">
-          <h2 className="play-section-title">Matches</h2>
-          {otherMatches.map((m) => (
-            <MatchCard key={m.id} match={m} meId={me?.steamId ?? null} skew={skew.current} busy={busy} act={act} />
-          ))}
+// ------------------------------------------------------------- status board layout
+
+const MODE_BLURB: Record<string, string> = {
+  competitive: "Balanced by rating",
+  wingman: "Short, small maps",
+  duel: "Aim duel, first to 16",
+  fixed5: "Pick your own side",
+  fixed2: "Wingman, your own side",
+};
+const sizeText = (l: { teamSize: number; fixed: boolean }) => (l.teamSize === 1 ? "1v1" : l.teamSize === 2 ? "2v2" : `up to ${l.teamSize}v${l.teamSize}`);
+
+/** The "Status board" layout: a ready-to-play checklist next to a table of every lobby, then live matches and casual servers. */
+function BoardHome({
+  state,
+  myMatch,
+  myDraft,
+  otherMatches,
+  skew,
+  busy,
+  act,
+}: {
+  state: State;
+  myMatch: Match | undefined;
+  myDraft: Draft | undefined;
+  otherMatches: Match[];
+  skew: number;
+  busy: boolean;
+  act: Act;
+}) {
+  const me = state.me;
+  const [discord, setDiscord] = useState<DiscordMe | null>(null);
+  useEffect(() => {
+    if (me)
+      void play
+        .discord()
+        .then(setDiscord)
+        .catch(() => undefined);
+  }, [me]);
+  const steps: { done: boolean; title: string; text: string; optional?: boolean }[] = [
+    { done: !!me, title: "Sign in with Steam", text: "Needed for matches, not for casual." },
+    ...(discord?.available || !me
+      ? [{ done: !!discord?.linked, title: "Link Discord", text: "We move you to your team's voice channel.", optional: true }]
+      : []),
+    { done: false, title: "Open CS2", text: "The Join button only works with the game running." },
+    { done: !!me && (me.inLobby || !!myMatch), title: "Join a lobby", text: "Pick one in the table." },
+  ];
+  return (
+    <div className="board">
+      <aside className="board-side">
+        <section className="panel board-check">
+          <h2>Ready to play?</h2>
+          <p className="hint">Tick these off and you're in.</p>
+          <ul>
+            {steps.map((s) => (
+              <li key={s.title} className={s.done ? "done" : ""}>
+                <span className="board-dot" aria-hidden="true">
+                  {s.done ? "✓" : ""}
+                </span>
+                <span>
+                  <b>{s.title}</b>
+                  {s.optional && <span className="hint"> (optional)</span>}
+                  <br />
+                  <span className="hint">{s.text}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+          {!me && (
+            <a className="btn primary play-steam" href={`${API}/auth/steam`}>
+              Sign in with Steam
+            </a>
+          )}
         </section>
-      )}
+        {me && <RatingCard state={state} busy={busy} act={act} />}
+        {me && <DiscordCard />}
+      </aside>
+
+      <div className="board-main">
+        {me && myMatch && <MatchCard match={myMatch} meId={me.steamId} skew={skew} busy={busy} act={act} mine />}
+        {me && myDraft && <DraftCard draft={myDraft} state={state} busy={busy} act={act} />}
+        {me?.inLobby && state.enabled ? (
+          <LobbyCard state={state} busy={busy} act={act} />
+        ) : (
+          <section className="panel board-lobbies">
+            <div className="board-lobbies-head">
+              <h2>Lobbies</h2>
+              <span className="hint">
+                {state.freeServers} of {state.matchServers} match servers free
+              </span>
+            </div>
+            <div className="board-table-wrap">
+              <table className="board-table">
+                <thead>
+                  <tr>
+                    <th>Mode</th>
+                    <th>Teams</th>
+                    <th>Waiting</th>
+                    <th aria-label="Join" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {state.lobbies.map((l) => (
+                    <tr key={l.mode}>
+                      <td>
+                        <b>{l.label}</b>
+                        <br />
+                        <span className="hint">{MODE_BLURB[l.mode] ?? ""}</span>
+                      </td>
+                      <td className="hint">{sizeText(l)}</td>
+                      <td>{l.players}</td>
+                      <td className="board-join">
+                        {me ? (
+                          <button className="btn primary small" disabled={busy || !state.enabled || !!myMatch} onClick={() => act(() => play.join(l.mode))}>
+                            Join
+                          </button>
+                        ) : (
+                          <a className="btn small" href={`${API}/auth/steam`}>
+                            Sign in to join
+                          </a>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {state.lobbies.length === 0 && <p className="hint">No lobbies are open right now.</p>}
+          </section>
+        )}
+        {otherMatches.length > 0 && (
+          <section className="play-section">
+            <h2 className="play-section-title">Live matches</h2>
+            {otherMatches.map((m) => (
+              <MatchCard key={m.id} match={m} meId={me?.steamId ?? null} skew={skew} busy={busy} act={act} />
+            ))}
+          </section>
+        )}
+        {state.casual.servers.length > 0 && !myMatch && <CasualCard state={state} />}
+      </div>
     </div>
   );
 }

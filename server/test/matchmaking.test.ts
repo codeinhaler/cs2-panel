@@ -820,6 +820,10 @@ describe("matchmaking site", () => {
     expect(html).toContain("<title>Fredags &lt;CS&gt;</title>");
     expect(html).toContain('<style id="cs2mm-theme">html:root{color-scheme:dark;');
     expect(html).toContain("--team-b:#00ff00;");
+    // The layout defaults to the original one; the status board can be picked and reaches the site.
+    expect((await play(await playerCookie(P[0]!, "Alpha"), "GET", "/api/state")).body.look.layout).toBe("classic");
+    await enable(owner, [], { look: { layout: "board", theme: "amber", colors: {} } });
+    expect((await play(await playerCookie(P[0]!, "Alpha"), "GET", "/api/state")).body.look.layout).toBe("board");
 
     const bad = await app.fastify.inject({
       method: "PUT",
@@ -846,7 +850,7 @@ describe("matchmaking site", () => {
     html = (await site.inject({ method: "GET", url: "/", headers: { host: "play.example:8090" } })).body;
     expect(html).toContain(`<link rel="icon" href="${iconUrl}" />`);
     expect(html).not.toContain("<svg");
-    expect((await play(null, "GET", "/api/state")).body.look).toEqual({ icon: iconUrl, banner: null });
+    expect((await play(null, "GET", "/api/state")).body.look).toMatchObject({ icon: iconUrl, banner: null });
 
     // Too big, and removing.
     const huge = Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), Buffer.alloc(600 * 1024)]);

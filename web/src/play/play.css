@@ -679,3 +679,111 @@
 .play-fixed-head {
   margin-bottom: 2px;
 }
+
+/* Status board layout: checklist beside the lobby table. */
+.play:has(.board) {
+  max-width: 1200px;
+}
+.board {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  align-items: flex-start;
+}
+.board-side {
+  flex: 1 1 300px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.board-main {
+  flex: 999 1 600px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.board-check h2 {
+  margin: 0 0 4px;
+}
+.board-check ul {
+  list-style: none;
+  margin: 12px 0 16px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.board-check li {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.board-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+}
+.board-check li.done .board-dot {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.board-lobbies {
+  padding: 0;
+  overflow: hidden;
+}
+.board-lobbies-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.board-lobbies-head h2 {
+  margin: 0;
+}
+.board-lobbies > .hint {
+  padding: 0 20px 16px;
+}
+.board-table-wrap {
+  overflow-x: auto;
+}
+.board-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 520px;
+}
+.board-table th {
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  padding: 10px 8px;
+}
+.board-table td {
+  padding: 12px 8px;
+  border-top: 1px solid var(--line-soft);
+  vertical-align: middle;
+}
+.board-table th:first-child,
+.board-table td:first-child {
+  padding-left: 20px;
+}
+.board-table th:last-child,
+.board-table td:last-child {
+  padding-right: 20px;
+}
+.board-join {
+  text-align: right;
+}

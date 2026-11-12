@@ -564,6 +564,7 @@ export interface MatchmakingSettings {
 
 export type MmColorKey = "paper" | "panel" | "ink" | "accent" | "teamA" | "teamB";
 export interface MmLook {
+  layout?: "classic" | "board";
   theme: string;
   colors: Partial<Record<MmColorKey, string>>;
 }
@@ -619,6 +620,7 @@ export interface MatchmakingInfo {
   };
   mapNames: Record<string, string>;
   themes: MmTheme[];
+  layouts?: { id: "classic" | "board"; label: string; hint: string }[];
   images: { icon: string | null; banner: string | null };
   history: {
     id: number;

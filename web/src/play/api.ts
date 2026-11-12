@@ -112,7 +112,7 @@ export interface State {
   lobby: LobbyPlayer[];
   drafts: Draft[];
   matches: Match[];
-  look: { icon: string | null; banner: string | null };
+  look: { icon: string | null; banner: string | null; layout?: "classic" | "board" };
   mapNames: Record<string, string>;
   casual: {
     name: string;

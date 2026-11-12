@@ -51,7 +51,7 @@ import { BackupService } from "./backups/service.js";
 import { MmPlayerStore } from "./matchmaking/players.js";
 import { Matchmaking } from "./matchmaking/service.js";
 import { PublicSite, buildPublicApp } from "./matchmaking/public-app.js";
-import { SiteImages, THEMES, type ImageKind } from "./matchmaking/look.js";
+import { LAYOUTS, SiteImages, THEMES, type ImageKind } from "./matchmaking/look.js";
 import { CertStore } from "./tls/acme.js";
 import { TlsService } from "./tls/service.js";
 
@@ -1366,6 +1366,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       mapNames: matchmaking.mapNames(),
       httpsDomain: publicSite.status().https ? tls.https().domain : null,
       themes: THEMES,
+      layouts: LAYOUTS,
       images: matchmaking.imageUrls(),
     };
   });

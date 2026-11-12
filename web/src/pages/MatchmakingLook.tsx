@@ -74,10 +74,40 @@ export function LookSettings({
         save.
       </p>
 
+      {info.layouts && (
+        <>
+          <h3 style={{ margin: "4px 0 8px" }}>Layout</h3>
+          <div className="mm-themes" role="radiogroup" aria-label="Layout" style={{ marginBottom: 16 }}>
+            {info.layouts.map((l) => (
+              <label key={l.id} className={`mm-theme ${(look.layout ?? "classic") === l.id ? "on" : ""}`} title={l.hint}>
+                <input
+                  type="radio"
+                  name="mm-layout"
+                  checked={(look.layout ?? "classic") === l.id}
+                  disabled={!manage}
+                  onChange={() => onChange({ ...look, layout: l.id })}
+                />
+                <span>
+                  <b>{l.label}</b>
+                  <br />
+                  <span className="hint">{l.hint}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <h3 style={{ margin: "4px 0 8px" }}>Colours</h3>
+        </>
+      )}
       <div className="mm-themes" role="radiogroup" aria-label="Theme">
         {info.themes.map((t) => (
           <label key={t.id} className={`mm-theme ${t.id === look.theme ? "on" : ""}`}>
-            <input type="radio" name="mm-theme" checked={t.id === look.theme} disabled={!manage} onChange={() => onChange({ theme: t.id, colors: {} })} />
+            <input
+              type="radio"
+              name="mm-theme"
+              checked={t.id === look.theme}
+              disabled={!manage}
+              onChange={() => onChange({ ...look, theme: t.id, colors: {} })}
+            />
             <span className="mm-swatches" aria-hidden="true">
               {t.colors ? (
                 (["paper", "panel", "accent", "teamA", "teamB"] as const).map((k) => <span key={k} style={{ background: t.colors![k] }} />)

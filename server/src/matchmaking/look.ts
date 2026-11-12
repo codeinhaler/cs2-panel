@@ -42,6 +42,12 @@ export const THEMES: Theme[] = [
     colors: { paper: "#160a2a", panel: "#22113d", ink: "#f3ecff", accent: "#b84dff", teamA: "#8f7dff", teamB: "#ff4fa8" },
   },
   {
+    id: "amber",
+    label: "Amber",
+    mode: "dark",
+    colors: { paper: "#0f1216", panel: "#161b22", ink: "#e8ecf1", accent: "#f5a524", teamA: "#7cc4ff", teamB: "#ff7a59" },
+  },
+  {
     id: "forest",
     label: "Forest",
     mode: "light",
@@ -49,16 +55,24 @@ export const THEMES: Theme[] = [
   },
 ];
 
+/** Page layouts for the site: the original one, and the status board (checklist + lobby table). */
+export const LAYOUTS = [
+  { id: "classic", label: "Classic", hint: "The original layout: lobby cards one under the other." },
+  { id: "board", label: "Status board", hint: 'A "Ready to play?" checklist next to a table of all lobbies, then live matches and casual servers.' },
+] as const;
+export type LayoutId = (typeof LAYOUTS)[number]["id"];
+
 export const LookSchema = z.object({
+  layout: z.enum(["classic", "board"]).default("classic"),
   theme: z.string().refine((id) => THEMES.some((t) => t.id === id), "Unknown theme."),
   /** Changes on top of the theme's colours. */
   colors: z.object(Object.fromEntries(COLOR_KEYS.map((k) => [k, Hex.optional()])) as Record<ColorKey, z.ZodOptional<typeof Hex>>).default({}),
 });
 export type Look = z.infer<typeof LookSchema>;
-export const DEFAULT_LOOK: Look = { theme: "default", colors: {} };
+export const DEFAULT_LOOK: Look = { layout: "classic", theme: "default", colors: {} };
 
 /** The theme's colours with the changes applied, or null for the default theme. */
-export function resolveColors(look: Look): { mode: "light" | "dark"; colors: Colors } | null {
+export function resolveColors(look: Pick<Look, "theme" | "colors">): { mode: "light" | "dark"; colors: Colors } | null {
   const theme = THEMES.find((t) => t.id === look.theme) ?? THEMES[0]!;
   if (!theme.colors || theme.mode === "auto") return null;
   const colors = { ...theme.colors };
@@ -114,7 +128,7 @@ export function themeVars(mode: "light" | "dark", c: Colors): Record<string, str
 }
 
 /** A style block for the player page, or "" for the default theme. */
-export function themeCss(look: Look): string {
+export function themeCss(look: Pick<Look, "theme" | "colors">): string {
   const r = resolveColors(look);
   if (!r) return "";
   const body = Object.entries(themeVars(r.mode, r.colors))
