@@ -63,7 +63,9 @@ case "$verb" in
   start | stop | restart)
     validate_slug "${1:-}"
     # Clear an earlier crash so systemd's restart limit doesn't block a manual start.
-    [[ "$verb" != stop ]] && systemctl reset-failed "cs2@$1.service" 2>/dev/null
+    # reset-failed errors on a unit systemd hasn't loaded yet (a new server that was never
+    # started or enabled); that must not stop the start under set -e.
+    if [[ "$verb" != stop ]]; then systemctl reset-failed "cs2@$1.service" 2>/dev/null || true; fi
     exec systemctl "$verb" "cs2@$1.service"
     ;;
 
