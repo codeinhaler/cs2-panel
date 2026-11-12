@@ -787,3 +787,25 @@
 .board-join {
   text-align: right;
 }
+
+/* Language picker in the header. */
+.play-lang {
+  margin-left: auto;
+}
+.play-lang select {
+  font: inherit;
+  font-size: 14px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

@@ -822,8 +822,8 @@ describe("matchmaking site", () => {
     expect(html).toContain("--team-b:#00ff00;");
     // The layout defaults to the original one; the status board can be picked and reaches the site.
     expect((await play(await playerCookie(P[0]!, "Alpha"), "GET", "/api/state")).body.look.layout).toBe("classic");
-    await enable(owner, [], { look: { layout: "board", theme: "amber", colors: {} } });
-    expect((await play(await playerCookie(P[0]!, "Alpha"), "GET", "/api/state")).body.look.layout).toBe("board");
+    await enable(owner, [], { look: { layout: "board", language: "da", theme: "amber", colors: {} } });
+    expect((await play(await playerCookie(P[0]!, "Alpha"), "GET", "/api/state")).body.look).toMatchObject({ layout: "board", language: "da" });
 
     const bad = await app.fastify.inject({
       method: "PUT",

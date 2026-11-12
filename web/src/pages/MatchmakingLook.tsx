@@ -95,6 +95,14 @@ export function LookSettings({
               </label>
             ))}
           </div>
+          <label className="field" style={{ maxWidth: 320, marginBottom: 16 }}>
+            <span>Language</span>
+            <select value={look.language ?? "en"} disabled={!manage} onChange={(e) => onChange({ ...look, language: e.target.value as "en" | "da" })}>
+              <option value="en">English</option>
+              <option value="da">Dansk</option>
+            </select>
+            <small className="hint">What the site shows first. Visitors can switch language at the top of the site.</small>
+          </label>
           <h3 style={{ margin: "4px 0 8px" }}>Colours</h3>
         </>
       )}

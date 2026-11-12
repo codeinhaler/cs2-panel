@@ -402,7 +402,7 @@ export interface StateView {
   drafts: DraftView[];
   matches: MatchView[];
   /** Uploaded images, as URLs on the matchmaking site. */
-  look: { icon: string | null; banner: string | null; layout: "classic" | "board" };
+  look: { icon: string | null; banner: string | null; layout: "classic" | "board"; language: "en" | "da" };
   /** Servers anyone can join, shown even to people who aren't signed in. */
   casual: { name: string; servers: CasualView[]; discord: { channel: string; invite: string | null } | null };
   /** Steam's names for Workshop maps, by "workshop:ID". */
@@ -1967,7 +1967,7 @@ export class Matchmaking {
         .slice()
         .reverse()
         .map((m) => this.matchView(m, viewer)),
-      look: { ...this.imageUrls(), layout: c.look.layout ?? "classic" },
+      look: { ...this.imageUrls(), layout: c.look.layout ?? "classic", language: c.look.language ?? "en" },
       mapNames: this.mapNames(),
       casual: {
         name: c.casual.name,

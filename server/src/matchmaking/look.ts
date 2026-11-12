@@ -64,12 +64,14 @@ export type LayoutId = (typeof LAYOUTS)[number]["id"];
 
 export const LookSchema = z.object({
   layout: z.enum(["classic", "board"]).default("classic"),
+  /** The site's language until a visitor picks their own. */
+  language: z.enum(["en", "da"]).default("en"),
   theme: z.string().refine((id) => THEMES.some((t) => t.id === id), "Unknown theme."),
   /** Changes on top of the theme's colours. */
   colors: z.object(Object.fromEntries(COLOR_KEYS.map((k) => [k, Hex.optional()])) as Record<ColorKey, z.ZodOptional<typeof Hex>>).default({}),
 });
 export type Look = z.infer<typeof LookSchema>;
-export const DEFAULT_LOOK: Look = { layout: "classic", theme: "default", colors: {} };
+export const DEFAULT_LOOK: Look = { layout: "classic", language: "en", theme: "default", colors: {} };
 
 /** The theme's colours with the changes applied, or null for the default theme. */
 export function resolveColors(look: Pick<Look, "theme" | "colors">): { mode: "light" | "dark"; colors: Colors } | null {

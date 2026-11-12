@@ -17,6 +17,7 @@ import {
   type State,
   type TeamKey,
 } from "./api";
+import { LANGS, savedLang, setLang, type Lang } from "./i18n";
 
 const POLL_MS = 2000;
 
@@ -27,6 +28,7 @@ export function Play() {
   const [busy, setBusy] = useState(false);
   /** Signed in and not in a lobby: the casual card shows once picked from the lobby choices. */
   const [casualOpen, setCasualOpen] = useState(false);
+  const [lang, setLangState] = useState<Lang | null>(() => savedLang());
   // The server's clock minus ours, so countdowns are right even if the phone's clock isn't.
   const skew = useRef(0);
 
@@ -70,6 +72,10 @@ export function Play() {
     [load],
   );
 
+  // The visitor's own language, else the organiser's default.
+  const shownLang: Lang = lang ?? state?.look.language ?? "en";
+  useEffect(() => setLang(shownLang), [shownLang]);
+
   if (!state) {
     return <div className="play-loading">{offline ? "Can't reach the matchmaking site. Retrying…" : "Loading…"}</div>;
   }
@@ -94,6 +100,24 @@ export function Play() {
           )}
           <h1>{state.title}</h1>
         </div>
+        <label className="play-lang" data-no-translate>
+          <span className="sr-only">Language</span>
+          <select
+            value={shownLang}
+            aria-label="Language / Sprog"
+            onChange={(e) => {
+              const l = e.target.value as Lang;
+              setLang(l, true);
+              setLangState(l);
+            }}
+          >
+            {LANGS.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.label}
+              </option>
+            ))}
+          </select>
+        </label>
         {me ? (
           <div className="play-me">
             {me.avatarUrl ? <img src={me.avatarUrl} alt="" /> : <span className="play-avatar" aria-hidden="true" />}
