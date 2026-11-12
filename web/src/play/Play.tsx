@@ -376,6 +376,7 @@ function LobbyPicker({ state, busy, act, casualOpen, onCasual }: { state: State;
 function LobbyCard({ state, busy, act }: { state: State; busy: boolean; act: Act }) {
   const me = state.me!;
   const lobby = state.lobbies.find((l) => l.mode === me.mode);
+  if (lobby?.fixed) return <FixedLobbyCard state={state} busy={busy} act={act} />;
   const members = state.lobby.filter((p) => p.mode === me.mode);
   const available = members.filter((p) => p.status === "ready");
   const myStatus = members.find((p) => p.steamId === me.steamId)?.status;
@@ -469,12 +470,121 @@ function LobbyCard({ state, busy, act }: { state: State; busy: boolean; act: Act
   );
 }
 
-function LobbyRow({ p, me }: { p: LobbyPlayer; me: boolean }) {
+/** Fixed teams: players pick Team 1 or Team 2; a full match starts at once, otherwise both captains vote to start. */
+function FixedLobbyCard({ state, busy, act }: { state: State; busy: boolean; act: Act }) {
+  const me = state.me!;
+  const lobby = state.lobbies.find((l) => l.mode === me.mode)!;
+  const f = state.fixed;
+  const size = lobby.teamSize;
+  const members = state.lobby.filter((p) => p.mode === me.mode);
+  const mine = members.find((p) => p.steamId === me.steamId);
+  const inMatch = mine?.status === "in-match";
+  const waiting = members.filter((p) => p.status !== "in-match");
+  const team = (k: "a" | "b") => waiting.filter((p) => p.team === k);
+  const bench = waiting.filter((p) => !p.team);
+  const myTeam = mine?.team ?? null;
+  const captainOf = (k: "a" | "b") => (k === "a" ? f?.captainA : f?.captainB);
+  const iAmCaptain = !!myTeam && captainOf(myTeam) === me.steamId;
+  const iVoted = !!myTeam && !!f?.votes[myTeam];
+  const free = lobby.freeServers;
+  const canStart = !inMatch && !!myTeam && free > 0 && (f?.full || (iAmCaptain && !iVoted && !f?.reason?.startsWith("Each team")));
+  const others = state.lobbies.filter((l) => l.mode !== me.mode);
+  const hint = inMatch
+    ? null
+    : lobby.matchServers === 0
+      ? `No server is set up for ${lobby.label} yet. Ask the organiser.`
+      : free === 0
+        ? `All ${lobby.label} servers are busy; you can start when one is free.`
+        : !myTeam
+          ? "Pick a team to play."
+          : f?.full
+            ? "Both teams are full: anyone on a team can start."
+            : f?.reason?.startsWith("Each team")
+              ? f.reason
+              : iVoted
+                ? "You voted to start. Waiting for the other captain."
+                : iAmCaptain
+                  ? `${f?.reason ?? ""}`
+                  : "The teams aren't full: the two captains (★) vote to start.";
+  const column = (k: "a" | "b", label: string) => (
+    <div className="play-fixed-team">
+      <div className="play-fixed-head">
+        <b>{label}</b>{" "}
+        <span className="hint">
+          {team(k).length}/{size}
+          {f?.votes[k] ? " · captain voted to start" : ""}
+        </span>
+      </div>
+      <ul className="play-list">
+        {team(k).map((p) => (
+          <LobbyRow key={p.steamId} p={p} me={p.steamId === me.steamId} captain={captainOf(k) === p.steamId} />
+        ))}
+      </ul>
+      {!inMatch && myTeam !== k && team(k).length < size && (
+        <button className="btn small" disabled={busy} onClick={() => act(() => play.pickTeam(k))}>
+          Join {label}
+        </button>
+      )}
+    </div>
+  );
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <h2>
+          {lobby.label} <span className="hint">{`${members.length} here`}</span>
+        </h2>
+        <div className="play-row">
+          {myTeam && !inMatch && (
+            <button className="btn small ghost" disabled={busy} onClick={() => act(() => play.pickTeam(null))}>
+              Sit out
+            </button>
+          )}
+          <button className="btn small ghost" disabled={busy} onClick={() => act(play.leave)}>
+            Leave
+          </button>
+        </div>
+      </div>
+      <div className="play-fixed">
+        {column("a", "Team 1")}
+        {column("b", "Team 2")}
+      </div>
+      {bench.length > 0 && (
+        <>
+          <p className="hint">Waiting for a spot</p>
+          <ul className="play-list">
+            {bench.map((p) => (
+              <LobbyRow key={p.steamId} p={p} me={p.steamId === me.steamId} />
+            ))}
+          </ul>
+        </>
+      )}
+      <div className="play-make">
+        <button className="btn primary play-big" disabled={busy || !canStart} onClick={() => act(play.startFixed)}>
+          {f?.full ? "Start: ban maps" : "Vote to start"}
+        </button>
+        {hint && <span className="hint">{hint}</span>}
+      </div>
+      {others.length > 0 && !inMatch && (
+        <div className="play-switch">
+          <span className="hint">Switch to</span>
+          {others.map((l) => (
+            <button key={l.mode} className="btn small" disabled={busy} onClick={() => act(() => play.join(l.mode))}>
+              {l.label} <span className="hint">({l.players})</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function LobbyRow({ p, me, captain }: { p: LobbyPlayer; me: boolean; captain?: boolean }) {
   const status = { ready: "Ready", away: "Not ready", "in-match": "In a match" }[p.status];
   return (
     <li className={`play-player ${p.status}`}>
       <Avatar url={p.avatarUrl} />
       <span className="play-player-name">
+        {captain && <span title="Captain">★ </span>}
         {p.name}
         {me && <span className="hint"> (you)</span>}
         <span className={`play-status ${p.status}`}>{status}</span>
@@ -553,8 +663,8 @@ function TeamsView({
               <span className="hint">avg {formatRating(avg)}</span>
             </div>
             <ul className="play-list">
-              {team.map((p) => (
-                <li key={p.steamId} className="play-player">
+              {team.map((p, j) => (
+                <li key={`${p.steamId}-${j}`} className="play-player">
                   <Avatar url={p.avatarUrl} />
                   <span className="play-player-name">
                     {p.name}
@@ -767,19 +877,29 @@ function MatchCard({ match: m, meId, skew, busy, act, mine }: { match: Match; me
               checked={m.bots.votes[iAmCaptainOf("a") ? "a" : "b"]}
               onChange={(e) => act(() => play.bot(m.id, e.target.checked))}
             />
-            <span>Fill the short team with a bot</span>
+            <span>{m.bots.counts.a + m.bots.counts.b > 1 ? "Fill the empty spots with bots" : "Fill the short team with a bot"}</span>
           </label>
           <span className="hint">
             {m.bots.on
               ? m.bots.votes.a && m.bots.votes.b
                 ? "The bot plays. It's left out only if both captains untick this."
                 : "The bot still plays: the other captain wants it."
-              : `No bot: both captains said no, so ${label(m.bots.team)} plays one short.`}
+              : m.bots.counts.a + m.bots.counts.b > 1
+                ? "No bots: both captains said no, so the teams play short."
+                : `No bot: both captains said no, so ${label(m.bots.team)} plays one short.`}
           </span>
         </div>
       )}
       {!ended && m.bots && myTeam && !iAmCaptainOf(myTeam) && (
-        <p className="hint">{m.bots.on ? `A bot fills the empty spot on ${label(m.bots.team)}.` : `No bot: ${label(m.bots.team)} plays one short.`}</p>
+        <p className="hint">
+          {m.bots.counts.a + m.bots.counts.b > 1
+            ? m.bots.on
+              ? `Bots fill the empty spots (${m.bots.counts.a} on ${label("a")}, ${m.bots.counts.b} on ${label("b")}).`
+              : "No bots: the teams play short."
+            : m.bots.on
+              ? `A bot fills the empty spot on ${label(m.bots.team)}.`
+              : `No bot: ${label(m.bots.team)} plays one short.`}
+        </p>
       )}
 
       {myTeam && !ended && (

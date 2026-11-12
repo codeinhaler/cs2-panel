@@ -651,6 +651,86 @@ describe("matchmaking site", () => {
     expect((await play(cookies[4]!, "POST", `/api/matches/${matchId}/join`)).body.error).toBe("Both teams are full.");
   });
 
+  it("Fixed teams: players pick teams; full teams start at once, otherwise both captains vote and bots fill every empty spot", async () => {
+    const owner = await adminCookie();
+    const ids = [await setupServer(owner)];
+    await enable(owner, ids, {
+      modes: {
+        competitive: { enabled: false, maps: ["de_mirage"] },
+        wingman: { enabled: false, maps: ["de_vertigo"] },
+        duel: { enabled: false, maps: ["de_vertigo"] },
+        fixed5: { enabled: true, maps: ["de_mirage", "de_inferno", "de_nuke"] },
+        fixed2: { enabled: false, maps: ["de_vertigo"] },
+      },
+    });
+    const names = ["Alpha", "Bravo", "Charlie", "Delta", "Echo"];
+    const cookies = await Promise.all(P.map((id, i) => playerCookie(id, names[i]!)));
+    for (const c of cookies.slice(0, 3)) await play(c, "POST", "/api/lobby/join", { mode: "fixed5" });
+    let st = (await play(cookies[0]!, "GET", "/api/state")).body;
+    // Newcomers go to the smaller team.
+    expect(st.lobby.map((p: any) => p.team).sort()).toEqual(["a", "a", "b"]);
+    // Players pick their own team; making balanced teams isn't a thing here.
+    expect((await play(cookies[1]!, "POST", "/api/lobby/team", { team: "a" })).status).toBe(200);
+    expect((await play(cookies[0]!, "POST", "/api/teams")).status).toBe(400);
+    st = (await play(cookies[0]!, "GET", "/api/state")).body;
+    // Everyone on Team 1: Team 2 needs someone.
+    expect(st.fixed.reason).toMatch(/at least one player/);
+    await play(cookies[1]!, "POST", "/api/lobby/team", { team: "b" });
+    st = (await play(cookies[0]!, "GET", "/api/state")).body;
+    expect(st.fixed).toMatchObject({ full: false, votes: { a: false, b: false } });
+    const { captainA, captainB } = st.fixed;
+    const cookieOf = (id: string) => cookies[P.indexOf(id)]!;
+    const notCaptain = st.lobby.find((p: any) => p.team === "a" && p.steamId !== captainA).steamId;
+    // 2v1: only captains can start, and both have to vote.
+    expect((await play(cookieOf(notCaptain), "POST", "/api/lobby/start")).status).toBe(403);
+    expect((await play(cookieOf(captainA), "POST", "/api/lobby/start")).body).toEqual({ matchId: null });
+    expect((await play(cookies[0]!, "GET", "/api/state")).body.fixed.votes).toEqual({ a: true, b: false });
+    const res = await play(cookieOf(captainB), "POST", "/api/lobby/start");
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.matchId).toBeGreaterThan(0);
+    const m = (await play(cookies[0]!, "GET", "/api/state")).body.matches[0];
+    // Bots fill every empty spot: 2+3 bots vs 1+4 bots, a full 5v5.
+    expect(m.teamA).toHaveLength(5);
+    expect(m.teamB).toHaveLength(5);
+    expect(m.bots).toMatchObject({ on: true, counts: { a: 3, b: 4 } });
+    expect([m.captainA, m.captainB]).toEqual([captainA, captainB]);
+    // A late joiner takes a bot's place, on the team with the most bots.
+    await toLive(cookies, P, m.id);
+    const join = await play(cookies[3]!, "POST", `/api/matches/${m.id}/join`);
+    expect(join.status, JSON.stringify(join.body)).toBe(200);
+    expect(join.body.team).toBe("b");
+    const after = (await play(cookies[0]!, "GET", "/api/state")).body.matches[0];
+    expect(after.bots.counts).toEqual({ a: 3, b: 3 });
+    const [matchFile] = findFile(dir, "match.json");
+    expect(JSON.parse(readFileSync(matchFile!, "utf8"))).toMatchObject({ bot: null, bots: { a: 3, b: 3 } });
+  });
+
+  it("Fixed teams 2v2: full teams can be started by anyone on them, with no bots; a full team can't be joined", async () => {
+    const owner = await adminCookie();
+    await enable(owner, [await setupServer(owner)], {
+      modes: {
+        competitive: { enabled: false, maps: ["de_mirage"] },
+        wingman: { enabled: false, maps: ["de_vertigo"] },
+        duel: { enabled: false, maps: ["de_vertigo"] },
+        fixed5: { enabled: false, maps: ["de_mirage"] },
+        fixed2: { enabled: true, maps: ["de_vertigo", "de_nuke"] },
+      },
+    });
+    const cookies = await Promise.all(P.map((id, i) => playerCookie(id, `P${i}`)));
+    for (const c of cookies.slice(0, 5)) await play(c, "POST", "/api/lobby/join", { mode: "fixed2" });
+    let st = (await play(cookies[0]!, "GET", "/api/state")).body;
+    expect(st.lobby.filter((p: any) => p.team === null)).toHaveLength(1); // the fifth waits for a spot
+    expect(st.fixed.full).toBe(true);
+    const benched = st.lobby.find((p: any) => p.team === null).steamId;
+    expect((await play(cookies[P.indexOf(benched)]!, "POST", "/api/lobby/team", { team: "a" })).status).toBe(400);
+    const anyone = st.lobby.find((p: any) => p.team === "b" && p.steamId !== st.fixed.captainB).steamId;
+    const res = await play(cookies[P.indexOf(anyone)]!, "POST", "/api/lobby/start");
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    st = (await play(cookies[0]!, "GET", "/api/state")).body;
+    expect(st.matches[0]).toMatchObject({ mode: "fixed2", bots: null });
+    expect(st.matches[0].teamA).toHaveLength(2);
+  });
+
   it("adds a bot to the other team when a late player makes it 2v1", async () => {
     const owner = await adminCookie();
     await enable(owner, [await setupServer(owner)]);

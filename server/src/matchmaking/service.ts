@@ -42,13 +42,18 @@ const POLL_MS = 10_000;
 
 export const DEFAULT_MAPS = ["de_ancient", "de_anubis", "de_dust2", "de_inferno", "de_mirage", "de_nuke", "de_overpass", "de_train"];
 
-/** The lobbies players can pick. 1v1 runs in Wingman mode (short halves, small maps). */
-export const MODES = ["competitive", "wingman", "duel"] as const;
+/**
+ * The lobbies players can pick. 1v1 runs in Wingman mode (short halves, small maps).
+ * Fixed teams: players pick their own team instead of the panel balancing them.
+ */
+export const MODES = ["competitive", "wingman", "duel", "fixed5", "fixed2"] as const;
 export type Mode = (typeof MODES)[number];
-export const MODE_INFO: Record<Mode, { label: string; teamSize: number; gameType: number; gameMode: number }> = {
-  competitive: { label: "Competitive", teamSize: 5, gameType: 0, gameMode: 1 },
-  wingman: { label: "Wingman", teamSize: 2, gameType: 0, gameMode: 2 },
-  duel: { label: "1v1", teamSize: 1, gameType: 0, gameMode: 2 },
+export const MODE_INFO: Record<Mode, { label: string; teamSize: number; gameType: number; gameMode: number; fixed: boolean }> = {
+  competitive: { label: "Competitive", teamSize: 5, gameType: 0, gameMode: 1, fixed: false },
+  wingman: { label: "Wingman", teamSize: 2, gameType: 0, gameMode: 2, fixed: false },
+  duel: { label: "1v1", teamSize: 1, gameType: 0, gameMode: 2, fixed: false },
+  fixed5: { label: "Fixed teams 5v5", teamSize: 5, gameType: 0, gameMode: 1, fixed: true },
+  fixed2: { label: "Fixed teams 2v2", teamSize: 2, gameType: 0, gameMode: 2, fixed: true },
 };
 
 /** Bot difficulty (bot_difficulty 0–3) and the rating it counts as when balancing. */
@@ -61,7 +66,7 @@ export const BOT_LEVELS = [
 export const BOT_ID = "BOT";
 
 /** Rounds a team needs to win, per mode (MR12 and MR8). */
-const WIN_ROUNDS: Record<Mode, number> = { competitive: 13, wingman: 9, duel: 9 };
+const WIN_ROUNDS: Record<Mode, number> = { competitive: 13, wingman: 9, duel: 9, fixed5: 13, fixed2: 9 };
 /** Nobody joins once a team is this close to winning. */
 const LATE_JOIN_CUTOFF = 2;
 
@@ -97,7 +102,14 @@ export const MatchmakingSettingsSchema = z.object({
   title: z.string().trim().min(1).max(60),
   serverIds: z.array(z.number().int().positive()).max(20),
   modes: z
-    .object({ competitive: ModeSettings, wingman: ModeSettings, duel: ModeSettings })
+    .object({
+      competitive: ModeSettings,
+      wingman: ModeSettings,
+      duel: ModeSettings,
+      // Added later: missing in older settings and clients.
+      fixed5: ModeSettings.default({ enabled: false, maps: DEFAULT_MAPS, config: "", keepWeapons: false }),
+      fixed2: ModeSettings.default({ enabled: false, maps: ["de_inferno", "de_nuke", "de_overpass", "de_vertigo"], config: "", keepWeapons: false }),
+    })
     .refine((m) => MODES.some((k) => m[k].enabled), "Open at least one lobby.")
     .refine((m) => MODES.every((k) => !m[k].enabled || m[k].maps.length > 0), "Every open lobby needs at least one map."),
   botDifficulty: z.number().int().min(0).max(3),
@@ -147,6 +159,8 @@ export const DEFAULT_SETTINGS: MatchmakingSettings = {
     competitive: { enabled: true, maps: DEFAULT_MAPS, config: "", keepWeapons: false },
     wingman: { enabled: true, maps: ["de_inferno", "de_nuke", "de_overpass", "de_vertigo"], config: "", keepWeapons: false },
     duel: { enabled: true, maps: ["de_inferno", "de_nuke", "de_vertigo"], config: DUEL_CONFIG, keepWeapons: true },
+    fixed5: { enabled: false, maps: DEFAULT_MAPS, config: "", keepWeapons: false },
+    fixed2: { enabled: false, maps: ["de_inferno", "de_nuke", "de_overpass", "de_vertigo"], config: "", keepWeapons: false },
   },
   botDifficulty: 1,
   look: DEFAULT_LOOK,
@@ -252,6 +266,8 @@ interface LobbyEntry {
   joinedAt: number;
   lastSeen: number;
   sitOuts: number;
+  /** Fixed teams: the team the player picked (null: waiting for a spot). */
+  team?: TeamKey | null;
 }
 
 interface Draft {
@@ -275,6 +291,8 @@ export interface LobbyView {
   status: "ready" | "away" | "in-match";
   sitOuts: number;
   mode: Mode;
+  /** Fixed teams: the team they picked. */
+  team: TeamKey | null;
 }
 
 export interface TeamsView {
@@ -321,7 +339,7 @@ export interface MatchView extends TeamsView {
   /** Only for players in the match. */
   join: { port: number; password: string } | null;
   /** The bot filling a short team: which team, whether it plays, and the captains' votes. */
-  bots: { team: TeamKey; on: boolean; votes: { a: boolean; b: boolean } } | null;
+  bots: { team: TeamKey; on: boolean; votes: { a: boolean; b: boolean }; counts: { a: number; b: number } } | null;
   /** The viewer's own team's Discord voice channel. */
   discord: { channel: string; invite: string | null } | null;
   /** Mid-match joins: open unless both captains voted no. */
@@ -367,7 +385,19 @@ export interface StateView {
     ready: boolean;
     leetifyUrl: string;
   } | null;
-  lobbies: { mode: Mode; label: string; teamSize: number; maps: string[]; players: number; ready: number; freeServers: number; matchServers: number }[];
+  lobbies: {
+    mode: Mode;
+    label: string;
+    teamSize: number;
+    fixed: boolean;
+    maps: string[];
+    players: number;
+    ready: number;
+    freeServers: number;
+    matchServers: number;
+  }[];
+  /** The viewer's Fixed teams lobby: captains, start votes and whether it can start. */
+  fixed: FixedView | null;
   lobby: LobbyView[];
   drafts: DraftView[];
   matches: MatchView[];
@@ -383,6 +413,17 @@ export interface StateView {
   /** Servers set up for matches (in the pool, with the bridge), busy or not. */
   matchServers: number;
   now: number;
+}
+
+export interface FixedView {
+  mode: Mode;
+  captainA: string | null;
+  captainB: string | null;
+  votes: { a: boolean; b: boolean };
+  /** Both teams full: anyone on a team can start. */
+  full: boolean;
+  /** Why it can't start yet, if it can't. */
+  reason: string | null;
 }
 
 export interface MatchmakingDeps {
@@ -413,6 +454,12 @@ export interface MatchmakingDeps {
 
 const ACTIVE: MatchPhase[] = ["veto", "side", "starting", "live"];
 const humans = (team: Member[]) => team.filter((p) => p.steamId !== BOT_ID);
+const botCount = (team: Member[]) => team.filter((p) => p.steamId === BOT_ID).length;
+/** The team playing with bot(s) (the one with more, if both): what "the bot's team" means for joins and votes. */
+const botTeamOf = (m: { teamA: Member[]; teamB: Member[] }): TeamKey | null => {
+  const [a, b] = [botCount(m.teamA), botCount(m.teamB)];
+  return a === 0 && b === 0 ? null : a >= b ? "a" : "b";
+};
 /** People who should be on the server (the bot doesn't count). */
 const expected = (m: { teamA: Member[]; teamB: Member[] }) => humans(m.teamA).length + humans(m.teamB).length;
 const isActive = (m: Match) => ACTIVE.includes(m.phase);
@@ -725,7 +772,117 @@ export class Matchmaking {
       if (this.activeMatchOf(steamId)) throw badRequest("Finish your match before changing lobby.");
       this.dropDraftsWith(steamId);
     }
-    this.lobby.set(steamId, { steamId, mode, ready: true, readySince: t, joinedAt: t, lastSeen: t, sitOuts: 0 });
+    this.lobby.set(steamId, { steamId, mode, ready: true, readySince: t, joinedAt: t, lastSeen: t, sitOuts: 0, team: this.openTeam(mode) });
+  }
+
+  // ------------------------------------------------------------- fixed teams
+
+  /** Players waiting in a Fixed teams lobby, by the team they picked (not those already in a match). */
+  private fixedTeams(mode: Mode): { a: LobbyEntry[]; b: LobbyEntry[] } {
+    const here = [...this.lobby.values()].filter((e) => e.mode === mode && !this.activeMatchOf(e.steamId)).sort((x, y) => x.joinedAt - y.joinedAt);
+    return { a: here.filter((e) => e.team === "a"), b: here.filter((e) => e.team === "b") };
+  }
+
+  /** For a newcomer to a Fixed teams lobby: the smaller team with room, or none (waiting for a spot). */
+  private openTeam(mode: Mode): TeamKey | null {
+    if (!MODE_INFO[mode].fixed) return null;
+    const { a, b } = this.fixedTeams(mode);
+    const size = MODE_INFO[mode].teamSize;
+    if (a.length >= size && b.length >= size) return null;
+    if (a.length >= size) return "b";
+    if (b.length >= size) return "a";
+    return b.length < a.length ? "b" : "a";
+  }
+
+  /** The best-rated player on a fixed team is its captain (the first to join on a tie). */
+  private fixedCaptain(team: LobbyEntry[]): string | null {
+    let best: LobbyEntry | null = null;
+    let bestRating = -1;
+    for (const e of team) {
+      const r = this.ratingNow(this.player(e.steamId)).value ?? 0;
+      if (r > bestRating) [best, bestRating] = [e, r];
+    }
+    return best?.steamId ?? null;
+  }
+
+  /** Each Fixed teams lobby's start votes: the captain who voted, per team (void once they're no longer captain). */
+  private fixedVotes = new Map<Mode, { a: string | null; b: string | null }>();
+
+  private fixedView(mode: Mode): FixedView {
+    const { a, b } = this.fixedTeams(mode);
+    const size = MODE_INFO[mode].teamSize;
+    const captainA = this.fixedCaptain(a);
+    const captainB = this.fixedCaptain(b);
+    const v = this.fixedVotes.get(mode) ?? { a: null, b: null };
+    const votes = { a: !!captainA && v.a === captainA, b: !!captainB && v.b === captainB };
+    const full = a.length === size && b.length === size;
+    const reason = full
+      ? null
+      : !a.length || !b.length
+        ? "Each team needs at least one player."
+        : `Not full yet (${a.length}v${b.length}): both captains vote to start, and bots fill the empty spots.`;
+    return { mode, captainA, captainB, votes, full, reason };
+  }
+
+  /** Picks a team in a Fixed teams lobby (null: step out and wait). */
+  pickTeam(steamId: string, team: TeamKey | null): void {
+    this.requireEnabled();
+    const e = this.lobby.get(steamId);
+    if (!e || !MODE_INFO[e.mode].fixed) throw badRequest("Join a Fixed teams lobby first.");
+    if (this.activeMatchOf(steamId)) throw badRequest("You're in a match.");
+    if (e.team === team) return;
+    if (team) {
+      const others = this.fixedTeams(e.mode)[team].filter((x) => x.steamId !== steamId);
+      if (others.length >= MODE_INFO[e.mode].teamSize) throw badRequest("That team is full.");
+    }
+    e.team = team;
+    e.lastSeen = this.now();
+  }
+
+  /**
+   * Starts a Fixed teams match: straight away when both teams are full (anyone on a team), otherwise once
+   * both captains have voted. Returns the match ID, or null while waiting for the other captain.
+   */
+  async startFixed(by: string): Promise<number | null> {
+    const c = this.requireEnabled();
+    const e = this.lobby.get(by);
+    if (!e || !MODE_INFO[e.mode].fixed) throw badRequest("Join a Fixed teams lobby first.");
+    if (this.activeMatchOf(by)) throw badRequest("You're already in a match.");
+    if (!e.team) throw badRequest("Pick a team first.");
+    const mode = e.mode;
+    const view = this.fixedView(mode);
+    if (!view.full) {
+      if (!view.captainA || !view.captainB) throw badRequest("Each team needs at least one player.");
+      const mine: TeamKey | null = view.captainA === by ? "a" : view.captainB === by ? "b" : null;
+      if (!mine) throw forbidden("The teams aren't full: only the two captains can start (both have to vote).");
+      const v = this.fixedVotes.get(mode) ?? { a: null, b: null };
+      v[mine] = by;
+      this.fixedVotes.set(mode, v);
+      if (!this.fixedView(mode).votes[mine === "a" ? "b" : "a"]) return null;
+    }
+    if ((await this.freeServers(mode)).length === 0) {
+      if (!this.poolRecords(mode).some((s) => this.d.hasBridge(s.id)))
+        throw badRequest(`No server is set up for ${MODE_INFO[mode].label} yet. Ask the organiser.`);
+      throw badRequest(`Every ${MODE_INFO[mode].label} server is busy. Wait for a match to finish.`);
+    }
+    const { a, b } = this.fixedTeams(mode);
+    const teamA = await Promise.all(a.map((x) => this.member(x.steamId)));
+    const teamB = await Promise.all(b.map((x) => this.member(x.steamId)));
+    // Things may have changed while Leetify answered.
+    const now = this.fixedTeams(mode);
+    if (now.a.length !== a.length || now.b.length !== b.length || this.activeMatchOf(by)) throw badRequest("The teams changed. Try again.");
+    const known = [...teamA, ...teamB]
+      .map((p) => p.rating.value)
+      .filter((v): v is number => v !== null)
+      .sort((x, y) => x - y);
+    const stand = known.length ? known[Math.floor(known.length / 2)]! : FALLBACK_RATING;
+    for (const p of [...teamA, ...teamB]) p.effective = p.rating.value ?? stand;
+    // Bots fill every empty spot (the captains can vote them off in the match).
+    const size = MODE_INFO[mode].teamSize;
+    while (teamA.length < size) teamA.push(this.botMember());
+    while (teamB.length < size) teamB.push(this.botMember());
+    this.fixedVotes.delete(mode);
+    return this.createMatch(c, mode, teamA, teamB, "Fixed teams picked on the matchmaking site");
   }
 
   leave(steamId: string): void {
@@ -923,6 +1080,7 @@ export class Matchmaking {
     if (!me) throw badRequest("Join a lobby first.");
     if (this.activeMatchOf(by)) throw badRequest("You're already in a match.");
     const mode = me.mode;
+    if (MODE_INFO[mode].fixed) throw badRequest("In Fixed teams, pick a team and press Start.");
     if (this.drafts.has(mode)) return;
     const size = MODE_INFO[mode].teamSize;
     // An odd number of players plays with a bot on the short team, so nobody waits.
@@ -977,8 +1135,32 @@ export class Matchmaking {
     const c = this.requireEnabled();
     const d = this.requireDraft(by, draftId);
     const split = d.splits[d.index]!;
-    const candidates = await this.freeServers(d.mode);
-    if (this.drafts.get(d.mode) !== d) throw badRequest("Those teams aren't up any more.");
+    const teamA = split.a.map((i) => d.players[i]!);
+    const teamB = split.b.map((i) => d.players[i]!);
+    const id = await this.createMatch(c, d.mode, teamA, teamB, "Teams made on the matchmaking site", () => {
+      if (this.drafts.get(d.mode) !== d) throw badRequest("Those teams aren't up any more.");
+      this.drafts.delete(d.mode);
+    });
+    // Whoever was ready but didn't get a spot goes first next time.
+    const picked = new Set(d.players.map((p) => p.steamId));
+    for (const e of this.available(d.mode)) if (!picked.has(e.steamId)) e.sitOuts++;
+    for (const pid of picked) {
+      const e = this.lobby.get(pid);
+      if (e) e.sitOuts = 0;
+    }
+    return id;
+  }
+
+  /** Takes a free server and starts the veto. `claim` runs once the server is certain, before anything changes. */
+  private async createMatch(
+    c: MatchmakingSettings,
+    mode: Mode,
+    teamA: Member[],
+    teamB: Member[],
+    reason: string,
+    claim: () => void = () => undefined,
+  ): Promise<number> {
+    const candidates = await this.freeServers(mode);
     // Checked again without waiting in between, so two teams starting at once can't get the same server.
     const stillFree = new Set(
       this.serverStates()
@@ -987,28 +1169,26 @@ export class Matchmaking {
     );
     const server = candidates.find((x) => stillFree.has(x.id));
     if (!server) throw badRequest("Every matchmaking server is busy. Wait for a match to finish.");
-    this.drafts.delete(d.mode);
+    claim();
 
-    const teamA = split.a.map((i) => d.players[i]!);
-    const teamB = split.b.map((i) => d.players[i]!);
-    // The best-rated person on each team is captain; never the bot.
+    // The best-rated person on each team is captain; never a bot.
     const captain = (team: Member[]) => team.filter((p) => p.steamId !== BOT_ID).sort((x, y) => y.effective - x.effective)[0]!.steamId;
     const t = this.now();
-    const pool = c.modes[d.mode].maps.slice();
-    const bot: TeamKey | null = teamA.some((p) => p.steamId === BOT_ID) ? "a" : teamB.some((p) => p.steamId === BOT_ID) ? "b" : null;
+    const pool = c.modes[mode].maps.slice();
+    const bot = botTeamOf({ teamA, teamB });
 
     const row = this.d.db
       .prepare("INSERT INTO mm_matches (server_id, mode, team_a, team_b, status) VALUES (?, ?, ?, ?, 'veto')")
       .run(
         server.id,
-        d.mode,
+        mode,
         JSON.stringify(teamA.map(({ steamId, name }) => ({ steamId, name }))),
         JSON.stringify(teamB.map(({ steamId, name }) => ({ steamId, name }))),
       );
 
     const m: Match = {
       id: Number(row.lastInsertRowid),
-      mode: d.mode,
+      mode,
       bot,
       teamA,
       teamB,
@@ -1042,20 +1222,13 @@ export class Matchmaking {
     };
     this.matches.push(m);
 
-    // Whoever was ready but didn't get a spot goes first next time.
-    const picked = new Set(d.players.map((p) => p.steamId));
-    for (const e of this.available(d.mode)) if (!picked.has(e.steamId)) e.sitOuts++;
-    for (const id of picked) {
-      const e = this.lobby.get(id);
-      if (e) e.sitOuts = 0;
-    }
-
+    const bots = botCount(teamA) + botCount(teamB);
     this.d.audit.record(null, "matchmaking.match", server.id, {
-      reason: "Teams made on the matchmaking site",
+      reason,
       match: m.id,
-      mode: MODE_INFO[d.mode].label,
-      players: d.players.filter((p) => p.steamId !== BOT_ID).length,
-      ...(bot ? { bot: true } : {}),
+      mode: MODE_INFO[mode].label,
+      players: humans(teamA).length + humans(teamB).length,
+      ...(bots ? { bots } : {}),
     });
     if (pool.length === 1) this.toSidePick(m, pool[0]!, "b");
     return m.id;
@@ -1164,7 +1337,13 @@ export class Matchmaking {
       password: m.password,
       keepWeapons: this.config().modes[m.mode].keepWeapons,
       exec: cleanModeConfig(this.config().modes[m.mode].config).text ? MATCH_CFG : null,
-      bot: this.botActive(m) ? { side: m.bot === "a" ? m.sideA : sideB, difficulty: this.config().botDifficulty } : null,
+      // One bot: the old single-bot form, which every bridge understands.
+      bot:
+        this.botActive(m) && botCount(m.teamA) + botCount(m.teamB) === 1
+          ? { side: m.bot === "a" ? m.sideA : sideB, difficulty: this.config().botDifficulty }
+          : null,
+      // Bots per team (by team, so they follow the team across half time). Bridge 1.9.0 and later.
+      bots: this.botActive(m) ? { a: botCount(m.teamA), b: botCount(m.teamB), difficulty: this.config().botDifficulty } : null,
       players: [
         ...humans(m.teamA).map((p) => ({ steamId: p.steamId, name: p.name, team: m.sideA, group: "a" })),
         ...humans(m.teamB).map((p) => ({ steamId: p.steamId, name: p.name, team: sideB, group: "b" })),
@@ -1541,7 +1720,8 @@ export class Matchmaking {
     if (m.score && Math.max(m.score.a, m.score.b) >= this.winRounds(m.mode) - LATE_JOIN_CUTOFF) return no("Too late to join: the match is nearly over.");
     if (room.length === 1) return { team: room[0]!, reason: null };
     // A team playing with the bot gets the player first, in the bot's place.
-    if (m.bot && room.includes(m.bot)) return { team: m.bot, reason: null };
+    const withBots = room.filter((k) => botCount(k === "a" ? m.teamA : m.teamB) > 0);
+    if (withBots.length) return { team: withBots.length === 2 ? botTeamOf(m)! : withBots[0]!, reason: null };
     // Both have room: the losing team, or on a tie (or before the first round) the team with the lower total rating.
     if (m.score && m.score.a !== m.score.b) return { team: m.score.a < m.score.b ? "a" : "b", reason: null };
     const total = (t: Member[]) => t.reduce((sum, p) => sum + p.effective, 0);
@@ -1577,13 +1757,13 @@ export class Matchmaking {
     }
 
     const team = teamKey === "a" ? m.teamA : m.teamB;
-    const replacesBot = m.bot === teamKey;
+    const replacesBot = botCount(team) > 0;
     if (replacesBot) {
       team.splice(
         team.findIndex((p) => p.steamId === BOT_ID),
         1,
       );
-      m.bot = null;
+      m.bot = botTeamOf(m);
     }
     team.push(joiner);
     // Now one player short on the other team (e.g. 2v1 in Wingman): a bot fills in, as when teams are made.
@@ -1684,7 +1864,7 @@ export class Matchmaking {
     const channel = !myTeam ? "" : this.discordChannel(m, myTeam, viewer ?? undefined);
     return {
       ...this.teamsView(shown(m.teamA), shown(m.teamB)),
-      bots: m.bot ? { team: m.bot, on: showBot, votes: { ...m.botVotes } } : null,
+      bots: m.bot ? { team: m.bot, on: showBot, votes: { ...m.botVotes }, counts: { a: botCount(m.teamA), b: botCount(m.teamB) } } : null,
       discord: channel && isActive(m) ? { channel, invite: this.config().discord.invite || null } : null,
       id: m.id,
       mode: m.mode,
@@ -1746,6 +1926,7 @@ export class Matchmaking {
           status: this.activeMatchOf(e.steamId) ? "in-match" : e.ready ? "ready" : "away",
           sitOuts: e.sitOuts,
           mode: e.mode,
+          team: e.team ?? null,
         };
       });
     const drafts: DraftView[] = [...this.drafts.values()].map((d) => {
@@ -1765,6 +1946,7 @@ export class Matchmaking {
       mode,
       label: MODE_INFO[mode].label,
       teamSize: MODE_INFO[mode].teamSize,
+      fixed: MODE_INFO[mode].fixed,
       maps: c.modes[mode].maps,
       players: lobby.filter((p) => p.mode === mode).length,
       ready: lobby.filter((p) => p.mode === mode && p.status === "ready").length,
@@ -1776,6 +1958,7 @@ export class Matchmaking {
       enabled: c.enabled,
       me,
       lobbies,
+      fixed: me?.mode && MODE_INFO[me.mode].fixed ? this.fixedView(me.mode) : null,
       lobby,
       drafts,
       // Ongoing matches for everyone (so people can join them); an ended match only for its own players.

@@ -61,7 +61,7 @@ const DEFAULTS: Stored = {
 /** A match as the bot needs it: who's on which team (humans only) and where it runs. */
 export interface VoiceMatch {
   id: number;
-  mode: "competitive" | "wingman" | "duel";
+  mode: "competitive" | "wingman" | "duel" | "fixed5" | "fixed2";
   serverId: number;
   teams: { a: string[]; b: string[] };
 }

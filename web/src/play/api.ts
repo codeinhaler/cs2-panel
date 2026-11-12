@@ -1,7 +1,7 @@
 // Client for the matchmaking site's API (the public site, not the panel).
 
 export type RatingSource = "admin" | "leetify" | "self" | "none" | "bot";
-export type Mode = "competitive" | "wingman" | "duel";
+export type Mode = "competitive" | "wingman" | "duel" | "fixed5" | "fixed2";
 
 export interface Rating {
   value: number | null;
@@ -27,6 +27,8 @@ export interface LobbyPlayer {
   status: "ready" | "away" | "in-match";
   sitOuts: number;
   mode: Mode;
+  /** Fixed teams: the team they picked. */
+  team: TeamKey | null;
 }
 
 export interface Teams {
@@ -75,7 +77,7 @@ export interface Match extends Teams {
   endedAt: number | null;
   joinInfo: { address: string; password: string; steamUrl: string; console: string } | null;
   lateJoins: { open: boolean; votes: { a: boolean; b: boolean } };
-  bots: { team: TeamKey; on: boolean; votes: { a: boolean; b: boolean } } | null;
+  bots: { team: TeamKey; on: boolean; votes: { a: boolean; b: boolean }; counts: { a: number; b: number } } | null;
   discord: { channel: string; invite: string | null } | null;
   canJoin: { team: TeamKey | null; reason: string | null } | null;
 }
@@ -94,7 +96,19 @@ export interface State {
     ready: boolean;
     leetifyUrl: string;
   } | null;
-  lobbies: { mode: Mode; label: string; teamSize: number; maps: string[]; players: number; ready: number; freeServers: number; matchServers: number }[];
+  lobbies: {
+    mode: Mode;
+    label: string;
+    teamSize: number;
+    fixed: boolean;
+    maps: string[];
+    players: number;
+    ready: number;
+    freeServers: number;
+    matchServers: number;
+  }[];
+  /** The viewer's Fixed teams lobby. */
+  fixed: { mode: Mode; captainA: string | null; captainB: string | null; votes: { a: boolean; b: boolean }; full: boolean; reason: string | null } | null;
   lobby: LobbyPlayer[];
   drafts: Draft[];
   matches: Match[];
@@ -159,6 +173,8 @@ export const play = {
   ready: (ready: boolean) => request<{ ok: true }>("POST", "/lobby/ready", { ready }),
   setRating: (rating: number | null) => request<{ ok: true }>("PUT", "/me/rating", { rating }),
   makeTeams: () => request<{ ok: true }>("POST", "/teams", {}),
+  pickTeam: (team: TeamKey | null) => request<{ ok: true }>("POST", "/lobby/team", { team }),
+  startFixed: () => request<{ matchId: number | null }>("POST", "/lobby/start", {}),
   reshuffle: (id: number) => request<{ ok: true }>("POST", `/teams/${id}/reshuffle`, {}),
   cancelTeams: (id: number) => request<{ ok: true }>("POST", `/teams/${id}/cancel`, {}),
   startTeams: (id: number) => request<{ matchId: number }>("POST", `/teams/${id}/start`, {}),

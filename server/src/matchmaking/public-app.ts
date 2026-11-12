@@ -255,6 +255,15 @@ export async function buildPublicApp(d: PublicDeps): Promise<FastifyInstance> {
     mm.setReady(requirePlayer(req), ready);
     return { ok: true };
   });
+  app.post("/api/lobby/team", async (req) => {
+    const { team } = z.object({ team: z.enum(["a", "b"]).nullable() }).parse(req.body ?? {});
+    mm.pickTeam(requirePlayer(req), team);
+    return { ok: true };
+  });
+  app.post("/api/lobby/start", async (req) => {
+    const matchId = await mm.startFixed(requirePlayer(req));
+    return { matchId };
+  });
   app.put("/api/me/rating", async (req) => {
     const { rating } = z.object({ rating: z.number().int().nullable() }).parse(req.body ?? {});
     mm.setSelfRating(requirePlayer(req), rating);

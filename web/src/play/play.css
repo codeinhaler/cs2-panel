@@ -660,3 +660,22 @@
   gap: 6px;
   margin: 6px 0 10px;
 }
+
+/* Fixed teams: two team columns players pick from. */
+.play-fixed {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.play-fixed-team {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+.play-fixed-team .play-list {
+  width: 100%;
+}
+.play-fixed-head {
+  margin-bottom: 2px;
+}

@@ -540,7 +540,10 @@ export interface MatchmakingSettings {
   port: number;
   title: string;
   serverIds: number[];
-  modes: Record<"competitive" | "wingman" | "duel", { enabled: boolean; maps: string[]; config: string; keepWeapons: boolean; serverIds: number[] }>;
+  modes: Record<
+    "competitive" | "wingman" | "duel" | "fixed5" | "fixed2",
+    { enabled: boolean; maps: string[]; config: string; keepWeapons: boolean; serverIds: number[] }
+  >;
   botDifficulty: number;
   look: MmLook;
   casual: { name: string; serverIds: number[] };
@@ -587,7 +590,7 @@ export interface MmMember {
 
 export interface MmMatch {
   id: number;
-  mode: "competitive" | "wingman" | "duel";
+  mode: "competitive" | "wingman" | "duel" | "fixed5" | "fixed2";
   modeLabel: string;
   phase: "veto" | "side" | "starting" | "live" | "over" | "cancelled" | "abandoned";
   teamA: MmMember[];
@@ -608,7 +611,7 @@ export interface MatchmakingInfo {
   servers: { id: number; name: string; port: number; inPool: boolean; hasBridge: boolean }[];
   maps: string[];
   state: {
-    lobby: (MmMember & { status: "ready" | "away" | "in-match"; leetifyUrl: string; mode: "competitive" | "wingman" | "duel" })[];
+    lobby: (MmMember & { status: "ready" | "away" | "in-match"; leetifyUrl: string; mode: "competitive" | "wingman" | "duel" | "fixed5" | "fixed2" })[];
     drafts: { id: number; teamA: MmMember[]; teamB: MmMember[] }[];
     matches: MmMatch[];
     freeServers: number;

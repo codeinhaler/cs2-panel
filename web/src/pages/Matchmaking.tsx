@@ -81,7 +81,8 @@ export function MatchmakingPage() {
   // Discord: lists built from the servers that exist and are ticked right now (by server ID).
   const serversIn = (mode: (typeof MODES)[number]) =>
     data.servers.filter((s) => (form.modes[mode].serverIds ?? []).includes(s.id) && !form.casual.serverIds.includes(s.id));
-  const teamServers = data.servers.filter((s) => serversIn("competitive").includes(s) || serversIn("wingman").includes(s));
+  const TEAM_MODES = ["competitive", "wingman", "fixed5", "fixed2"] as const;
+  const teamServers = data.servers.filter((s) => TEAM_MODES.some((m) => serversIn(m).includes(s)));
   const casualServers = data.servers.filter((s) => form.casual.serverIds.includes(s.id));
   const setDiscord = (key: "duel" | "casual", v: string) => set("discord", { ...form.discord, [key]: v.trim() });
   const setServerChannel = (key: "duelServers" | "casualServers", id: number, v: string) => {
@@ -300,9 +301,7 @@ export function MatchmakingPage() {
                 else channels[String(s.id)] = next;
                 set("discord", { ...form.discord, channels });
               };
-              const lobbies = (["competitive", "wingman"] as const)
-                .filter((m) => (form.modes[m].serverIds ?? []).includes(s.id))
-                .map((m) => MODE_TEXT[m].label);
+              const lobbies = TEAM_MODES.filter((m) => (form.modes[m].serverIds ?? []).includes(s.id)).map((m) => MODE_TEXT[m].label);
               return (
                 <div key={s.id} style={{ marginTop: 10 }}>
                   <b>{s.name}</b> <span className="hint">· {lobbies.join(" and ")}</span>
@@ -493,11 +492,13 @@ export function MatchmakingPage() {
   );
 }
 
-const MODES = ["competitive", "wingman", "duel"] as const;
+const MODES = ["competitive", "wingman", "duel", "fixed5", "fixed2"] as const;
 const MODE_TEXT = {
   competitive: { label: "Competitive", size: "up to 5v5", hint: "Classic maps." },
   wingman: { label: "Wingman", size: "2v2", hint: "Wingman maps; short halves." },
   duel: { label: "1v1", size: "1v1", hint: "Runs in Wingman mode. Aim maps from the Workshop work well." },
+  fixed5: { label: "Fixed teams 5v5", size: "up to 5v5", hint: "Players pick their own team. Bots fill empty spots unless both captains say no." },
+  fixed2: { label: "Fixed teams 2v2", size: "2v2", hint: "Players pick their own team, in Wingman. Bots fill empty spots unless both captains say no." },
 } as const;
 const BOT_LEVELS = [
   { label: "Easy", rating: 3000 },

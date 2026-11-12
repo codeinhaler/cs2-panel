@@ -30,7 +30,7 @@ namespace Cs2PanelBridge;
 public class Cs2PanelBridge : BasePlugin
 {
     public override string ModuleName => "CS2 Panel Bridge";
-    public override string ModuleVersion => "1.8.1";
+    public override string ModuleVersion => "1.9.0";
     public override string ModuleAuthor => "cs2-panel";
     public override string ModuleDescription => "Enforces cs2-panel bans, locks matchmaking matches and reports players to the panel.";
 
@@ -555,7 +555,15 @@ public class Cs2PanelBridge : BasePlugin
     {
         if (_match == null || _matchOver) return;
         if (_match.Password != null) Server.ExecuteCommand($"sv_password \"{Clean(_match.Password)}\"");
-        if (_match.Bot is { } bot)
+        if (_match.Bots is { } bots && bots.A + bots.B > 0)
+        {
+            // Several bots (Fixed teams): the game adds them, then each is put on its team's current side.
+            Server.ExecuteCommand(
+                $"bot_quota_mode normal; bot_difficulty {Math.Clamp(bots.Difficulty, 0, 3)}; bot_join_team any; bot_quota {Math.Max(0, bots.A) + Math.Max(0, bots.B)}");
+            SortBots(bots);
+            AddTimer(2.0f, () => SortBots(bots));
+        }
+        else if (_match.Bot is { } bot)
         {
             var side = bot.Side == "t" ? "T" : "CT";
             Server.ExecuteCommand($"bot_quota_mode normal; bot_difficulty {Math.Clamp(bot.Difficulty, 0, 3)}; bot_join_team {side}; bot_quota 1");
@@ -563,6 +571,29 @@ public class Cs2PanelBridge : BasePlugin
         else
         {
             Server.ExecuteCommand("bot_quota 0; bot_kick");
+        }
+    }
+
+    /// <summary>Moves bots so each team has its number (by team, so it holds after the sides swap at half time).</summary>
+    private void SortBots(MatchBots bots)
+    {
+        if (_match == null || _matchOver || _match.Bots != bots) return;
+        var sideA = SideOf("a");
+        var sideB = sideA == CsTeam.Terrorist ? CsTeam.CounterTerrorist : CsTeam.Terrorist;
+        var want = new Dictionary<CsTeam, int> { [sideA] = Math.Max(0, bots.A), [sideB] = Math.Max(0, bots.B) };
+        var all = Utilities.GetPlayers().Where(p => p is { IsValid: true, IsBot: true, IsHLTV: false }).ToList();
+        var spare = all.Where(p => (CsTeam)p.TeamNum is not (CsTeam.Terrorist or CsTeam.CounterTerrorist)).ToList();
+        foreach (var side in want.Keys) spare.AddRange(all.Where(p => (CsTeam)p.TeamNum == side).Skip(want[side]));
+        foreach (var side in want.Keys)
+        {
+            var have = all.Count(p => (CsTeam)p.TeamNum == side) - spare.Count(p => (CsTeam)p.TeamNum == side);
+            while (have < want[side] && spare.Count > 0)
+            {
+                var bot = spare[0];
+                spare.RemoveAt(0);
+                if ((CsTeam)bot.TeamNum != side) bot.ChangeTeam(side);
+                have++;
+            }
         }
     }
 
@@ -763,6 +794,8 @@ public class MatchFile
     public string? Password { get; set; }
     /// <summary>The one bot filling a short team, or none.</summary>
     public MatchBot? Bot { get; set; }
+    /// <summary>Bots per team (Fixed teams fill every empty spot). Takes over from Bot when set.</summary>
+    public MatchBots? Bots { get; set; }
     /// <summary>Players get the weapons they bought back after dying (1v1).</summary>
     public bool KeepWeapons { get; set; }
     /// <summary>A config under cfg/ run after every map load, before the match's own settings.</summary>
@@ -785,6 +818,14 @@ public class MapCycleEntry
     public string? Map { get; set; }
     /// <summary>A Workshop map's ID.</summary>
     public string? Workshop { get; set; }
+}
+
+public class MatchBots
+{
+    /// <summary>Bots on team "a" and team "b" (the groups in Players).</summary>
+    public int A { get; set; }
+    public int B { get; set; }
+    public int Difficulty { get; set; } = 1;
 }
 
 public class MatchBot
