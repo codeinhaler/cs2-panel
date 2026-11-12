@@ -620,13 +620,9 @@ describe("matchmaking site", () => {
     expect(m.phase).toBe("live");
     const botTeam = m.teamA.some((p: any) => p.steamId === "BOT") ? "a" : "b";
 
-    // Delta is in the Competitive lobby: can't join a Wingman match.
+    // Delta is in the Competitive lobby: can still join the Wingman match straight from the front page.
     await play(cookies[3]!, "POST", "/api/lobby/join", { mode: "competitive" });
-    let view = (await play(cookies[3]!, "GET", "/api/state")).body.matches[0];
-    expect(view.canJoin).toEqual({ team: null, reason: "Join the Wingman lobby to join this match." });
-
-    await play(cookies[3]!, "POST", "/api/lobby/join", { mode: "wingman" });
-    view = (await play(cookies[3]!, "GET", "/api/state")).body.matches[0];
+    const view = (await play(cookies[3]!, "GET", "/api/state")).body.matches[0];
     expect(view.canJoin).toEqual({ team: botTeam, reason: null });
     // People in the match get no join option.
     expect((await play(cookies[0]!, "GET", "/api/state")).body.matches[0].canJoin).toBeNull();
@@ -638,6 +634,8 @@ describe("matchmaking site", () => {
     m = (await play(cookies[3]!, "GET", "/api/state")).body.matches[0];
     const team = botTeam === "a" ? m.teamA : m.teamB;
     expect(team.map((p: any) => p.steamId)).toContain(P[3]);
+    // Now in the Wingman lobby, like everyone else in the match.
+    expect((await play(cookies[3]!, "GET", "/api/state")).body.me.mode).toBe("wingman");
     expect([...m.teamA, ...m.teamB].some((p: any) => p.steamId === "BOT")).toBe(false);
     expect(m.joinInfo).not.toBeNull();
     expect(rconLog).toContain("cs2panel_match_reload");

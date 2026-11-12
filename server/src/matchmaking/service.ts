@@ -1535,8 +1535,7 @@ export class Matchmaking {
     const size = MODE_INFO[m.mode].teamSize;
     const room = (["a", "b"] as const).filter((k) => humans(k === "a" ? m.teamA : m.teamB).length < size);
     if (room.length === 0) return no("Both teams are full.");
-    const entry = this.lobby.get(steamId);
-    if (!entry || entry.mode !== m.mode) return no(`Join the ${MODE_INFO[m.mode].label} lobby to join this match.`);
+    // No lobby needed: joining from the front page puts the player in this match's lobby.
     if (this.activeMatchOf(steamId)) return no("You're in another match.");
     if (!this.lateJoinsOpen(m)) return no("The captains have closed this match to new players.");
     if (m.score && Math.max(m.score.a, m.score.b) >= this.winRounds(m.mode) - LATE_JOIN_CUTOFF) return no("Too late to join: the match is nearly over.");
@@ -1569,6 +1568,13 @@ export class Matchmaking {
     // Things may have changed while Leetify answered.
     const again = this.joinOption(m, by);
     if (!again?.team) throw badRequest(again?.reason ?? "You're already in this match.");
+    // Into this match's lobby (from another lobby, or none), so they're handled like everyone else in the match.
+    const entry = this.lobby.get(by);
+    if (!entry || entry.mode !== m.mode) {
+      if (entry) this.dropDraftsWith(by);
+      const t = this.now();
+      this.lobby.set(by, { steamId: by, mode: m.mode, ready: true, readySince: t, joinedAt: t, lastSeen: t, sitOuts: 0 });
+    }
 
     const team = teamKey === "a" ? m.teamA : m.teamB;
     const replacesBot = m.bot === teamKey;

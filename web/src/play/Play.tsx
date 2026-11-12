@@ -732,7 +732,7 @@ function MatchCard({ match: m, meId, skew, busy, act, mine }: { match: Match; me
           </button>
         </div>
       )}
-      {m.canJoin && !m.canJoin.team && m.canJoin.reason && !m.canJoin.reason.startsWith("Join the") && <p className="hint">{m.canJoin.reason}</p>}
+      {m.canJoin && !m.canJoin.team && m.canJoin.reason && <p className="hint">{m.canJoin.reason}</p>}
 
       {!ended && (iAmCaptainOf("a") || iAmCaptainOf("b")) && (
         <div className="play-vote">
