@@ -33,6 +33,8 @@ export const BotSettingsSchema = z.object({
   privateChannels: z.boolean(),
   returnAfter: z.boolean(),
   orphanCleanup: z.boolean(),
+  /** Also move players who are in any voice channel (not only a waiting room), unless they switched that off. */
+  anyChannel: z.boolean().default(false),
 });
 
 type Stored = Omit<z.infer<typeof BotSettingsSchema>, "token" | "clientSecret" | "clearToken" | "clearSecret"> & {
@@ -48,6 +50,7 @@ const DEFAULTS: Stored = {
   category: "",
   teamMode: "configured",
   duelMode: "shared",
+  anyChannel: false,
   privateChannels: true,
   returnAfter: true,
   orphanCleanup: true,
@@ -140,6 +143,7 @@ export class DiscordBot {
       teamMode: input.teamMode,
       duelMode: input.duelMode,
       privateChannels: input.privateChannels,
+      anyChannel: input.anyChannel,
       returnAfter: input.returnAfter,
       orphanCleanup: input.orphanCleanup,
       tokenSealed: input.clearToken ? null : input.token ? this.d.box.seal(input.token) : cur.tokenSealed,
@@ -359,6 +363,7 @@ export class DiscordBot {
     const created = new Set<string>();
     const dest = await this.destinations(m, g, created);
     const waiting = new Set(this.waiting());
+    const anyChannel = !!this.stored().anyChannel;
     for (const team of ["a", "b"] as const) {
       const target = dest[team];
       for (const steamId of m.teams[team]) {
@@ -368,8 +373,8 @@ export class DiscordBot {
         if (this.d.db.prepare("SELECT 1 FROM discord_moves WHERE match_id = ? AND discord_id = ?").get(m.id, discordId)) continue;
         const decide = (result: string) =>
           this.d.db.prepare("INSERT OR IGNORE INTO discord_moves (match_id, discord_id, result) VALUES (?, ?, ?)").run(m.id, discordId, result);
-        const prefs = this.d.db.prepare("SELECT auto_move, username FROM discord_users WHERE discord_id = ?").get(discordId) as
-          { auto_move: number; username: string } | undefined;
+        const prefs = this.d.db.prepare("SELECT auto_move, move_any, username FROM discord_users WHERE discord_id = ?").get(discordId) as
+          { auto_move: number; move_any: number; username: string } | undefined;
         if (!prefs?.auto_move) {
           decide("not-opted-in");
           continue;
@@ -396,7 +401,8 @@ export class DiscordBot {
             decide("not-in-voice");
             continue;
           }
-          if (!waiting.has(vs.channel_id)) {
+          // From any voice channel when the admin allows it and the player hasn't switched that off.
+          if (!waiting.has(vs.channel_id) && !(anyChannel && prefs.move_any)) {
             decide("not-in-waiting-room");
             continue;
           }
@@ -432,14 +438,15 @@ export class DiscordBot {
       try {
         const prefs = this.d.db.prepare("SELECT auto_return, username FROM discord_users WHERE discord_id = ?").get(ses.discord_id) as
           { auto_return: number; username: string } | undefined;
-        const back = ses.origin_id && waiting.has(ses.origin_id) ? ses.origin_id : [...waiting][0];
+        // Back where they came from: a waiting room, or (when moving from any channel is on) whatever channel that was.
+        const back = ses.origin_id && (waiting.has(ses.origin_id) || s.anyChannel) ? ses.origin_id : [...waiting][0];
         if (g && this.ready() && s.returnAfter && prefs?.auto_return && back) {
           // Only someone still in the match's channel: not someone who went somewhere else themselves.
           const vs = await this.rest.voiceState(g, ses.discord_id);
           if (vs?.channel_id === ses.channel_id) {
             await this.rest.move(g, ses.discord_id, back, `CS2 Panel match ${matchId} ended`);
             this.ok();
-            this.log(matchId, true, `Moved ${prefs.username} back to the waiting room`);
+            this.log(matchId, true, `Moved ${prefs.username} back${waiting.has(back) ? " to the waiting room" : " to the channel they came from"}`);
           }
         }
       } catch (e) {
@@ -649,15 +656,18 @@ export class DiscordBot {
   playerView(steamId: string) {
     const row = this.d.db
       .prepare(
-        "SELECT u.discord_id, u.username, u.auto_move, u.auto_return FROM discord_links l JOIN discord_users u ON u.discord_id = l.discord_id WHERE l.steam_id = ?",
+        "SELECT u.discord_id, u.username, u.auto_move, u.auto_return, u.move_any FROM discord_links l JOIN discord_users u ON u.discord_id = l.discord_id WHERE l.steam_id = ?",
       )
-      .get(steamId) as { discord_id: string; username: string; auto_move: number; auto_return: number } | undefined;
+      .get(steamId) as { discord_id: string; username: string; auto_move: number; auto_return: number; move_any: number } | undefined;
     return {
       available: this.oauthReady(),
       botOn: !!this.ready(),
       linked: row ? { username: row.username } : null,
       autoMove: !!row?.auto_move,
       autoReturn: row ? !!row.auto_return : true,
+      /** The admin lets the bot move players from any voice channel. */
+      anyChannel: !!this.stored().anyChannel,
+      moveAny: row ? !!row.move_any : true,
     };
   }
 
@@ -686,11 +696,11 @@ export class DiscordBot {
   }
 
   /** The player's choices, shared by all Steam accounts linked to the same Discord user. */
-  setPrefs(steamId: string, p: { autoMove: boolean; autoReturn: boolean }): void {
+  setPrefs(steamId: string, p: { autoMove: boolean; autoReturn: boolean; moveAny?: boolean }): void {
     const discordId = this.discordOf(steamId);
     if (!discordId) throw badRequest("Link your Discord account first.");
     this.d.db
-      .prepare("UPDATE discord_users SET auto_move = ?, auto_return = ?, updated_at = datetime('now') WHERE discord_id = ?")
-      .run(p.autoMove ? 1 : 0, p.autoReturn ? 1 : 0, discordId);
+      .prepare("UPDATE discord_users SET auto_move = ?, auto_return = ?, move_any = COALESCE(?, move_any), updated_at = datetime('now') WHERE discord_id = ?")
+      .run(p.autoMove ? 1 : 0, p.autoReturn ? 1 : 0, p.moveAny === undefined ? null : p.moveAny ? 1 : 0, discordId);
   }
 }

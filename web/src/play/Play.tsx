@@ -235,9 +235,21 @@ function DiscordCard() {
                   onChange={(e) => void run(() => play.discordPrefs({ autoMove: e.target.checked, autoReturn: d.autoReturn }))}
                 />
                 <span>
-                  Move me to my match's voice channel <span className="hint">· when I'm in the waiting room on Discord</span>
+                  Move me to my match's voice channel{" "}
+                  <span className="hint">· {d.anyChannel && d.moveAny ? "from any voice channel on Discord" : "when I'm in the waiting room on Discord"}</span>
                 </span>
               </label>
+              {d.anyChannel && (
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={d.moveAny}
+                    disabled={busy || !d.autoMove}
+                    onChange={(e) => void run(() => play.discordPrefs({ autoMove: d.autoMove, autoReturn: d.autoReturn, moveAny: e.target.checked }))}
+                  />
+                  <span>Also when I'm in another voice channel, not just the waiting room</span>
+                </label>
+              )}
               <label className="check">
                 <input
                   type="checkbox"
@@ -245,7 +257,7 @@ function DiscordCard() {
                   disabled={busy || !d.autoMove}
                   onChange={(e) => void run(() => play.discordPrefs({ autoMove: d.autoMove, autoReturn: e.target.checked }))}
                 />
-                <span>Move me back to the waiting room after the match</span>
+                <span>Move me back after the match{d.anyChannel && d.moveAny ? " (to the channel I came from)" : " to the waiting room"}</span>
               </label>
             </div>
           ) : (

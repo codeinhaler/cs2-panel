@@ -277,6 +277,9 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX discord_channels_match ON discord_channels(match_id);
   `,
+  /* 15: Discord bot: a player's choice to be moved from any voice channel (when the admin allows it) */ `
+  ALTER TABLE discord_users ADD COLUMN move_any INTEGER NOT NULL DEFAULT 1;
+  `,
 ];
 
 export function openDb(file: string): Db {

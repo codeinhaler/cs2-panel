@@ -167,6 +167,7 @@ export interface DiscordBotSettings {
   duelMode: "shared" | "temporary";
   privateChannels: boolean;
   returnAfter: boolean;
+  anyChannel: boolean;
   orphanCleanup: boolean;
   hasToken: boolean;
   hasSecret: boolean;

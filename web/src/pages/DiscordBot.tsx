@@ -187,7 +187,10 @@ export function DiscordBotPanel() {
           placeholder="https://discord.com/channels/…"
           disabled={!manage}
         />
-        <small className="hint">Only players sitting in one of these are moved. Nobody is pulled out of other conversations.</small>
+        <small className="hint">
+          Players sitting in one of these are moved. With "Move players from any voice channel" on, players are moved from anywhere unless they switched that
+          off.
+        </small>
       </label>
       <div className="mm-bot-grid" style={{ marginTop: 10 }}>
         <label className="field">
@@ -214,6 +217,13 @@ export function DiscordBotPanel() {
           <input type="checkbox" checked={form.privateChannels} onChange={(e) => set("privateChannels", e.target.checked)} disabled={!manage || !temporary} />
           <span>
             Private temporary channels <span className="hint">· only that team's linked players can see and join (the other team can't listen in)</span>
+          </span>
+        </label>
+        <label className="check">
+          <input type="checkbox" checked={form.anyChannel} onChange={(e) => set("anyChannel", e.target.checked)} disabled={!manage} />
+          <span>
+            Move players from any voice channel{" "}
+            <span className="hint">· not only the waiting rooms; each player can switch this off on the site (on for them by default)</span>
           </span>
         </label>
         <label className="check">

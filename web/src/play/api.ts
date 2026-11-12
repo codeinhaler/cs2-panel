@@ -144,11 +144,13 @@ export interface DiscordMe {
   linked: { username: string } | null;
   autoMove: boolean;
   autoReturn: boolean;
+  anyChannel: boolean;
+  moveAny: boolean;
 }
 
 export const play = {
   discord: () => request<DiscordMe>("GET", "/discord"),
-  discordPrefs: (p: { autoMove: boolean; autoReturn: boolean }) => request<DiscordMe>("PUT", "/discord/prefs", p),
+  discordPrefs: (p: { autoMove: boolean; autoReturn: boolean; moveAny?: boolean }) => request<DiscordMe>("PUT", "/discord/prefs", p),
   discordUnlink: () => request<{ ok: true }>("POST", "/discord/unlink", {}),
   state: () => request<State>("GET", "/state"),
   logout: () => request<{ ok: true }>("POST", "/auth/logout", {}),

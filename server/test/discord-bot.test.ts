@@ -283,6 +283,26 @@ describe("Discord bot: moving players", () => {
     expect([discord.voice.get(DISC[4]!), discord.voice.get(DISC[5]!)]).toEqual([c103, c103]);
   });
 
+  it("with 'any voice channel' on: moves players from anywhere unless they switched it off, and back where they came from", async () => {
+    const bot = makeBot();
+    await bot.save({ ...base, anyChannel: true }, 1);
+    player(bot, 0, { voice: LOUNGE });
+    player(bot, 1, { voice: LOUNGE });
+    player(bot, 2);
+    bot.setPrefs(STEAM[1]!, { autoMove: true, autoReturn: true, moveAny: false }); // only from the waiting room
+    expect(bot.playerView(STEAM[0]!)).toMatchObject({ anyChannel: true, moveAny: true });
+    expect(bot.playerView(STEAM[1]!)).toMatchObject({ moveAny: false });
+    active.add(42);
+    await bot.matchLive(comp(42, [0, 1], [2]));
+    expect(discord.voice.get(DISC[0]!)).toBe(T1);
+    expect(discord.voice.get(DISC[1]!)).toBe(LOUNGE);
+    expect(discord.voice.get(DISC[2]!)).toBe(T2);
+    active.delete(42);
+    await bot.matchEnded(42);
+    expect(discord.voice.get(DISC[0]!)).toBe(LOUNGE); // the channel they came from
+    expect(discord.voice.get(DISC[2]!)).toBe(WAIT);
+  });
+
   it("after the match: moves back only those still in the match's channel, and removes only its own channels", async () => {
     const bot = makeBot();
     await bot.save({ ...base, teamMode: "temporary", waitingChannels: [link(WAIT), link(LOUNGE)] }, 1);

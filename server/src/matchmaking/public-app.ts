@@ -137,7 +137,7 @@ export async function buildPublicApp(d: PublicDeps): Promise<FastifyInstance> {
 
   app.get("/api/discord", async (req) => {
     const me = requirePlayer(req);
-    return bot ? bot.playerView(me) : { available: false, botOn: false, linked: null, autoMove: false, autoReturn: true };
+    return bot ? bot.playerView(me) : { available: false, botOn: false, linked: null, autoMove: false, autoReturn: true, anyChannel: false, moveAny: true };
   });
 
   app.get("/api/discord/link", async (req, reply) => {
@@ -180,7 +180,7 @@ export async function buildPublicApp(d: PublicDeps): Promise<FastifyInstance> {
 
   app.put("/api/discord/prefs", async (req) => {
     const me = requirePlayer(req);
-    const p = z.object({ autoMove: z.boolean(), autoReturn: z.boolean() }).parse(req.body);
+    const p = z.object({ autoMove: z.boolean(), autoReturn: z.boolean(), moveAny: z.boolean().optional() }).parse(req.body);
     if (!bot) throw new HttpError(400, "Discord isn't set up on this site.");
     bot.setPrefs(me, p);
     return bot.playerView(me);
