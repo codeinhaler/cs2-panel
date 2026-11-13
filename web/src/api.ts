@@ -545,6 +545,7 @@ export interface MatchmakingSettings {
     { enabled: boolean; maps: string[]; config: string; keepWeapons: boolean; serverIds: number[] }
   >;
   botDifficulty: number;
+  faceit?: { blend: "average" | "faceit" | "premier" | "off"; table: [number, number][] };
   look: MmLook;
   casual: { name: string; serverIds: number[] };
   gameAddress: string;
@@ -578,6 +579,7 @@ export interface MmTheme {
 
 export interface MmRating {
   value: number | null;
+  badge?: string | null;
   source: "admin" | "leetify" | "self" | "none" | "bot";
   note: string | null;
   pending?: boolean;
@@ -693,6 +695,8 @@ export const api = {
   shared: () => request<{ shared: SharedConfig; preview: { id: number; name: string; hostname: string; uses: boolean }[] }>("GET", "/api/shared"),
   saveShared: (c: SharedConfig) => request<{ shared: SharedConfig; liveOn: string[] }>("PUT", "/api/shared", c),
   matchmaking: () => request<MatchmakingInfo>("GET", "/api/matchmaking"),
+  removeWorkshopMap: (id: string, mode: string) =>
+    request<{ deleted: number; keptBecause: string[] }>("DELETE", `/api/matchmaking/workshop/${encodeURIComponent(id)}?mode=${encodeURIComponent(mode)}`),
   saveMatchmaking: (settings: MatchmakingSettings, leetifyKey?: string | null) =>
     request<{ settings: MatchmakingSettings; site: MatchmakingInfo["site"]; leetifyKeyHint: string | null }>("PUT", "/api/matchmaking", {
       settings,

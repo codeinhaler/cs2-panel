@@ -49,7 +49,7 @@ import { queryInfo, type A2sInfo } from "./game/a2s.js";
 import { DiscordNotifier, EVENT_GROUPS, type EventGroup } from "./notify/discord.js";
 import { BackupService } from "./backups/service.js";
 import { MmPlayerStore } from "./matchmaking/players.js";
-import { Matchmaking } from "./matchmaking/service.js";
+import { MODES, Matchmaking } from "./matchmaking/service.js";
 import { PublicSite, buildPublicApp } from "./matchmaking/public-app.js";
 import { LAYOUTS, SiteImages, THEMES, type ImageKind } from "./matchmaking/look.js";
 import { CertStore } from "./tls/acme.js";
@@ -1400,6 +1400,13 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     const body = z.object({ settings: z.unknown(), leetifyKey: z.string().max(300).nullable().optional() }).parse(req.body ?? {});
     const settings = await matchmaking.saveConfig(body.settings, body.leetifyKey, user.id);
     return { settings, site: publicSite.status(), leetifyKeyHint: matchmaking.leetifyKeyHint() };
+  });
+
+  app.delete("/api/matchmaking/workshop/:id", async (req) => {
+    const user = requirePerm(req, "server.manage");
+    const { id } = z.object({ id: z.string() }).parse(req.params);
+    const { mode } = z.object({ mode: z.enum(MODES) }).parse(req.query ?? {});
+    return matchmaking.removeWorkshopMap(id, mode, user.id);
   });
 
   app.put("/api/matchmaking/players/:steamId/rating", async (req) => {

@@ -26,6 +26,40 @@ export const MATCH_FILE = "addons/counterstrikesharp/configs/plugins/Cs2PanelBri
 
 /** Premier's scale. */
 export const MAX_RATING = 40_000;
+
+/**
+ * FACEIT Elo → Premier, provisional: FACEIT's level bands (level 1 from 100 Elo … level 10 from 2001)
+ * laid against Premier's colour tiers (grey < 5,000 … gold 30,000+). An estimate, not measured;
+ * editable on the Matchmaking page.
+ */
+export const FACEIT_TABLE: [number, number][] = [
+  [100, 1000],
+  [500, 5000],
+  [750, 7500],
+  [900, 9000],
+  [1050, 10500],
+  [1200, 12000],
+  [1350, 13500],
+  [1530, 15000],
+  [1750, 17000],
+  [2000, 19500],
+  [2500, 24000],
+  [3000, 28000],
+  [3500, 31000],
+];
+
+/** Piecewise straight lines through the table; beyond its ends, the nearest end's slope. */
+export function faceitToPremier(elo: number, table: [number, number][]): number {
+  const t = table.length >= 2 ? table : FACEIT_TABLE;
+  let i = t.findIndex((p) => elo <= p[0]);
+  if (i === -1) i = t.length - 1;
+  if (i === 0) i = 1;
+  const [x0, y0] = t[i - 1]!;
+  const [x1, y1] = t[i]!;
+  const v = x1 === x0 ? y1 : y0 + ((elo - x0) * (y1 - y0)) / (x1 - x0);
+  return Math.max(0, Math.min(MAX_RATING, Math.round(v)));
+}
+
 /** Used for players nobody knows a rating for, when no one else in the match has one either. */
 const FALLBACK_RATING = 10_000;
 /** A lobby member whose page hasn't checked in for this long has closed it. */
@@ -113,6 +147,20 @@ export const MatchmakingSettingsSchema = z.object({
     .refine((m) => MODES.some((k) => m[k].enabled), "Open at least one lobby.")
     .refine((m) => MODES.every((k) => !m[k].enabled || m[k].maps.length > 0), "Every open lobby needs at least one map."),
   botDifficulty: z.number().int().min(0).max(3),
+  /** FACEIT Elo (from Leetify) next to Premier: how it counts for balancing, and the Elo → Premier table. */
+  faceit: z
+    .object({
+      blend: z.enum(["average", "faceit", "premier", "off"]),
+      table: z
+        .array(z.tuple([z.number().int().min(0).max(10_000), z.number().int().min(0).max(MAX_RATING)]))
+        .min(2)
+        .max(30)
+        .refine(
+          (t) => t.every((p, i) => i === 0 || (p[0] > t[i - 1]![0] && p[1] >= t[i - 1]![1])),
+          "The FACEIT table must go up: Elo and Premier both increasing.",
+        ),
+    })
+    .default({ blend: "average", table: FACEIT_TABLE }),
   look: LookSchema.default(DEFAULT_LOOK),
   /** Discord voice channels per match server (Team 1 / Team 2), and an invite for people not on the Discord yet. */
   discord: z
@@ -163,6 +211,7 @@ export const DEFAULT_SETTINGS: MatchmakingSettings = {
     fixed2: { enabled: false, maps: ["de_inferno", "de_nuke", "de_overpass", "de_vertigo"], config: "", keepWeapons: false },
   },
   botDifficulty: 1,
+  faceit: { blend: "average", table: FACEIT_TABLE },
   look: DEFAULT_LOOK,
   casual: { name: "Casual", serverIds: [] },
   discord: { invite: "", channels: {}, casual: "", duel: "", duelServers: {}, casualServers: {} },
@@ -172,7 +221,10 @@ export const DEFAULT_SETTINGS: MatchmakingSettings = {
 
 export type RatingSource = "admin" | "leetify" | "self" | "none" | "bot";
 export interface RatingView {
+  /** On the Premier scale; what the team balancer uses. */
   value: number | null;
+  /** Shown instead of the number when FACEIT is the stronger rating ("FACEIT 9 · 1,850"). */
+  badge?: string | null;
   source: RatingSource;
   /** Why Leetify has nothing, when it doesn't. */
   note: string | null;
@@ -533,6 +585,53 @@ export class Matchmaking {
     return key ? `…${key.slice(-4)}` : null;
   }
 
+  /**
+   * Takes a Workshop map out of a lobby's pool and deletes its downloaded files from every server,
+   * unless something still uses it: another lobby, a casual map cycle or a server's own map.
+   */
+  async removeWorkshopMap(id: string, mode: Mode, actorId: number): Promise<{ deleted: number; keptBecause: string[] }> {
+    if (!/^\d{3,20}$/.test(id)) throw badRequest("That's not a Workshop ID.");
+    const map = `workshop:${id}`;
+    const c = this.config();
+    const stored = this.d.settings.get<MatchmakingSettings | null>("matchmaking", null);
+    if (stored?.modes?.[mode]) {
+      stored.modes[mode].maps = stored.modes[mode].maps.filter((m) => m !== map);
+      this.d.settings.set("matchmaking", stored);
+    }
+    const keptBecause: string[] = [];
+    for (const other of MODES) if (other !== mode && c.modes[other].maps.includes(map)) keptBecause.push(`the ${MODE_INFO[other].label} lobby`);
+    const servers = this.d.db.prepare("SELECT id, slug, name FROM servers").all() as { id: number; slug: string; name: string }[];
+    for (const s of servers) {
+      const row = this.d.db.prepare("SELECT map, map_cycle FROM servers WHERE id = ?").get(s.id) as
+        { map: string | null; map_cycle: string | null } | undefined;
+      if (row?.map === map) keptBecause.push(`${s.name}'s map`);
+      if (row?.map_cycle && row.map_cycle.includes(`"${map}"`)) keptBecause.push(`${s.name}'s map cycle`);
+    }
+    let deleted = 0;
+    if (!keptBecause.length) {
+      for (const s of servers) {
+        for (const base of [this.d.files.upperDir(s.slug), this.d.files.mergedDir(s.slug)]) {
+          const dir = path.join(base, "game", "bin", "linuxsteamrt64", "steamapps", "workshop", "content", "730", id);
+          try {
+            await fs.access(dir);
+            await fs.rm(dir, { recursive: true, force: true });
+            deleted++;
+            break;
+          } catch {
+            /* not downloaded here */
+          }
+        }
+      }
+    }
+    this.d.audit.record(actorId, "matchmaking.workshop.remove", null, {
+      map: id,
+      lobby: MODE_INFO[mode].label,
+      deleted,
+      ...(keptBecause.length ? { kept: keptBecause.join(", ") } : {}),
+    });
+    return { deleted, keptBecause };
+  }
+
   async saveConfig(raw: unknown, leetifyKey: string | null | undefined, actorId: number): Promise<MatchmakingSettings> {
     const next = MatchmakingSettingsSchema.parse(raw);
     const known = new Set(this.d.servers.listRecords().map((s) => s.id));
@@ -716,7 +815,23 @@ export class Matchmaking {
       if (p.selfRating !== null) return { value: p.selfRating, source: "self", note: null, pending: true };
       return { value: null, source: "none", note: null, pending: true };
     }
-    if (cached.premier !== null) return { value: cached.premier, source: "leetify", note: null };
+    const fc = this.config().faceit ?? { blend: "average", table: FACEIT_TABLE };
+    const fromFaceit = cached.faceit && fc.blend !== "off" ? faceitToPremier(cached.faceit.elo, fc.table) : null;
+    if (cached.premier !== null || fromFaceit !== null) {
+      const pr = cached.premier;
+      const value =
+        pr !== null && fromFaceit !== null
+          ? fc.blend === "faceit"
+            ? fromFaceit
+            : fc.blend === "premier"
+              ? pr
+              : Math.round((pr + fromFaceit) / 2)
+          : (pr ?? fromFaceit)!;
+      // The badge shows the stronger one in its own format; FACEIT numbers are never shown as Premier.
+      const badge =
+        fromFaceit !== null && (pr === null || fromFaceit > pr) ? `FACEIT ${cached.faceit!.level ?? "?"} · ${cached.faceit!.elo.toLocaleString("en")}` : null;
+      return { value, badge, source: "leetify", note: null };
+    }
     if (p.selfRating !== null) return { value: p.selfRating, source: "self", note: cached.note };
     return { value: null, source: "none", note: cached.note };
   }
@@ -1137,6 +1252,12 @@ export class Matchmaking {
     const split = d.splits[d.index]!;
     const teamA = split.a.map((i) => d.players[i]!);
     const teamB = split.b.map((i) => d.players[i]!);
+    // Bots fill every empty spot (the captains can vote them off), never in 1v1.
+    if (d.mode !== "duel") {
+      const size = MODE_INFO[d.mode].teamSize;
+      while (teamA.length < size) teamA.push(this.botMember());
+      while (teamB.length < size) teamB.push(this.botMember());
+    }
     const id = await this.createMatch(c, d.mode, teamA, teamB, "Teams made on the matchmaking site", () => {
       if (this.drafts.get(d.mode) !== d) throw badRequest("Those teams aren't up any more.");
       this.drafts.delete(d.mode);
@@ -1321,9 +1442,12 @@ export class Matchmaking {
     await writeAtomic(file, JSON.stringify(content, null, 2) + "\n", 0o664);
   }
 
-  /** The bot plays when the match has one and not both captains said no. */
+  /**
+   * Bots fill every empty spot (at the start and when someone disconnects) unless both captains
+   * said no. Never in 1v1.
+   */
   private botActive(m: Match): boolean {
-    return !!m.bot && (m.botVotes.a || m.botVotes.b);
+    return m.mode !== "duel" && (m.botVotes.a || m.botVotes.b);
   }
 
   /** What the bridge needs: who may join, on which team, the password and the bot. The bridge re-applies these after every map load. */
@@ -1343,7 +1467,10 @@ export class Matchmaking {
           ? { side: m.bot === "a" ? m.sideA : sideB, difficulty: this.config().botDifficulty }
           : null,
       // Bots per team (by team, so they follow the team across half time). Bridge 1.9.0 and later.
-      bots: this.botActive(m) ? { a: botCount(m.teamA), b: botCount(m.teamB), difficulty: this.config().botDifficulty } : null,
+      // fill: the bridge (1.10.0+) keeps every empty spot filled, also for players who disconnect; size: spots per team.
+      bots: this.botActive(m)
+        ? { a: botCount(m.teamA), b: botCount(m.teamB), fill: true, size: MODE_INFO[m.mode].teamSize, difficulty: this.config().botDifficulty }
+        : null,
       players: [
         ...humans(m.teamA).map((p) => ({ steamId: p.steamId, name: p.name, team: m.sideA, group: "a" })),
         ...humans(m.teamB).map((p) => ({ steamId: p.steamId, name: p.name, team: sideB, group: "b" })),
@@ -1719,12 +1846,12 @@ export class Matchmaking {
     if (!this.lateJoinsOpen(m)) return no("The captains have closed this match to new players.");
     if (m.score && Math.max(m.score.a, m.score.b) >= this.winRounds(m.mode) - LATE_JOIN_CUTOFF) return no("Too late to join: the match is nearly over.");
     if (room.length === 1) return { team: room[0]!, reason: null };
-    // A team playing with the bot gets the player first, in the bot's place.
-    const withBots = room.filter((k) => botCount(k === "a" ? m.teamA : m.teamB) > 0);
-    if (withBots.length) return { team: withBots.length === 2 ? botTeamOf(m)! : withBots[0]!, reason: null };
-    // Both have room: the losing team, or on a tie (or before the first round) the team with the lower total rating.
+    // The team with fewer players gets them first (in a bot's place, if bots fill in).
+    const [ha, hb] = [humans(m.teamA).length, humans(m.teamB).length];
+    if (ha !== hb) return { team: ha < hb ? "a" : "b", reason: null };
+    // Even: the losing team, or on a tie (or before the first round) the team with the lower total rating.
     if (m.score && m.score.a !== m.score.b) return { team: m.score.a < m.score.b ? "a" : "b", reason: null };
-    const total = (t: Member[]) => t.reduce((sum, p) => sum + p.effective, 0);
+    const total = (t: Member[]) => humans(t).reduce((sum, p) => sum + p.effective, 0);
     return { team: total(m.teamA) <= total(m.teamB) ? "a" : "b", reason: null };
   }
 
@@ -1816,7 +1943,7 @@ export class Matchmaking {
   async setBot(by: string, matchId: number, allow: boolean): Promise<void> {
     const m = this.requireMatch(matchId);
     if (!isActive(m)) throw badRequest("That match has already ended.");
-    if (!m.bot) throw badRequest("This match has no bot.");
+    if (m.mode === "duel") throw badRequest("1v1 matches have no bots.");
     const team: TeamKey | null = m.captainA === by ? "a" : m.captainB === by ? "b" : null;
     if (!team) throw forbidden("Only the captains vote on this.");
     const before = this.botActive(m);
@@ -1864,7 +1991,8 @@ export class Matchmaking {
     const channel = !myTeam ? "" : this.discordChannel(m, myTeam, viewer ?? undefined);
     return {
       ...this.teamsView(shown(m.teamA), shown(m.teamB)),
-      bots: m.bot ? { team: m.bot, on: showBot, votes: { ...m.botVotes }, counts: { a: botCount(m.teamA), b: botCount(m.teamB) } } : null,
+      // Shown in every match but 1v1: bots can also fill in for players who disconnect.
+      bots: m.mode !== "duel" ? { team: m.bot ?? "a", on: showBot, votes: { ...m.botVotes }, counts: { a: botCount(m.teamA), b: botCount(m.teamB) } } : null,
       discord: channel && isActive(m) ? { channel, invite: this.config().discord.invite || null } : null,
       id: m.id,
       mode: m.mode,

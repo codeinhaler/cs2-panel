@@ -809,3 +809,21 @@
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+.play-leave {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  font-weight: 600;
+}
+.play-leave:hover:not(:disabled) {
+  border-color: var(--ink-soft);
+}
+.board-dot-btn {
+  cursor: pointer;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  min-width: 24px;
+}

@@ -240,12 +240,29 @@ function BoardHome({
         .then(setDiscord)
         .catch(() => undefined);
   }, [me]);
-  const steps: { done: boolean; title: string; text: string; optional?: boolean }[] = [
+  // A web page can't see whether CS2 runs, so the player ticks this one (remembered for this visit).
+  const [cs2Open, setCs2Open] = useState(() => {
+    try {
+      return sessionStorage.getItem("cs2mm-cs2-open") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleCs2 = () => {
+    const v = !cs2Open;
+    setCs2Open(v);
+    try {
+      sessionStorage.setItem("cs2mm-cs2-open", v ? "1" : "0");
+    } catch {
+      /* fine: just not remembered */
+    }
+  };
+  const steps: { done: boolean; title: string; text: string; optional?: boolean; toggle?: boolean }[] = [
     { done: !!me, title: "Sign in with Steam", text: "Needed for matches, not for casual." },
     ...(discord?.available || !me
       ? [{ done: !!discord?.linked, title: "Link Discord", text: "We move you to your team's voice channel.", optional: true }]
       : []),
-    { done: false, title: "Open CS2", text: "The Join button only works with the game running." },
+    { done: cs2Open, title: "Open CS2", text: "The Join button only works with the game running. Tick it when it's open.", toggle: true },
     { done: !!me && (me.inLobby || !!myMatch), title: "Join a lobby", text: "Pick one in the table." },
   ];
   return (
@@ -257,9 +274,15 @@ function BoardHome({
           <ul>
             {steps.map((s) => (
               <li key={s.title} className={s.done ? "done" : ""}>
-                <span className="board-dot" aria-hidden="true">
-                  {s.done ? "✓" : ""}
-                </span>
+                {s.toggle ? (
+                  <button type="button" className="board-dot board-dot-btn" aria-pressed={s.done} aria-label={`${s.title}: done`} onClick={toggleCs2}>
+                    {s.done ? "✓" : ""}
+                  </button>
+                ) : (
+                  <span className="board-dot" aria-hidden="true">
+                    {s.done ? "✓" : ""}
+                  </span>
+                )}
                 <span>
                   <b>{s.title}</b>
                   {s.optional && <span className="hint"> (optional)</span>}
@@ -282,6 +305,7 @@ function BoardHome({
       <div className="board-main">
         {me && myMatch && <MatchCard match={myMatch} meId={me.steamId} skew={skew} busy={busy} act={act} mine />}
         {me && myDraft && <DraftCard draft={myDraft} state={state} busy={busy} act={act} />}
+        {!me && state.casual.servers.length > 0 && <CasualCard state={state} />}
         {me?.inLobby && state.enabled ? (
           <LobbyCard state={state} busy={busy} act={act} />
         ) : (
@@ -339,7 +363,7 @@ function BoardHome({
             ))}
           </section>
         )}
-        {state.casual.servers.length > 0 && !myMatch && <CasualCard state={state} />}
+        {state.casual.servers.length > 0 && me && !me.inLobby && !myMatch && <CasualCard state={state} />}
       </div>
     </div>
   );
@@ -495,8 +519,8 @@ function RatingCard({ state, busy, act }: { state: State; busy: boolean; act: Ac
 function RatingBadge({ rating, big }: { rating: Rating; big?: boolean }) {
   const label = { leetify: "Leetify", self: "self-set", admin: "set by organiser", none: "no rating", bot: "bot" }[rating.source];
   return (
-    <span className={`rating ${tier(rating.value)} ${big ? "big" : ""}`} title={rating.note ?? label}>
-      <b>{formatRating(rating.value)}</b>
+    <span className={`rating ${tier(rating.value)} ${big ? "big" : ""}`} title={rating.badge ? "FACEIT, via Leetify" : (rating.note ?? label)}>
+      <b>{rating.badge ?? formatRating(rating.value)}</b>
       <small>{rating.pending ? "…" : label}</small>
     </span>
   );
@@ -596,9 +620,7 @@ function LobbyCard({ state, busy, act }: { state: State; busy: boolean; act: Act
               <span>Ready</span>
             </label>
           )}
-          <button className="btn small ghost" disabled={busy} onClick={() => act(play.leave)}>
-            Leave
-          </button>
+          <LeaveButton busy={busy} act={act} />
         </div>
       </div>
 
@@ -712,9 +734,7 @@ function FixedLobbyCard({ state, busy, act }: { state: State; busy: boolean; act
               Sit out
             </button>
           )}
-          <button className="btn small ghost" disabled={busy} onClick={() => act(play.leave)}>
-            Leave
-          </button>
+          <LeaveButton busy={busy} act={act} />
         </div>
       </div>
       <div className="play-fixed">
@@ -770,6 +790,28 @@ function LobbyRow({ p, me, captain }: { p: LobbyPlayer; me: boolean; captain?: b
         <RatingBadge rating={p.rating} />
       )}
     </li>
+  );
+}
+
+/** What the bots do in a match, for everyone in it. */
+function botLine(m: Match): string {
+  const b = m.bots!;
+  const nameOf = (id: string) => [...m.teamA, ...m.teamB].find((p) => p.steamId === id)?.name ?? "?";
+  const label = (_m: Match, k: TeamKey) => `Team ${nameOf(k === "a" ? m.captainA : m.captainB)}`;
+  if (!b.on) return b.counts.a + b.counts.b ? "No bots: the teams play short." : "No bots: if someone disconnects, their team plays short.";
+  if (b.counts.a + b.counts.b === 0) return "The teams are full. If someone disconnects, a bot takes their spot.";
+  return `Bots fill the empty spots (${b.counts.a} on ${label(m, "a")}, ${b.counts.b} on ${label(m, "b")}), and take the spot of anyone who disconnects.`;
+}
+
+/** Out of the lobby: easy to find, top right of the lobby card. */
+function LeaveButton({ busy, act }: { busy: boolean; act: Act }) {
+  return (
+    <button className="btn small play-leave" disabled={busy} onClick={() => act(play.leave)}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
+        <path d="M6 6l12 12M18 6L6 18" />
+      </svg>
+      Leave lobby
+    </button>
   );
 }
 
@@ -1050,30 +1092,18 @@ function MatchCard({ match: m, meId, skew, busy, act, mine }: { match: Match; me
               checked={m.bots.votes[iAmCaptainOf("a") ? "a" : "b"]}
               onChange={(e) => act(() => play.bot(m.id, e.target.checked))}
             />
-            <span>{m.bots.counts.a + m.bots.counts.b > 1 ? "Fill the empty spots with bots" : "Fill the short team with a bot"}</span>
+            <span>Fill the empty spots with bots</span>
           </label>
           <span className="hint">
             {m.bots.on
               ? m.bots.votes.a && m.bots.votes.b
-                ? "The bot plays. It's left out only if both captains untick this."
-                : "The bot still plays: the other captain wants it."
-              : m.bots.counts.a + m.bots.counts.b > 1
-                ? "No bots: both captains said no, so the teams play short."
-                : `No bot: both captains said no, so ${label(m.bots.team)} plays one short.`}
+                ? "On. It turns off only if both captains untick this."
+                : "Still on: the other captain wants bots."
+              : "Off: both captains said no, so empty spots stay empty."}
           </span>
         </div>
       )}
-      {!ended && m.bots && myTeam && !iAmCaptainOf(myTeam) && (
-        <p className="hint">
-          {m.bots.counts.a + m.bots.counts.b > 1
-            ? m.bots.on
-              ? `Bots fill the empty spots (${m.bots.counts.a} on ${label("a")}, ${m.bots.counts.b} on ${label("b")}).`
-              : "No bots: the teams play short."
-            : m.bots.on
-              ? `A bot fills the empty spot on ${label(m.bots.team)}.`
-              : `No bot: ${label(m.bots.team)} plays one short.`}
-        </p>
-      )}
+      {!ended && m.bots && <p className="hint">{botLine(m)}</p>}
 
       {myTeam && !ended && (
         <div className="row-actions">

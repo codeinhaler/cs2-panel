@@ -30,7 +30,7 @@ namespace Cs2PanelBridge;
 public class Cs2PanelBridge : BasePlugin
 {
     public override string ModuleName => "CS2 Panel Bridge";
-    public override string ModuleVersion => "1.9.0";
+    public override string ModuleVersion => "1.10.0";
     public override string ModuleAuthor => "cs2-panel";
     public override string ModuleDescription => "Enforces cs2-panel bans, locks matchmaking matches and reports players to the panel.";
 
@@ -80,6 +80,11 @@ public class Cs2PanelBridge : BasePlugin
         LoadBans();
         LoadMatch();
         LoadCycle();
+        // Bots that fill in for players who disconnect (and leave again when they're back).
+        AddTimer(5.0f, () =>
+        {
+            if (_match?.Bots is { Fill: true } bots && !_matchOver) ApplyBots(bots);
+        }, TimerFlags.REPEAT);
         RegisterListener<Listeners.OnClientAuthorized>(OnClientAuthorized);
         RegisterListener<Listeners.OnMapStart>(_ =>
         {
@@ -555,13 +560,10 @@ public class Cs2PanelBridge : BasePlugin
     {
         if (_match == null || _matchOver) return;
         if (_match.Password != null) Server.ExecuteCommand($"sv_password \"{Clean(_match.Password)}\"");
-        if (_match.Bots is { } bots && bots.A + bots.B > 0)
+        if (_match.Bots is { } bots && (bots.Fill || bots.A + bots.B > 0))
         {
-            // Several bots (Fixed teams): the game adds them, then each is put on its team's current side.
-            Server.ExecuteCommand(
-                $"bot_quota_mode normal; bot_difficulty {Math.Clamp(bots.Difficulty, 0, 3)}; bot_join_team any; bot_quota {Math.Max(0, bots.A) + Math.Max(0, bots.B)}");
-            SortBots(bots);
-            AddTimer(2.0f, () => SortBots(bots));
+            ApplyBots(bots);
+            AddTimer(2.0f, () => ApplyBots(bots));
         }
         else if (_match.Bot is { } bot)
         {
@@ -574,13 +576,38 @@ public class Cs2PanelBridge : BasePlugin
         }
     }
 
+    /// <summary>
+    /// Bots wanted per team. With Fill, every empty spot: in warmup the spots no match player holds, once
+    /// the match is live also the spots of players who disconnected (they get it back when they return).
+    /// </summary>
+    private (int A, int B) BotTargets(MatchBots bots)
+    {
+        if (!bots.Fill) return (Math.Max(0, bots.A), Math.Max(0, bots.B));
+        var live = !IsWarmup();
+        var online = Utilities.GetPlayers()
+            .Where(p => p is { IsValid: true, IsBot: false, IsHLTV: false } && (int)p.Connected == 0)
+            .Select(p => p.SteamID)
+            .ToHashSet();
+        int Humans(string g) => _matchPlayers.Count(kv => kv.Value.Group == g && (!live || online.Contains(kv.Key)));
+        return (Math.Max(0, bots.Size - Humans("a")), Math.Max(0, bots.Size - Humans("b")));
+    }
+
+    /// <summary>Sets the bot count and puts each bot on its team's current side.</summary>
+    private void ApplyBots(MatchBots bots)
+    {
+        if (_match == null || _matchOver || _match.Bots != bots) return;
+        var (a, b) = BotTargets(bots);
+        Server.ExecuteCommand($"bot_quota_mode normal; bot_difficulty {Math.Clamp(bots.Difficulty, 0, 3)}; bot_join_team any; bot_quota {a + b}");
+        SortBots(bots, a, b);
+    }
+
     /// <summary>Moves bots so each team has its number (by team, so it holds after the sides swap at half time).</summary>
-    private void SortBots(MatchBots bots)
+    private void SortBots(MatchBots bots, int wantA, int wantB)
     {
         if (_match == null || _matchOver || _match.Bots != bots) return;
         var sideA = SideOf("a");
         var sideB = sideA == CsTeam.Terrorist ? CsTeam.CounterTerrorist : CsTeam.Terrorist;
-        var want = new Dictionary<CsTeam, int> { [sideA] = Math.Max(0, bots.A), [sideB] = Math.Max(0, bots.B) };
+        var want = new Dictionary<CsTeam, int> { [sideA] = wantA, [sideB] = wantB };
         var all = Utilities.GetPlayers().Where(p => p is { IsValid: true, IsBot: true, IsHLTV: false }).ToList();
         var spare = all.Where(p => (CsTeam)p.TeamNum is not (CsTeam.Terrorist or CsTeam.CounterTerrorist)).ToList();
         foreach (var side in want.Keys) spare.AddRange(all.Where(p => (CsTeam)p.TeamNum == side).Skip(want[side]));
@@ -825,6 +852,10 @@ public class MatchBots
     /// <summary>Bots on team "a" and team "b" (the groups in Players).</summary>
     public int A { get; set; }
     public int B { get; set; }
+    /// <summary>Keep every empty spot filled, also for players who disconnect (A/B are then only the starting counts).</summary>
+    public bool Fill { get; set; }
+    /// <summary>Spots per team.</summary>
+    public int Size { get; set; }
     public int Difficulty { get; set; } = 1;
 }
 

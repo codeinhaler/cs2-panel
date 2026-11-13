@@ -1,5 +1,5 @@
 /**
- * Premier ratings from Leetify's public API.
+ * Premier ratings (and FACEIT level/Elo) from Leetify's public API.
  *
  * Leetify's developer guidelines ask apps not to store their data and not to
  * show numbers different from what the API returns. So nothing from here goes
@@ -16,6 +16,8 @@ const ERROR_CACHE_MS = 60 * 1000;
 export interface LeetifyResult {
   /** Premier (CS Rating), or null when Leetify doesn't know one. */
   premier: number | null;
+  /** FACEIT CS2 level and Elo, when Leetify knows them. */
+  faceit?: { level: number | null; elo: number } | null;
   /** Why there's no rating, for the lobby page. */
   note: string | null;
 }
@@ -88,9 +90,12 @@ export class LeetifyClient {
 }
 
 export function parseProfile(body: unknown): LeetifyResult {
-  const ranks = (body as { ranks?: { premier?: unknown } } | null)?.ranks;
-  const premier = ranks?.premier;
-  if (typeof premier === "number" && Number.isFinite(premier) && premier > 0) return { premier: Math.round(premier), note: null };
+  const ranks = (body as { ranks?: { premier?: unknown; faceit?: unknown; faceit_elo?: unknown } } | null)?.ranks;
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.round(v) : null);
+  const elo = num(ranks?.faceit_elo);
+  const faceit = elo !== null ? { level: num(ranks?.faceit), elo } : null;
+  const premier = num(ranks?.premier);
+  if (premier !== null || faceit) return { premier, faceit, note: null };
   const privacy = (body as { privacy_mode?: unknown } | null)?.privacy_mode;
   if (typeof privacy === "string" && privacy !== "public") return { premier: null, note: "Leetify profile is private" };
   return { premier: null, note: "No Premier rating on Leetify" };

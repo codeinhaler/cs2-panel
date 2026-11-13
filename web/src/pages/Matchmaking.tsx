@@ -427,8 +427,9 @@ export function MatchmakingPage() {
                   </option>
                 ))}
               </select>
-              <small>With an odd number of players in Competitive or Wingman, a bot joins the smaller team so nobody sits out.</small>
+              <small>Bots fill empty spots in every lobby but 1v1, unless both captains of a match say no.</small>
             </label>
+            <FaceitSettings value={form.faceit ?? { blend: "average", table: [] }} onChange={(faceit) => setForm({ ...form, faceit })} disabled={!manage} />
           </div>
         )}
 
@@ -492,6 +493,62 @@ export function MatchmakingPage() {
   );
 }
 
+/** FACEIT Elo (from Leetify) next to Premier: how it counts, and the Elo → Premier table. */
+function FaceitSettings({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: { blend: "average" | "faceit" | "premier" | "off"; table: [number, number][] };
+  onChange: (v: { blend: "average" | "faceit" | "premier" | "off"; table: [number, number][] }) => void;
+  disabled: boolean;
+}) {
+  const [text, setText] = useState(() => value.table.map(([e, p]) => `${e} = ${p}`).join("\n"));
+  const parse = (t: string): [number, number][] | null => {
+    const rows = t
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((l) => /^(\d+)\s*=\s*(\d+)$/.exec(l));
+    return rows.every(Boolean) ? rows.map((m) => [Number(m![1]), Number(m![2])] as [number, number]) : null;
+  };
+  return (
+    <div style={{ marginTop: 16 }}>
+      <label className="field" style={{ maxWidth: 420 }}>
+        <span>FACEIT Elo</span>
+        <select value={value.blend} disabled={disabled} onChange={(e) => onChange({ ...value, blend: e.target.value as typeof value.blend })}>
+          <option value="average">Use it: average of FACEIT and Premier when a player has both</option>
+          <option value="faceit">Use it: FACEIT first when a player has both</option>
+          <option value="premier">Use it only when there's no Premier rating</option>
+          <option value="off">Don't use FACEIT</option>
+        </select>
+        <small>Comes from Leetify with the Premier rating. Players see the stronger one in its own format (e.g. "FACEIT 9 · 1,850").</small>
+      </label>
+      {value.blend !== "off" && (
+        <details className="mm-config" style={{ marginTop: 8 }}>
+          <summary>
+            FACEIT Elo → Premier table <span className="hint">· a provisional estimate, used only for balancing</span>
+          </summary>
+          <textarea
+            className="mono"
+            rows={8}
+            value={text}
+            disabled={disabled}
+            spellCheck={false}
+            aria-label="FACEIT Elo to Premier table"
+            onChange={(e) => {
+              setText(e.target.value);
+              const t = parse(e.target.value);
+              if (t) onChange({ ...value, table: t });
+            }}
+          />
+          <small className="hint">One line per point, "Elo = Premier", both going up. Values in between are drawn as straight lines.</small>
+        </details>
+      )}
+    </div>
+  );
+}
+
 const MODES = ["competitive", "wingman", "duel", "fixed5", "fixed2"] as const;
 const MODE_TEXT = {
   competitive: { label: "Competitive", size: "up to 5v5", hint: "Classic maps." },
@@ -528,6 +585,7 @@ function LobbySettings({
   servers: React.ReactNode;
 }) {
   const [workshop, setWorkshop] = useState("");
+  const { toast } = useApp();
   // Same check as the map picker on a server's page: ask Steam about the item as it's typed.
   const workshopId = /(\d{3,20})/.exec(workshop)?.[1] ?? "";
   const info = useWorkshopInfo(workshopId, "map");
@@ -562,6 +620,33 @@ function LobbySettings({
                   {mapLabel(m, names)}
                   {m.startsWith("workshop:") && <span className="hint"> · Workshop {m.slice(9)}</span>}
                 </span>
+                {m.startsWith("workshop:") && manage && (
+                  <button
+                    type="button"
+                    className="btn small ghost danger"
+                    style={{ marginLeft: 6, padding: "0 6px" }}
+                    title="Remove from this lobby and delete the downloaded map from the servers (kept if something else uses it)"
+                    aria-label={`Remove ${mapLabel(m, names)}`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      if (!window.confirm(`Remove ${mapLabel(m, names)} from ${text.label} and delete its downloaded files from the servers?`)) return;
+                      onChange({ ...value, maps: value.maps.filter((x) => x !== m) });
+                      void api
+                        .removeWorkshopMap(m.slice(9), mode)
+                        .then((r) =>
+                          toast(
+                            r.keptBecause.length
+                              ? `Removed from ${text.label}. The files stay on the servers because ${r.keptBecause.join(", ")} still uses it.`
+                              : `Removed from ${text.label} and deleted from ${r.deleted} server${r.deleted === 1 ? "" : "s"}.`,
+                            r.keptBecause.length ? "info" : undefined,
+                          ),
+                        )
+                        .catch((err: Error) => toast(err.message, "warn"));
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
               </label>
             ))}
           </div>

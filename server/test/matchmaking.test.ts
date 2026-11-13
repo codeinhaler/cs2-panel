@@ -12,7 +12,7 @@ import { choosePlayers, rankSplits } from "../src/matchmaking/balance.js";
 import { parseProfile } from "../src/matchmaking/leetify.js";
 import { hostOnly } from "../src/matchmaking/public-app.js";
 import { imageType, inkOn, themeCss } from "../src/matchmaking/look.js";
-import { cleanupDelay, parseMatchStatus } from "../src/matchmaking/service.js";
+import { FACEIT_TABLE, cleanupDelay, faceitToPremier, parseMatchStatus } from "../src/matchmaking/service.js";
 
 describe("team balancing", () => {
   it("tries every split once and puts the most even first", () => {
@@ -67,7 +67,12 @@ describe("site look", () => {
 
 describe("parsers", () => {
   it("reads Premier from a Leetify profile", () => {
-    expect(parseProfile({ ranks: { premier: 18854, competitive: [] }, privacy_mode: "public" })).toEqual({ premier: 18854, note: null });
+    expect(parseProfile({ ranks: { premier: 18854, competitive: [] }, privacy_mode: "public" })).toEqual({ premier: 18854, faceit: null, note: null });
+    // FACEIT level and Elo come along; a FACEIT-only player still has a rating.
+    expect(parseProfile({ ranks: { premier: null, faceit: 9, faceit_elo: 1850 } })).toEqual({ premier: null, faceit: { level: 9, elo: 1850 }, note: null });
+    expect(faceitToPremier(1850, FACEIT_TABLE)).toBe(18000);
+    expect(faceitToPremier(50, FACEIT_TABLE)).toBeLessThan(faceitToPremier(100, FACEIT_TABLE));
+    expect(faceitToPremier(9000, FACEIT_TABLE)).toBe(40000);
     expect(parseProfile({ ranks: { premier: null, competitive: [] }, privacy_mode: "private" }).note).toMatch(/private/);
     expect(parseProfile({}).premier).toBeNull();
   });
@@ -93,6 +98,8 @@ const OWNER = "76561198000000001";
 const P = ["76561198000000101", "76561198000000102", "76561198000000103", "76561198000000104", "76561198000000105"];
 /** Leetify's answers: P4 and P5 aren't on Leetify. */
 const LEETIFY: Record<string, number> = { [P[0]!]: 20000, [P[1]!]: 15000, [P[2]!]: 10000 };
+/** Players Leetify knows only a FACEIT Elo for. */
+const FACEIT_ONLY: Record<string, number> = {};
 
 let dir: string;
 let app: App;
@@ -153,6 +160,7 @@ async function setup() {
     if (u.hostname === "api-public.cs-prod.leetify.com") {
       leetifyCalls++;
       const id = u.searchParams.get("steam64_id")!;
+      if (id in FACEIT_ONLY) return Response.json({ name: "x", privacy_mode: "public", ranks: { premier: null, faceit: 9, faceit_elo: FACEIT_ONLY[id] } });
       if (!(id in LEETIFY)) return new Response("{}", { status: 404 });
       return Response.json({ name: "x", privacy_mode: "public", ranks: { premier: LEETIFY[id], competitive: [] } });
     }
@@ -260,6 +268,17 @@ function findFile(root: string, name: string): string[] {
     const p = path.join(root, entry);
     if (statSync(p).isDirectory()) out.push(...findFile(p, name));
     else if (entry === name) out.push(p);
+  }
+  return out;
+}
+
+function findDir(root: string, name: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(root)) {
+    const p = path.join(root, entry);
+    if (!statSync(p).isDirectory()) continue;
+    if (entry === name) out.push(p);
+    else out.push(...findDir(p, name));
   }
   return out;
 }
@@ -727,11 +746,12 @@ describe("matchmaking site", () => {
     const res = await play(cookies[P.indexOf(anyone)]!, "POST", "/api/lobby/start");
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     st = (await play(cookies[0]!, "GET", "/api/state")).body;
-    expect(st.matches[0]).toMatchObject({ mode: "fixed2", bots: null });
+    // Full teams: no bots now, but the captains' box is there for anyone who disconnects.
+    expect(st.matches[0]).toMatchObject({ mode: "fixed2", bots: { on: true, counts: { a: 0, b: 0 } } });
     expect(st.matches[0].teamA).toHaveLength(2);
   });
 
-  it("adds a bot to the other team when a late player makes it 2v1", async () => {
+  it("bots fill every empty spot (on by default, off only when both captains say no); a late player takes a bot's place", async () => {
     const owner = await adminCookie();
     await enable(owner, [await setupServer(owner)]);
     const names = ["Alpha", "Bravo", "Charlie", "Delta", "Echo"];
@@ -741,26 +761,29 @@ describe("matchmaking site", () => {
     const draft = (await play(cookies[0]!, "GET", "/api/state")).body.drafts[0];
     const { matchId } = (await play(cookies[0]!, "POST", `/api/teams/${draft.id}/start`)).body;
     let m = await toLive(cookies, P, matchId);
-    expect([...m.teamA, ...m.teamB].some((p: any) => p.steamId === "BOT")).toBe(false);
+    // 1v1 in a 2v2 lobby: a bot on each team.
+    expect(m.bots).toMatchObject({ on: true, counts: { a: 1, b: 1 } });
+    const [matchFile] = findFile(dir, "match.json");
+    expect(JSON.parse(readFileSync(matchFile!, "utf8"))).toMatchObject({ bot: null, bots: { a: 1, b: 1, fill: true, size: 2 } });
 
+    // A late player takes one bot's place.
     await play(cookies[2]!, "POST", "/api/lobby/join", { mode: "wingman" });
     rconLog = [];
     const res = await play(cookies[2]!, "POST", `/api/matches/${matchId}/join`);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
-    const other = res.body.team === "a" ? "b" : "a";
     m = (await play(cookies[0]!, "GET", "/api/state")).body.matches[0];
-    expect(m.bots).toMatchObject({ team: other, on: true });
-    expect((other === "a" ? m.teamA : m.teamB).some((p: any) => p.steamId === "BOT")).toBe(true);
+    expect(m.bots.counts.a + m.bots.counts.b).toBe(1);
     expect(rconLog).toContain("cs2panel_match_reload");
-    const [matchFile] = findFile(dir, "match.json");
-    expect(JSON.parse(readFileSync(matchFile!, "utf8")).bot).not.toBeNull();
 
-    // The next player takes the bot's place: 2v2.
-    await play(cookies[3]!, "POST", "/api/lobby/join", { mode: "wingman" });
-    const res2 = await play(cookies[3]!, "POST", `/api/matches/${matchId}/join`);
-    expect(res2.body.team).toBe(other);
+    // Off only when both captains untick it.
+    const capA = cookies[P.indexOf(m.captainA)]!;
+    const capB = cookies[P.indexOf(m.captainB)]!;
+    await play(capA, "POST", `/api/matches/${matchId}/bot`, { allow: false });
+    expect(JSON.parse(readFileSync(matchFile!, "utf8")).bots).not.toBeNull();
+    await play(capB, "POST", `/api/matches/${matchId}/bot`, { allow: false });
     m = (await play(cookies[0]!, "GET", "/api/state")).body.matches[0];
-    expect([...m.teamA, ...m.teamB].some((p: any) => p.steamId === "BOT")).toBe(false);
+    expect(m.bots).toMatchObject({ on: false, votes: { a: false, b: false } });
+    expect(JSON.parse(readFileSync(matchFile!, "utf8")).bots).toBeNull();
   });
 
   it("puts late players on the losing team, and the captains can close the match", async () => {
@@ -775,7 +798,7 @@ describe("matchmaking site", () => {
     const { matchId } = (await play(cookies[0]!, "POST", `/api/teams/${draft.id}/start`)).body;
     const m = await toLive(cookies, P, matchId);
     // 2v2 in a 5v5 lobby: both teams have room. Before any score, the lower total rating gets the player.
-    const total = (t: any[]) => t.reduce((s, p) => s + p.effective, 0);
+    const total = (t: any[]) => t.filter((p) => p.steamId !== "BOT").reduce((s, p) => s + p.effective, 0);
     const lower = total(m.teamA) <= total(m.teamB) ? "a" : "b";
     await play(cookies[4]!, "POST", "/api/lobby/join", { mode: "competitive" });
     expect((await play(cookies[4]!, "GET", "/api/state")).body.matches[0].canJoin.team).toBe(lower);
@@ -811,6 +834,55 @@ describe("matchmaking site", () => {
     now += 10_000;
     await app.services.matchmaking.tick();
     expect((await play(cookies[4]!, "POST", `/api/matches/${matchId}/join`)).body.team).toBe("a");
+  });
+
+  it("removes a Workshop map from a lobby and deletes its files, unless something else still uses it", async () => {
+    const owner = await adminCookie();
+    const id = await setupServer(owner);
+    const slug = (await admin(owner, "GET", `/api/servers/${id}`)).body.server?.slug ?? (await admin(owner, "GET", "/api/servers")).body.servers[0].slug;
+    const upper = findDir(dir, "upper").find((d) => d.includes(slug))!;
+    const content = path.join(upper, "game", "bin", "linuxsteamrt64", "steamapps", "workshop", "content", "730");
+    for (const ws of ["111", "999"]) {
+      mkdirSync(path.join(content, ws), { recursive: true });
+      writeFileSync(path.join(content, ws, "map.vpk"), "x");
+    }
+    await enable(owner, [id], {
+      modes: {
+        competitive: { enabled: true, maps: ["de_mirage", "workshop:111"] },
+        wingman: { enabled: true, maps: ["de_vertigo", "workshop:111"] },
+        duel: { enabled: false, maps: ["de_vertigo"] },
+      },
+    });
+    // Still in the Wingman pool: out of Competitive, but the files stay.
+    let r = await admin(owner, "DELETE", "/api/matchmaking/workshop/111?mode=competitive");
+    expect(r.body).toEqual({ deleted: 0, keptBecause: ["the Wingman lobby"] });
+    expect(readdirSync(content).sort()).toEqual(["111", "999"]);
+    expect((await admin(owner, "GET", "/api/matchmaking")).body.settings.modes.competitive.maps).toEqual(["de_mirage"]);
+    // Nothing else uses it: deleted (other maps untouched).
+    r = await admin(owner, "DELETE", "/api/matchmaking/workshop/111?mode=wingman");
+    expect(r.body).toEqual({ deleted: 1, keptBecause: [] });
+    expect(readdirSync(content)).toEqual(["999"]);
+  });
+
+  it("uses FACEIT Elo from Leetify: badge in FACEIT's format, Premier-scale value for balancing", async () => {
+    const owner = await adminCookie();
+    await enable(owner, [await setupServer(owner)]);
+    FACEIT_ONLY[P[4]!] = 1850;
+    try {
+      const c = await playerCookie(P[4]!, "Echo");
+      await play(c, "POST", "/api/lobby/join");
+      await play(c, "GET", "/api/state");
+      await settle(async () => leetifyCalls > 0);
+      await settle();
+      const me = (await play(c, "GET", "/api/state")).body.me;
+      expect(me.rating).toMatchObject({ source: "leetify", value: 18000, badge: "FACEIT 9 · 1,850" });
+      // Switched off: no rating from FACEIT.
+      const cur = (await admin(owner, "GET", "/api/matchmaking")).body.settings;
+      await admin(owner, "PUT", "/api/matchmaking", { settings: { ...cur, faceit: { ...cur.faceit, blend: "off" } } });
+      expect((await play(c, "GET", "/api/state")).body.me.rating).toMatchObject({ value: null });
+    } finally {
+      delete FACEIT_ONLY[P[4]!];
+    }
   });
 
   it("serves the page with the theme, title and uploaded images", async () => {

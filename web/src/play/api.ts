@@ -5,6 +5,8 @@ export type Mode = "competitive" | "wingman" | "duel" | "fixed5" | "fixed2";
 
 export interface Rating {
   value: number | null;
+  /** "FACEIT 9 · 1,850" when FACEIT is the stronger rating: shown instead of the number. */
+  badge?: string | null;
   source: RatingSource;
   note: string | null;
   pending?: boolean;
