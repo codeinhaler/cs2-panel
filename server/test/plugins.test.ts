@@ -176,6 +176,7 @@ beforeEach(async () => {
     fetchFn: fakeFetch,
     logLevel: "silent",
     pluginCheckDelayMs: 0,
+    updateRecovery: { windowMs: 400, pollMs: 10, stableMs: 0 },
     rcon: async (_o, cmd) => {
       rconCalls.push(cmd);
       if (cmd === "meta list") return "Listing 1 plugin:\n  [01] CounterStrikeSharp (1.0.370) by Roflmuffin\n";
@@ -196,7 +197,12 @@ async function login(steamId = OWNER) {
   return `cs2p_session=${res.cookies.find((c) => c.name === "cs2p_session")!.value}`;
 }
 async function call(cookie: string, method: string, url: string, body?: unknown) {
-  const res = await app.fastify.inject({ method: method as "GET", url, headers: { cookie, host: "panel.lan" }, ...(body !== undefined ? { payload: body as object } : {}) });
+  const res = await app.fastify.inject({
+    method: method as "GET",
+    url,
+    headers: { cookie, host: "panel.lan" },
+    ...(body !== undefined ? { payload: body as object } : {}),
+  });
   return { status: res.statusCode, body: res.json() as Record<string, any> };
 }
 async function newServer(c: string, name = "S", port = 27015) {
@@ -211,7 +217,14 @@ describe("plugin management", () => {
     const s = await newServer(c);
     const res = await call(c, "POST", `/api/servers/${s.id}/plugins/cs2-simpleadmin/install`, {});
     expect(res.status, JSON.stringify(res.body)).toBe(200);
-    expect(res.body.installed.map((p: { id: string }) => p.id)).toEqual(["metamod", "counterstrikesharp", "anybaselib", "playersettings", "menumanager", "cs2-simpleadmin"]);
+    expect(res.body.installed.map((p: { id: string }) => p.id)).toEqual([
+      "metamod",
+      "counterstrikesharp",
+      "anybaselib",
+      "playersettings",
+      "menumanager",
+      "cs2-simpleadmin",
+    ]);
     // Pre-releases are skipped by default.
     expect(res.body.installed.at(-1).version).toBe("build-1.9.1");
 
@@ -244,7 +257,10 @@ describe("plugin management", () => {
     const s = await newServer(c);
     await call(c, "POST", `/api/servers/${s.id}/plugins/counterstrikesharp/install`, {});
     expect((await call(c, "GET", `/api/servers/${s.id}/plugins`)).body.warnings).toEqual([]);
-    await call(c, "PUT", `/api/servers/${s.id}/configs/file`, { path: "cfg/server.cfg", content: "sv_hibernate_when_empty 0\nsv_hibernate_when_empty 1 // later wins\n" });
+    await call(c, "PUT", `/api/servers/${s.id}/configs/file`, {
+      path: "cfg/server.cfg",
+      content: "sv_hibernate_when_empty 0\nsv_hibernate_when_empty 1 // later wins\n",
+    });
     expect((await call(c, "GET", `/api/servers/${s.id}/plugins`)).body.warnings[0]).toMatch(/hibernates/);
   });
 

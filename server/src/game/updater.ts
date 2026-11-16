@@ -6,7 +6,8 @@ import type { OperationGate } from "../servers/service.js";
 import type { ServerRecord, ServerStore } from "../servers/store.js";
 import type { RconExec } from "./rcon.js";
 
-export type JobState = "idle" | "running" | "succeeded" | "failed";
+/** servers-down: the game files were updated, but a server that was running didn't come back up. */
+export type JobState = "idle" | "running" | "succeeded" | "failed" | "servers-down";
 
 export interface UpdateJob {
   state: JobState;
@@ -16,6 +17,15 @@ export interface UpdateJob {
   /** Why it ran when nobody clicked: "automatic", or null for a manual update. */
   trigger: string | null;
   lines: string[];
+  /** SteamCMD finished without an error (the files are the latest build). */
+  filesUpdated?: boolean;
+  /** Servers that were running before but didn't come back, and why. */
+  down?: { name: string; reason: string }[];
+}
+
+interface RunResult {
+  filesUpdated: boolean;
+  down: { name: string; reason: string }[];
 }
 
 const MAX_LINES = 5000;
@@ -30,6 +40,14 @@ export class GameUpdater {
   /** Called with the servers that were started again; returns lines for the log (plugin health). */
   afterStart: ((started: ServerRecord[]) => Promise<string[]>) | null = null;
   pluginCheckDelayMs = 45_000;
+  /**
+   * After starting a server: how long it may take to come up, how often to look, and how long it must have
+   * stayed up (same systemd start time on two looks in a row) to count. A crash loop keeps restarting, so it
+   * never counts; a brief "active" between crashes isn't enough.
+   */
+  recoveryWindowMs = 120_000;
+  recoveryPollMs = 5_000;
+  recoveryStableMs = 20_000;
 
   constructor(
     private readonly host: Host,
@@ -55,14 +73,27 @@ export class GameUpdater {
     this.audit.record(userId, "game.update.start", null, { ...opts, ...(trigger ? { trigger } : {}) });
     if (trigger) this.log(`Started automatically: ${trigger}.`);
     return this.run(opts)
-      .then(() => {
-        this.job.state = "succeeded";
-        this.audit.record(userId, "game.update.finish", null, { result: "succeeded" });
+      .then((r) => {
+        this.job.filesUpdated = r.filesUpdated;
+        this.job.down = r.down;
+        if (r.down.length) {
+          const list = r.down.map((d) => `${d.name} (${d.reason})`).join(", ");
+          this.log(
+            `CS2 was updated, but these servers didn't come back up: ${list}. Check their Console tab; a plugin may need an update for the new CS2 version.`,
+          );
+          this.job.state = "servers-down";
+          this.audit.record(userId, "game.update.finish", null, { result: "servers_down", filesUpdated: true, down: list });
+        } else {
+          this.job.state = "succeeded";
+          this.audit.record(userId, "game.update.finish", null, { result: "succeeded" });
+        }
       })
-      .catch((err: Error) => {
+      .catch((err: Error & { down?: { name: string; reason: string }[] }) => {
         this.log(`ERROR: ${err.message}`);
         this.job.state = "failed";
-        this.audit.record(userId, "game.update.finish", null, { result: "failed", error: err.message });
+        this.job.down = err.down ?? [];
+        const down = this.job.down.map((d) => `${d.name} (${d.reason})`).join(", ");
+        this.audit.record(userId, "game.update.finish", null, { result: "failed", error: err.message, ...(down ? { down } : {}) });
       })
       .finally(() => {
         this.job.finishedAt = new Date().toISOString();
@@ -75,7 +106,7 @@ export class GameUpdater {
     if (this.job.lines.length > MAX_LINES) this.job.lines.splice(0, this.job.lines.length - MAX_LINES);
   }
 
-  private async run(opts: { validate: boolean; warnSeconds: number }): Promise<void> {
+  private async run(opts: { validate: boolean; warnSeconds: number }): Promise<RunResult> {
     const servers = this.servers.list();
     const before = (await this.files.baseVersion()).patchVersion;
     this.log(`Installed CS2 version: ${before ?? "not installed"}`);
@@ -103,9 +134,25 @@ export class GameUpdater {
     }
 
     this.log("Stopping servers and unmounting overlays…");
+    const touched: typeof servers = [];
     for (const s of servers) {
-      await this.host.cs2ctl("umount", s.slug);
-      this.log(`  ${s.name}: stopped`);
+      touched.push(s);
+      try {
+        await this.host.cs2ctl("umount", s.slug);
+        this.log(`  ${s.name}: stopped`);
+      } catch (e) {
+        // Don't update with a server half-stopped: put back the ones already stopped, then report.
+        const msg = (e as Error).message;
+        this.log(`  ${s.name}: ERROR ${msg}`);
+        this.log("Not running SteamCMD. Starting the servers that were stopped again…");
+        const down = await this.bringBack(touched, running);
+        const err = new Error(
+          `Couldn't stop ${s.name} (${msg}), so CS2 wasn't updated.` +
+            (down.length ? ` Not back up: ${down.map((d) => `${d.name} (${d.reason})`).join(", ")}.` : ""),
+        ) as Error & { down?: { name: string; reason: string }[] };
+        err.down = down;
+        throw err;
+      }
     }
 
     let updateError: Error | null = null;
@@ -133,31 +180,88 @@ export class GameUpdater {
       }
     }
 
-    this.log("Mounting overlays and starting servers…");
-    for (const s of servers) {
-      try {
-        if (running.includes(s)) {
-          await this.host.cs2ctl("start", s.slug);
-          this.log(`  ${s.name}: started`);
-        } else {
-          await this.host.cs2ctl("mount", s.slug);
-        }
-      } catch (e) {
-        this.log(`  ${s.name}: ERROR ${(e as Error).message}`);
-      }
-    }
+    const down = await this.bringBack(servers, running);
+    const up = running.filter((s) => !down.some((d) => d.name === s.name));
 
-    if (this.afterStart && running.length) {
+    if (this.afterStart && up.length) {
       this.log(`Checking that plugins loaded (in ${Math.round(this.pluginCheckDelayMs / 1000)} seconds)…`);
       await this.sleep(this.pluginCheckDelayMs);
       try {
-        for (const l of await this.afterStart(running)) this.log(l);
+        for (const l of await this.afterStart(up)) this.log(l);
       } catch (e) {
         this.log(`  plugin check failed: ${(e as Error).message}`);
       }
     }
 
-    if (updateError) throw updateError;
-    this.log("Done.");
+    if (updateError) {
+      const err = new Error(
+        updateError.message + (down.length ? ` Also not back up: ${down.map((d) => `${d.name} (${d.reason})`).join(", ")}.` : ""),
+      ) as Error & { down?: { name: string; reason: string }[] };
+      err.down = down;
+      throw err;
+    }
+    if (!down.length) this.log("Done.");
+    return { filesUpdated: true, down };
+  }
+
+  /**
+   * Mounts the given servers and starts those that were running, then waits until each started one has
+   * stayed up. Returns the ones that didn't come back, with the reason.
+   */
+  private async bringBack(list: ServerRecord[], running: ServerRecord[]): Promise<{ name: string; reason: string }[]> {
+    this.log("Mounting overlays and starting servers…");
+    const down: { name: string; reason: string }[] = [];
+    const started: ServerRecord[] = [];
+    for (const s of list) {
+      try {
+        if (running.includes(s)) {
+          await this.host.cs2ctl("start", s.slug);
+          this.log(`  ${s.name}: started`);
+          started.push(s);
+        } else {
+          await this.host.cs2ctl("mount", s.slug);
+        }
+      } catch (e) {
+        const msg = (e as Error).message;
+        this.log(`  ${s.name}: ERROR ${msg}`);
+        if (running.includes(s)) down.push({ name: s.name, reason: `couldn't start: ${msg}` });
+      }
+    }
+    if (!started.length) return down;
+
+    this.log(`Checking that the servers stay up (up to ${Math.round(this.recoveryWindowMs / 1000)} seconds)…`);
+    const deadline = Date.now() + this.recoveryWindowMs;
+    const seen = new Map<string, string>();
+    const last = new Map<string, string>();
+    const healthy = new Set<string>();
+    for (;;) {
+      for (const s of started) {
+        if (healthy.has(s.slug)) continue;
+        const st = await this.host.serviceStatus(s.slug);
+        last.set(s.slug, st.state);
+        if (st.state === "active" && st.since) {
+          const stableFor = Date.now() - Date.parse(st.since);
+          if (seen.get(s.slug) === st.since && stableFor >= this.recoveryStableMs) {
+            healthy.add(s.slug);
+            this.log(`  ${s.name}: up`);
+          } else seen.set(s.slug, st.since);
+        } else seen.delete(s.slug);
+      }
+      if (healthy.size === started.length || Date.now() >= deadline) break;
+      await this.sleep(this.recoveryPollMs);
+    }
+    for (const s of started) {
+      if (healthy.has(s.slug)) continue;
+      const state = last.get(s.slug);
+      const reason =
+        state === "failed"
+          ? "crashed, and systemd gave up restarting it"
+          : state === "activating" || state === "active"
+            ? "keeps crashing and restarting"
+            : `is ${state ?? "not running"}`;
+      this.log(`  ${s.name}: NOT UP: ${reason}`);
+      down.push({ name: s.name, reason });
+    }
+    return down;
   }
 }

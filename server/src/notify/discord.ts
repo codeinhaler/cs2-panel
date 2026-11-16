@@ -44,7 +44,10 @@ interface Embed {
 }
 
 /** Turns an Activity entry into a Discord message, if it's one people may want to hear about. */
-export function describeEvent(e: AuditEvent, names: { user: string | null; server: string | null }): { group: EventGroup; embed: Omit<Embed, "timestamp"> } | null {
+export function describeEvent(
+  e: AuditEvent,
+  names: { user: string | null; server: string | null },
+): { group: EventGroup; embed: Omit<Embed, "timestamp"> } | null {
   const d = e.details;
   const str = (k: string) => (d[k] === undefined || d[k] === null ? "" : String(d[k]));
   const who = names.user ?? "Someone";
@@ -56,42 +59,89 @@ export function describeEvent(e: AuditEvent, names: { user: string | null; serve
     case "alert.cleared":
       return { group: "problems", embed: { title: "✓ Back to normal", description: `Cleared: ${str("message")}`, color: GREEN, footer } };
     case "server.crashed":
-      return { group: "problems", embed: { title: `💥 ${server ?? "A server"} crashed`, description: "systemd restarted it automatically.", color: RED, footer } };
+      return {
+        group: "problems",
+        embed: { title: `💥 ${server ?? "A server"} crashed`, description: "systemd restarted it automatically.", color: RED, footer },
+      };
     case "server.restart.failed":
-      return { group: "problems", embed: { title: `Couldn't restart ${server ?? "a server"}`, description: `${str("trigger")}: ${str("error")}`, color: RED, footer } };
+      return {
+        group: "problems",
+        embed: { title: `Couldn't restart ${server ?? "a server"}`, description: `${str("trigger")}: ${str("error")}`, color: RED, footer },
+      };
     case "game.update.available":
-      return { group: "updates", embed: { title: "A CS2 update is out", description: `Build ${str("latest")} (installed: ${str("installed")}).`, color: BLUE } };
+      return {
+        group: "updates",
+        embed: { title: "A CS2 update is out", description: `Build ${str("latest")} (installed: ${str("installed")}).`, color: BLUE },
+      };
     case "game.update.start":
       return {
         group: "updates",
-        embed: { title: "Updating CS2", description: d.trigger ? `Started automatically: ${str("trigger")}. Servers restart when it's done.` : `${who} started it. Servers restart when it's done.`, color: BLUE },
+        embed: {
+          title: "Updating CS2",
+          description: d.trigger
+            ? `Started automatically: ${str("trigger")}. Servers restart when it's done.`
+            : `${who} started it. Servers restart when it's done.`,
+          color: BLUE,
+        },
       };
     case "game.update.finish":
-      return d.result === "succeeded"
-        ? { group: "updates", embed: { title: "✓ CS2 updated", description: "Running servers have been started again.", color: GREEN } }
-        : { group: "problems", embed: { title: "CS2 update failed", description: str("error") || "See the Game update page.", color: RED } };
+      if (d.result === "succeeded")
+        return { group: "updates", embed: { title: "✓ CS2 updated", description: "Running servers have been started again.", color: GREEN } };
+      if (d.result === "servers_down")
+        return {
+          group: "problems",
+          embed: {
+            title: "CS2 updated, but servers are down",
+            description: `Not back up: ${str("down")}. A plugin may need an update for the new CS2 version.`,
+            color: RED,
+          },
+        };
+      return { group: "problems", embed: { title: "CS2 update failed", description: str("error") || "See the Game update page.", color: RED } };
     case "server.restart":
-      if (d.trigger) return { group: "restarts", embed: { title: `${server ?? "A server"} restarted`, description: `Reason: ${str("trigger")}.`, color: BLUE, footer } };
+      if (d.trigger)
+        return { group: "restarts", embed: { title: `${server ?? "A server"} restarted`, description: `Reason: ${str("trigger")}.`, color: BLUE, footer } };
       return { group: "servers", embed: { title: `${server ?? "A server"} restarted`, description: `By ${who}.`, color: BLUE, footer } };
     case "server.start":
     case "server.stop":
     case "server.kill":
       return {
         group: "servers",
-        embed: { title: `${server ?? "A server"} ${e.action === "server.start" ? "started" : e.action === "server.kill" ? "force-stopped" : "stopped"}`, description: `By ${who}.`, color: BLUE, footer },
+        embed: {
+          title: `${server ?? "A server"} ${e.action === "server.start" ? "started" : e.action === "server.kill" ? "force-stopped" : "stopped"}`,
+          description: `By ${who}.`,
+          color: BLUE,
+          footer,
+        },
       };
     case "player.kick":
-      return { group: "moderation", embed: { title: `${str("name") || "A player"} was kicked`, description: `By ${who}${d.reason ? `: ${str("reason")}` : "."}`, color: ORANGE, footer } };
-    case "player.ban": {
-      const minutes = Number(d.minutes);
-      const length = minutes === 0 ? "permanently" : minutes % 1440 === 0 ? `for ${minutes / 1440} day${minutes === 1440 ? "" : "s"}` : `for ${minutes} minutes`;
       return {
         group: "moderation",
-        embed: { title: `${str("name") || str("steamId") || "A player"} was banned ${length}`, description: `By ${who}: ${str("reason")}`, color: ORANGE, footer },
+        embed: { title: `${str("name") || "A player"} was kicked`, description: `By ${who}${d.reason ? `: ${str("reason")}` : "."}`, color: ORANGE, footer },
+      };
+    case "player.ban": {
+      const minutes = Number(d.minutes);
+      const length =
+        minutes === 0 ? "permanently" : minutes % 1440 === 0 ? `for ${minutes / 1440} day${minutes === 1440 ? "" : "s"}` : `for ${minutes} minutes`;
+      return {
+        group: "moderation",
+        embed: {
+          title: `${str("name") || str("steamId") || "A player"} was banned ${length}`,
+          description: `By ${who}: ${str("reason")}`,
+          color: ORANGE,
+          footer,
+        },
       };
     }
     case "player.unban":
-      return { group: "moderation", embed: { title: `${str("name") || str("steamId") || "A player"} was unbanned`, description: `By ${who}${d.reason ? `: ${str("reason")}` : "."}`, color: GREEN, footer } };
+      return {
+        group: "moderation",
+        embed: {
+          title: `${str("name") || str("steamId") || "A player"} was unbanned`,
+          description: `By ${who}${d.reason ? `: ${str("reason")}` : "."}`,
+          color: GREEN,
+          footer,
+        },
+      };
     default:
       return null;
   }
@@ -156,7 +206,12 @@ export class DiscordNotifier {
   async test(): Promise<void> {
     const url = this.webhook();
     if (!url) throw badRequest("Save a webhook link first.");
-    const res = await this.post(url, { title: "✓ CS2 Panel is connected", description: "Notifications from the panel will show up in this channel.", color: GREEN, timestamp: new Date().toISOString() });
+    const res = await this.post(url, {
+      title: "✓ CS2 Panel is connected",
+      description: "Notifications from the panel will show up in this channel.",
+      color: GREEN,
+      timestamp: new Date().toISOString(),
+    });
     if (!res.ok) throw badRequest(`Discord refused the message (${res.status}). Check that the webhook still exists.`);
   }
 
@@ -169,7 +224,9 @@ export class DiscordNotifier {
     const user = e.userId
       ? ((this.db.prepare("SELECT COALESCE(display_name, steam_id) AS n FROM users WHERE id = ?").get(e.userId) as { n: string } | undefined)?.n ?? null)
       : null;
-    const server = e.serverId ? ((this.db.prepare("SELECT name FROM servers WHERE id = ?").get(e.serverId) as { name: string } | undefined)?.name ?? null) : null;
+    const server = e.serverId
+      ? ((this.db.prepare("SELECT name FROM servers WHERE id = ?").get(e.serverId) as { name: string } | undefined)?.name ?? null)
+      : null;
     return { user, server };
   }
 

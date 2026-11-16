@@ -79,9 +79,11 @@ beforeEach(async () => {
     host,
     logLevel: "silent",
     pluginCheckDelayMs: 0,
+    updateRecovery: { windowMs: 400, pollMs: 10, stableMs: 0 },
     automationSleep: async () => undefined,
     a2sQuery: async () => null,
-    fetchFn: (async (url: string | URL | Request, init?: RequestInit) => (await fakeSteamWorkshop(url, init)) ?? new Response("", { status: 404 })) as typeof fetch,
+    fetchFn: (async (url: string | URL | Request, init?: RequestInit) =>
+      (await fakeSteamWorkshop(url, init)) ?? new Response("", { status: 404 })) as typeof fetch,
     rcon: async (_o, cmd) => {
       if (cmd === "status") return status;
       if (cmd.startsWith("say ")) said.push(cmd.slice(4));
@@ -100,7 +102,12 @@ async function login(steamId = OWNER) {
   return `cs2p_session=${res.cookies.find((c) => c.name === "cs2p_session")!.value}`;
 }
 async function call(cookie: string, method: string, url: string, body?: unknown) {
-  const res = await app.fastify.inject({ method: method as "GET", url, headers: { cookie, host: "panel.lan" }, ...(body !== undefined ? { payload: body as object } : {}) });
+  const res = await app.fastify.inject({
+    method: method as "GET",
+    url,
+    headers: { cookie, host: "panel.lan" },
+    ...(body !== undefined ? { payload: body as object } : {}),
+  });
   return { status: res.statusCode, body: res.json() as Record<string, any> };
 }
 async function runningServer(c: string, name = "A", port = 27015) {
@@ -159,7 +166,7 @@ describe("automatic CS2 updates", () => {
     await app.services.automation.tick(t(12));
     await updateDone();
     expect(app.services.updater.job).toMatchObject({ state: "succeeded", startedBy: null, trigger: "new CS2 build 20001300" });
-    expect((await auto(c))).toMatchObject({ installedBuild: "20001300", updateAvailable: false });
+    expect(await auto(c)).toMatchObject({ installedBuild: "20001300", updateAvailable: false });
     expect((await call(c, "GET", `/api/servers/${s.id}`)).body.server.status.state).toBe("active");
     const start = (await audit(c)).find((e) => e.action === "game.update.start")!;
     expect(start.details.trigger).toBe("new CS2 build 20001300");
@@ -365,4 +372,3 @@ describe("server status", () => {
     expect((await call(c, "GET", `/api/servers/${s.id}`)).body.server.answering).toBeNull();
   });
 });
-

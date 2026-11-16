@@ -504,7 +504,13 @@ export interface AutoUpdateStatus {
 
 export interface GameState {
   cs2: { installed: boolean; patchVersion: string | null; buildId: string | null };
-  job: { state: "idle" | "running" | "succeeded" | "failed"; startedAt: string | null; finishedAt: string | null; trigger: string | null };
+  job: {
+    state: "idle" | "running" | "succeeded" | "failed" | "servers-down";
+    down?: { name: string; reason: string }[];
+    startedAt: string | null;
+    finishedAt: string | null;
+    trigger: string | null;
+  };
   lines: string[];
   next: number;
   auto: AutoUpdateStatus;

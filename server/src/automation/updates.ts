@@ -182,7 +182,8 @@ export class UpdateWatcher {
     this.save();
     // Runs in the background; the Game update page shows its log.
     void this.updater.start({ validate: false, warnSeconds }, null, reason).then(() => {
-      if (this.updater.job.state === "succeeded") this.state.pendingSince = null;
+      // The files are updated even if a server didn't come back (that's reported, not retried).
+      if (this.updater.job.state === "succeeded" || this.updater.job.filesUpdated) this.state.pendingSince = null;
       this.save();
     });
   }

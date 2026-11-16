@@ -23,8 +23,13 @@ export class FakeHost implements Host {
     private readonly envDir: string,
   ) {}
 
+  /** Tests: servers that start but keep crashing, and commands that fail ("umount b"). */
+  readonly crashLooping = new Set<string>();
+  readonly failing = new Set<string>();
+
   async cs2ctl(verb: Cs2ctlVerb, slug: string): Promise<string> {
     this.calls.push(`${verb} ${slug}`);
+    if (this.failing.has(`${verb} ${slug}`)) throw new Error(`cs2ctl ${verb} ${slug} failed (simulated)`);
     switch (verb) {
       case "start":
       case "restart":
@@ -199,6 +204,8 @@ export class FakeHost implements Host {
   }
 
   async serviceStatus(slug: string): Promise<ServiceStatus> {
+    // A crash loop: systemd restarts it all the time, so it's never up for long.
+    if (this.crashLooping.has(slug) && this.running.has(slug)) return { state: "activating", pid: null, since: new Date().toISOString() };
     const active = this.running.has(slug);
     return { state: active ? "active" : "inactive", pid: active ? 4242 : null, since: active ? (this.since.get(slug) ?? null) : null };
   }

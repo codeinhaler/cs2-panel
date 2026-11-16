@@ -51,6 +51,7 @@ async function setup(opts: { baseInstalled?: boolean } = {}) {
     fetchFn,
     logLevel: "silent",
     pluginCheckDelayMs: 0,
+    updateRecovery: { windowMs: 400, pollMs: 10, stableMs: 0 },
     rcon: async (o, cmd) => {
       rconLog.push(`${o.port}:${cmd}`);
       return `ok ${cmd}`;
@@ -179,7 +180,9 @@ describe("servers", () => {
     const cfg = app.services.servers.require(s.id);
     const env = readFileSync(path.join(dir, "env", "comp-1.env"), "utf8");
     expect(env).toContain("CS2_CPU=0");
-    expect(env).toContain("+ip 0.0.0.0 -port 27015 -usercon -maxplayers 10 +game_type 0 +game_mode 1 +exec cs2panel_generated.cfg +sv_setsteamaccount ABCDEF0123456789 +map de_mirage");
+    expect(env).toContain(
+      "+ip 0.0.0.0 -port 27015 -usercon -maxplayers 10 +game_type 0 +game_mode 1 +exec cs2panel_generated.cfg +sv_setsteamaccount ABCDEF0123456789 +map de_mirage",
+    );
     const generated = readFileSync(path.join(dir, "cs2/instances/comp-1/upper/game/csgo/cfg/cs2panel_generated.cfg"), "utf8");
     expect(generated).toContain('hostname "Comp #1"');
     expect(generated).toContain('sv_password "pw1"');
@@ -393,7 +396,9 @@ describe("config editor", () => {
     expect(save.body.file.revisions.map((r: { comment: string }) => r.comment)).toEqual(["MR15", "Original (stock)"]);
 
     // Saving identical content is a no-op.
-    expect((await call(c, "PUT", `/api/servers/${id}/configs/file`, { path: "cfg/gamemode_competitive.cfg", content: "mp_maxrounds 30\n" })).body.changed).toBe(false);
+    expect((await call(c, "PUT", `/api/servers/${id}/configs/file`, { path: "cfg/gamemode_competitive.cfg", content: "mp_maxrounds 30\n" })).body.changed).toBe(
+      false,
+    );
 
     // Revert to stock.
     expect((await call(c, "DELETE", `/api/servers/${id}/configs/file?path=cfg/gamemode_competitive.cfg`)).body.result).toBe("stock");
@@ -495,6 +500,47 @@ describe("game update", () => {
     expect(existsSync(path.join(dir, "cs2/instances/a/upper/game/csgo/gameinfo.gi"))).toBe(false);
     // Unmount happened before steam-update.
     expect(host.calls.indexOf("umount a")).toBeLessThan(host.calls.indexOf("steam-update"));
+  });
+
+  it("reports servers that start but then keep crashing: CS2 updated, servers down", async () => {
+    const c = await login();
+    const pid = await presetId(c, "casual");
+    const a = (await call(c, "POST", "/api/servers", { name: "A", presetId: pid, port: 27015 })).body.server;
+    const b = (await call(c, "POST", "/api/servers", { name: "B", presetId: pid, port: 27025 })).body.server;
+    await call(c, "POST", `/api/servers/${a.id}/start`, {});
+    await call(c, "POST", `/api/servers/${b.id}/start`, {});
+    host.crashLooping.add("b"); // the start command works, the game doesn't
+    await call(c, "POST", "/api/game/update", { warnSeconds: 0 });
+    const done = await waitForJob(c);
+    expect(done.job.state).toBe("servers-down");
+    const text = done.lines.join("\n");
+    expect(text).toContain("A: up");
+    expect(text).toContain("B: NOT UP: keeps crashing and restarting");
+    expect(text).toMatch(/CS2 was updated, but these servers didn't come back up: B/);
+    expect(text).not.toContain("Done.");
+    const finish = app.services.audit.list({ limit: 5 }).find((e: any) => e.action === "game.update.finish");
+    expect(finish?.details).toMatchObject({ result: "servers_down", filesUpdated: true });
+    host.crashLooping.delete("b");
+  });
+
+  it("doesn't update when a server can't be stopped, and starts the ones already stopped again", async () => {
+    const c = await login();
+    const pid = await presetId(c, "casual");
+    const a = (await call(c, "POST", "/api/servers", { name: "A", presetId: pid, port: 27015 })).body.server;
+    const b = (await call(c, "POST", "/api/servers", { name: "B", presetId: pid, port: 27025 })).body.server;
+    await call(c, "POST", `/api/servers/${a.id}/start`, {});
+    await call(c, "POST", `/api/servers/${b.id}/start`, {});
+    host.failing.add("umount b");
+    await call(c, "POST", "/api/game/update", { warnSeconds: 0 });
+    const done = await waitForJob(c);
+    expect(done.job.state).toBe("failed");
+    const text = done.lines.join("\n");
+    expect(text).toMatch(/Couldn't stop B .*so CS2 wasn't updated/);
+    expect(host.calls).not.toContain("steam-update");
+    // A was stopped before B failed: it's running again.
+    expect(host.running.has("a")).toBe(true);
+    expect(text).toContain("A: up");
+    host.failing.delete("umount b");
   });
 
   it("warns players over RCON before stopping", async () => {

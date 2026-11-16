@@ -195,7 +195,11 @@ function describe(e: AuditEntry): string {
       return `set automatic CS2 updates to "${p[str("policy")] ?? str("policy")}"`;
     }
     case "game.update.finish":
-      return d.result === "succeeded" ? "CS2 update finished" : `CS2 update failed: ${str("error")}`;
+      return d.result === "succeeded"
+        ? "CS2 update finished"
+        : d.result === "servers_down"
+          ? `CS2 updated, but these servers didn't come back up: ${str("down")}`
+          : `CS2 update failed: ${str("error")}`;
     default:
       return e.action;
   }

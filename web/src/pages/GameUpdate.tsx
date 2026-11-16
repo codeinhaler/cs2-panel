@@ -116,11 +116,33 @@ export function GameUpdatePage() {
           <div className="panel-head">
             <div>
               <h2>{running ? "Update in progress" : "Last update"}</h2>
-              {state.job.trigger && <p className="hint" style={{ margin: "4px 0 0" }}>Started automatically: {state.job.trigger}.</p>}
+              {state.job.trigger && (
+                <p className="hint" style={{ margin: "4px 0 0" }}>
+                  Started automatically: {state.job.trigger}.
+                </p>
+              )}
             </div>
-            {state.job.state === "succeeded" && <span className="state-pill" data-state="active">Finished <span title={fullTime(state.job.finishedAt)}>{timeAgo(state.job.finishedAt)}</span></span>}
-            {state.job.state === "failed" && <span className="state-pill" data-state="failed">Failed <span title={fullTime(state.job.finishedAt)}>{timeAgo(state.job.finishedAt)}</span></span>}
-            {running && <span className="state-pill" data-state="activating">Running</span>}
+            {state.job.state === "succeeded" && (
+              <span className="state-pill" data-state="active">
+                Finished <span title={fullTime(state.job.finishedAt)}>{timeAgo(state.job.finishedAt)}</span>
+              </span>
+            )}
+            {state.job.state === "failed" && (
+              <span className="state-pill" data-state="failed">
+                Failed <span title={fullTime(state.job.finishedAt)}>{timeAgo(state.job.finishedAt)}</span>
+              </span>
+            )}
+            {state.job.state === "servers-down" && (
+              <span className="state-pill" data-state="failed" title={(state.job.down ?? []).map((d) => `${d.name}: ${d.reason}`).join("\n")}>
+                CS2 updated, {(state.job.down ?? []).length} server{(state.job.down ?? []).length === 1 ? "" : "s"} down{" "}
+                <span title={fullTime(state.job.finishedAt)}>{timeAgo(state.job.finishedAt)}</span>
+              </span>
+            )}
+            {running && (
+              <span className="state-pill" data-state="activating">
+                Running
+              </span>
+            )}
           </div>
           <div className="log" ref={logBox} role="log" aria-live="polite">
             {lines.join("\n") || "Waiting for output…"}

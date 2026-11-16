@@ -70,6 +70,8 @@ export interface AppDeps {
   logLevel?: string;
   /** Seconds-long waits are skipped in tests. */
   pluginCheckDelayMs?: number;
+  /** Tests: shorter recovery checks after a CS2 update. */
+  updateRecovery?: { windowMs: number; pollMs: number; stableMs: number };
   /** Replaces the Steam server query the monitor uses (tests). */
   a2sQuery?: (port: number) => Promise<A2sInfo | null>;
   /** Replaces the waits before scheduled restarts (tests). */
@@ -202,6 +204,11 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     if (info.appliedPreset || info.modeChanged) await mapCycles.apply(s).catch(() => undefined);
   });
   if (deps.pluginCheckDelayMs !== undefined) updater.pluginCheckDelayMs = deps.pluginCheckDelayMs;
+  if (deps.updateRecovery) {
+    updater.recoveryWindowMs = deps.updateRecovery.windowMs;
+    updater.recoveryPollMs = deps.updateRecovery.pollMs;
+    updater.recoveryStableMs = deps.updateRecovery.stableMs;
+  }
 
   const mmPlayers = new MmPlayerStore(db);
   const isBanned = (steamId: string) => !!bans.activeBan(steamId);
