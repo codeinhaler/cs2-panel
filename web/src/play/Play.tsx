@@ -198,7 +198,7 @@ export function Play() {
               ))}
             </section>
           )}
-          <RecentMatches signedIn={!!me} />
+          {!me?.inLobby && <RecentMatches signedIn={!!me} />}
         </>
       )}
     </div>
@@ -367,7 +367,7 @@ function BoardHome({
           </section>
         )}
         {state.casual.servers.length > 0 && me && !me.inLobby && !myMatch && <CasualCard state={state} />}
-        <RecentMatches signedIn={!!me} />
+        {!me?.inLobby && <RecentMatches signedIn={!!me} />}
       </div>
     </div>
   );
