@@ -884,3 +884,9 @@
 .play-recent-score.lost {
   color: var(--ink-soft);
 }
+
+.board-dot-info {
+  border-style: dashed;
+  font-style: italic;
+  color: var(--ink-soft);
+}

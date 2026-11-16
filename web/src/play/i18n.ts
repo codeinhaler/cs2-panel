@@ -49,6 +49,8 @@ const DA: Record<string, string> = {
   "The Join button only works with the game running.": "Deltag-knappen virker kun, når spillet kører.",
   "Join a lobby": "Gå ind i en lobby",
   "Pick one in the table.": "Vælg en i tabellen.",
+  "Have CS2 open": "Hav CS2 åbent",
+  "Start the game before you press Join, or it won't connect.": "Start spillet, før du trykker Deltag, ellers forbinder det ikke.",
   "The Join button only works with the game running. Tick it when it's open.": "Deltag-knappen virker kun, når spillet kører. Sæt flueben, når det er åbent.",
   "Leave lobby": "Forlad lobby",
   "Open CS2: done": "Åbn CS2: klaret",

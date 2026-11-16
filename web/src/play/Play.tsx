@@ -243,29 +243,13 @@ function BoardHome({
         .then(setDiscord)
         .catch(() => undefined);
   }, [me]);
-  // A web page can't see whether CS2 runs, so the player ticks this one (remembered for this visit).
-  const [cs2Open, setCs2Open] = useState(() => {
-    try {
-      return sessionStorage.getItem("cs2mm-cs2-open") === "1";
-    } catch {
-      return false;
-    }
-  });
-  const toggleCs2 = () => {
-    const v = !cs2Open;
-    setCs2Open(v);
-    try {
-      sessionStorage.setItem("cs2mm-cs2-open", v ? "1" : "0");
-    } catch {
-      /* fine: just not remembered */
-    }
-  };
-  const steps: { done: boolean; title: string; text: string; optional?: boolean; toggle?: boolean }[] = [
+  const steps: { done: boolean; title: string; text: string; optional?: boolean; info?: boolean }[] = [
     { done: !!me, title: "Sign in with Steam", text: "Needed for matches, not for casual." },
     ...(discord?.available || !me
       ? [{ done: !!discord?.linked, title: "Link Discord", text: "We move you to your team's voice channel.", optional: true }]
       : []),
-    { done: cs2Open, title: "Open CS2", text: "The Join button only works with the game running. Tick it when it's open.", toggle: true },
+    // A web page can't see whether CS2 runs: a reminder, not a box to tick.
+    { done: false, title: "Have CS2 open", text: "Start the game before you press Join, or it won't connect.", info: true },
     { done: !!me && (me.inLobby || !!myMatch), title: "Join a lobby", text: "Pick one in the table." },
   ];
   return (
@@ -277,10 +261,10 @@ function BoardHome({
           <ul>
             {steps.map((s) => (
               <li key={s.title} className={s.done ? "done" : ""}>
-                {s.toggle ? (
-                  <button type="button" className="board-dot board-dot-btn" aria-pressed={s.done} aria-label={`${s.title}: done`} onClick={toggleCs2}>
-                    {s.done ? "✓" : ""}
-                  </button>
+                {s.info ? (
+                  <span className="board-dot board-dot-info" aria-hidden="true">
+                    i
+                  </span>
                 ) : (
                   <span className="board-dot" aria-hidden="true">
                     {s.done ? "✓" : ""}

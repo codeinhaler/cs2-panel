@@ -2092,3 +2092,54 @@ details.inline-form[open] > summary {
   background: var(--panel);
   box-shadow: 0 -4px 14px rgba(0, 0, 0, 0.08);
 }
+
+/* Help page: contents beside the text, stacked on narrow screens. */
+.help-layout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+}
+.help-toc {
+  flex: 1 1 200px;
+  max-width: 260px;
+  position: sticky;
+  top: 16px;
+}
+.help-toc ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.help-body {
+  flex: 999 1 520px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.help-body section {
+  scroll-margin-top: 16px;
+}
+.help-list {
+  margin: 8px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.help-list dt {
+  font-weight: 600;
+}
+.help-list dd {
+  margin: 2px 0 0;
+  color: var(--ink-soft, inherit);
+}
+@media (max-width: 760px) {
+  .help-toc {
+    position: static;
+    max-width: none;
+  }
+}
