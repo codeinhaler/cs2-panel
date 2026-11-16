@@ -932,6 +932,63 @@ describe("matchmaking site", () => {
     }
   });
 
+  it("keeps Workshop files a running match needs, and never empties an open lobby", async () => {
+    const owner = await adminCookie();
+    const id = await setupServer(owner);
+    const slug = (await admin(owner, "GET", "/api/servers")).body.servers[0].slug;
+    const upper = findDir(dir, "upper").find((d) => d.includes(slug))!;
+    const content = path.join(upper, "game", "bin", "linuxsteamrt64", "steamapps", "workshop", "content", "730");
+    mkdirSync(path.join(content, "111"), { recursive: true });
+    writeFileSync(path.join(content, "111", "map.vpk"), "x");
+    const modes = (competitive: string[], wingman: string[]) => ({
+      modes: {
+        competitive: { enabled: true, maps: competitive },
+        wingman: { enabled: true, maps: wingman },
+        duel: { enabled: false, maps: ["de_vertigo"] },
+      },
+    });
+
+    // The last map of an open lobby can't go: settings and files stay as they were.
+    await enable(owner, [id], modes(["de_mirage"], ["workshop:111"]));
+    let r = await admin(owner, "DELETE", "/api/matchmaking/workshop/111?mode=wingman");
+    expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/last map in the Wingman lobby/);
+    expect((await admin(owner, "GET", "/api/matchmaking")).body.settings.modes.wingman.maps).toEqual(["workshop:111"]);
+    expect(readdirSync(content)).toEqual(["111"]);
+
+    // A match in its map veto can still pick it: out of the pool, files kept.
+    await enable(owner, [id], modes(["de_mirage", "de_inferno", "workshop:111"], ["de_vertigo"]));
+    const cookies = await Promise.all(P.slice(0, 2).map((pid, i) => playerCookie(pid, `P${i}`)));
+    for (const c of cookies) await play(c, "POST", "/api/lobby/join", { mode: "competitive" });
+    await play(cookies[0]!, "POST", "/api/teams");
+    const draft = (await play(cookies[0]!, "GET", "/api/state")).body.drafts[0];
+    const { matchId } = (await play(cookies[0]!, "POST", `/api/teams/${draft.id}/start`)).body;
+    expect((await play(cookies[0]!, "GET", "/api/state")).body.matches[0].phase).toBe("veto");
+    r = await admin(owner, "DELETE", "/api/matchmaking/workshop/111?mode=competitive");
+    expect(r.body.deleted).toBe(0);
+    expect(r.body.keptBecause.join()).toMatch(/map veto/);
+    expect(readdirSync(content)).toEqual(["111"]);
+    expect((await admin(owner, "GET", "/api/matchmaking")).body.settings.modes.competitive.maps).toEqual(["de_mirage", "de_inferno"]);
+
+    // Once the veto picks it, the match plays it: still kept.
+    for (;;) {
+      const m = (await play(cookies[0]!, "GET", "/api/state")).body.matches.find((x: any) => x.id === matchId);
+      if (m.phase !== "veto") break;
+      const ban = m.remaining.find((x: string) => x !== "workshop:111");
+      await play(cookies[P.indexOf(m.turn === "a" ? m.captainA : m.captainB)]!, "POST", `/api/matches/${matchId}/ban`, { map: ban });
+    }
+    expect((await play(cookies[0]!, "GET", "/api/state")).body.matches[0].map).toBe("workshop:111");
+    r = await admin(owner, "DELETE", "/api/matchmaking/workshop/111?mode=competitive");
+    expect(r.body.keptBecause.join()).toMatch(/plays it/);
+    expect(readdirSync(content)).toEqual(["111"]);
+
+    // After the match, nothing uses it: deleted.
+    await admin(owner, "POST", `/api/matchmaking/matches/${matchId}/cancel`, {});
+    r = await admin(owner, "DELETE", "/api/matchmaking/workshop/111?mode=competitive");
+    expect(r.body).toEqual({ deleted: 1, keptBecause: [] });
+    expect(readdirSync(content)).toEqual([]);
+  });
+
   it("serves the page with the theme, title and uploaded images", async () => {
     const owner = await adminCookie();
     await enable(owner, [], { title: "Fredags <CS>", look: { theme: "purple", colors: { teamB: "#00ff00" } } });

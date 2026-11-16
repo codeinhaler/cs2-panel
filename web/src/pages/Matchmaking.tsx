@@ -413,6 +413,10 @@ export function MatchmakingPage() {
                   manage={manage}
                   names={names}
                   onChange={(v) => set("modes", { ...form.modes, [mode]: v })}
+                  onMapRemoved={(map) =>
+                    // On the latest form, so edits made meanwhile (unsaved too) stay.
+                    setForm((f) => (f ? { ...f, modes: { ...f.modes, [mode]: { ...f.modes[mode], maps: f.modes[mode].maps.filter((x) => x !== map) } } } : f))
+                  }
                   onTitle={(map, title) => setTitles((t) => ({ ...t, [map]: title }))}
                   servers={lobbyServers(mode)}
                 />
@@ -571,6 +575,7 @@ function LobbySettings({
   manage,
   names,
   onChange,
+  onMapRemoved,
   onTitle,
   servers,
 }: {
@@ -580,6 +585,8 @@ function LobbySettings({
   manage: boolean;
   names: Record<string, string>;
   onChange: (v: { enabled: boolean; maps: string[]; config: string; keepWeapons: boolean; serverIds: number[] }) => void;
+  /** After the panel removed a Workshop map (and maybe its files). */
+  onMapRemoved: (map: string) => void;
   onTitle: (map: string, title: string) => void;
   /** The server tick boxes for this lobby, built by the page (they need the live server states). */
   servers: React.ReactNode;
@@ -630,17 +637,18 @@ function LobbySettings({
                     onClick={(e) => {
                       e.preventDefault();
                       if (!window.confirm(`Remove ${mapLabel(m, names)} from ${text.label} and delete its downloaded files from the servers?`)) return;
-                      onChange({ ...value, maps: value.maps.filter((x) => x !== m) });
+                      // The form changes only once the panel has done it (a refused removal leaves everything as it was).
                       void api
                         .removeWorkshopMap(m.slice(9), mode)
-                        .then((r) =>
+                        .then((r) => {
+                          onMapRemoved(m);
                           toast(
                             r.keptBecause.length
                               ? `Removed from ${text.label}. The files stay on the servers because ${r.keptBecause.join(", ")} still uses it.`
                               : `Removed from ${text.label} and deleted from ${r.deleted} server${r.deleted === 1 ? "" : "s"}.`,
                             r.keptBecause.length ? "info" : undefined,
-                          ),
-                        )
+                          );
+                        })
                         .catch((err: Error) => toast(err.message, "warn"));
                     }}
                   >

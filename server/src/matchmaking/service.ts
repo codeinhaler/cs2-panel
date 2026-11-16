@@ -624,12 +624,26 @@ export class Matchmaking {
     if (!/^\d{3,20}$/.test(id)) throw badRequest("That's not a Workshop ID.");
     const map = `workshop:${id}`;
     const c = this.config();
+    // Same rule as saving the settings: an open lobby keeps at least one map.
+    if (c.modes[mode].enabled && c.modes[mode].maps.length > 0 && c.modes[mode].maps.every((m) => m === map)) {
+      throw badRequest(`This is the last map in the ${MODE_INFO[mode].label} lobby. Add another map or close the lobby first.`);
+    }
+    // Out of the pool first, synchronously: from here on no new match can pick it, so the checks below
+    // can't be overtaken by a match starting with it.
     const stored = this.d.settings.get<MatchmakingSettings | null>("matchmaking", null);
     if (stored?.modes?.[mode]) {
       stored.modes[mode].maps = stored.modes[mode].maps.filter((m) => m !== map);
       this.d.settings.set("matchmaking", stored);
     }
     const keptBecause: string[] = [];
+    // Matches already running keep their own copy of the pool: still banning with it, or playing it.
+    for (const m of this.matches) {
+      if (!isActive(m)) continue;
+      const serverName = this.d.servers.listRecords().find((x) => x.id === m.serverId)?.name ?? "a server";
+      if (m.map === map) keptBecause.push(`the match on ${serverName}, which plays it`);
+      else if ((m.phase === "veto" || m.phase === "side") && m.pool.includes(map) && !m.bans.some((b) => b.map === map))
+        keptBecause.push(`the match on ${serverName}, which can still pick it in the map veto`);
+    }
     for (const other of MODES) if (other !== mode && c.modes[other].maps.includes(map)) keptBecause.push(`the ${MODE_INFO[other].label} lobby`);
     const servers = this.d.db.prepare("SELECT id, slug, name FROM servers").all() as { id: number; slug: string; name: string }[];
     for (const s of servers) {
