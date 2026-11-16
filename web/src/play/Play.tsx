@@ -9,6 +9,8 @@ import {
   teamsLabel,
   type DiscordMe,
   type Draft,
+  type HistoryItem,
+  type ScoreRow,
   type LobbyPlayer,
   type Match,
   type Member,
@@ -196,6 +198,7 @@ export function Play() {
               ))}
             </section>
           )}
+          <RecentMatches signedIn={!!me} />
         </>
       )}
     </div>
@@ -364,6 +367,7 @@ function BoardHome({
           </section>
         )}
         {state.casual.servers.length > 0 && me && !me.inLobby && !myMatch && <CasualCard state={state} />}
+        <RecentMatches signedIn={!!me} />
       </div>
     </div>
   );
@@ -793,6 +797,122 @@ function LobbyRow({ p, me, captain }: { p: LobbyPlayer; me: boolean; captain?: b
   );
 }
 
+/** K / D / A / ADR per player, one table per team. Bots show as "BOT". */
+function Scoreboard({ rows, rounds, labelA, labelB }: { rows: ScoreRow[]; rounds: number; labelA: string; labelB: string }) {
+  const per = Math.max(1, rounds);
+  return (
+    <div className="play-scoreboard">
+      {(["a", "b"] as const).map((k) => {
+        const team = rows.filter((r) => r.team === k).sort((x, y) => y.kills - x.kills || x.deaths - y.deaths);
+        if (!team.length) return null;
+        return (
+          <table key={k} className="board-table play-score-table">
+            <caption>{k === "a" ? labelA : labelB}</caption>
+            <thead>
+              <tr>
+                <th>Player</th>
+                <th>K</th>
+                <th>D</th>
+                <th>A</th>
+                <th>K/D</th>
+                <th>ADR</th>
+              </tr>
+            </thead>
+            <tbody>
+              {team.map((r, i) => (
+                <tr key={`${r.steamId}-${i}`}>
+                  <td data-no-translate>{r.steamId === "BOT" ? `BOT ${r.name}` : r.name}</td>
+                  <td>{r.kills}</td>
+                  <td>{r.deaths}</td>
+                  <td>{r.assists}</td>
+                  <td>{(r.kills / Math.max(1, r.deaths)).toFixed(2)}</td>
+                  <td>{Math.round(r.damage / per)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Finished matches: the last 20 for everyone, or all of the signed-in player's own. */
+function RecentMatches({ signedIn }: { signedIn: boolean }) {
+  const [mine, setMine] = useState(false);
+  const [items, setItems] = useState<HistoryItem[] | null>(null);
+  const [open, setOpen] = useState<number | null>(null);
+  const [rows, setRows] = useState<Record<number, ScoreRow[]>>({});
+  useEffect(() => {
+    setItems(null);
+    void play
+      .history(mine && signedIn)
+      .then((r) => setItems(r.matches))
+      .catch(() => setItems([]));
+  }, [mine, signedIn]);
+  const toggle = (id: number) => {
+    setOpen(open === id ? null : id);
+    if (!rows[id])
+      void play
+        .scoreboard(id)
+        .then((r) => setRows((x) => ({ ...x, [id]: r.rows })))
+        .catch(() => setRows((x) => ({ ...x, [id]: [] })));
+  };
+  return (
+    <section className="panel play-recent">
+      <div className="board-lobbies-head" style={{ padding: 0, border: 0, marginBottom: 8 }}>
+        <h2>{mine ? "My matches" : "Recent matches"}</h2>
+        {signedIn && (
+          <div className="row-actions" role="tablist" aria-label="Which matches">
+            <button role="tab" aria-selected={!mine} className={`btn small ${!mine ? "primary" : ""}`} onClick={() => setMine(false)}>
+              Last 20
+            </button>
+            <button role="tab" aria-selected={mine} className={`btn small ${mine ? "primary" : ""}`} onClick={() => setMine(true)}>
+              My matches
+            </button>
+          </div>
+        )}
+      </div>
+      {items === null ? (
+        <p className="hint">Loading…</p>
+      ) : items.length === 0 ? (
+        <p className="hint">{mine ? "You haven't played a match here yet." : "No finished matches yet."}</p>
+      ) : (
+        <ul className="play-recent-list">
+          {items.map((h) => (
+            <li key={h.id}>
+              <div className="play-recent-row">
+                <span>
+                  <b>{h.modeLabel}</b> · {h.map ? mapName(h.map) : "?"}
+                  {h.status === "abandoned" && <span className="hint"> · Abandoned</span>}
+                  <br />
+                  <span className="hint">{h.endedAt ? new Date(h.endedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : ""}</span>
+                </span>
+                <span
+                  className={`play-recent-score ${h.mine && h.scoreA !== null && h.scoreB !== null ? ((h.mine === "a" ? h.scoreA > h.scoreB : h.scoreB > h.scoreA) ? "won" : h.scoreA === h.scoreB ? "" : "lost") : ""}`}
+                >
+                  {h.scoreA ?? "–"} : {h.scoreB ?? "–"}
+                </span>
+                <button className="btn small" aria-expanded={open === h.id} onClick={() => toggle(h.id)}>
+                  {open === h.id ? "Hide scoreboard" : "Scoreboard"}
+                </button>
+              </div>
+              {open === h.id &&
+                (rows[h.id] === undefined ? (
+                  <p className="hint">Loading…</p>
+                ) : rows[h.id]!.length === 0 ? (
+                  <p className="hint">No scoreboard for this match (it was played before scoreboards were recorded).</p>
+                ) : (
+                  <Scoreboard rows={rows[h.id]!} rounds={(h.scoreA ?? 0) + (h.scoreB ?? 0)} labelA="Team 1" labelB="Team 2" />
+                ))}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 /** What the bots do in a match, for everyone in it. */
 function botLine(m: Match): string {
   const b = m.bots!;
@@ -1104,6 +1224,12 @@ function MatchCard({ match: m, meId, skew, busy, act, mine }: { match: Match; me
         </div>
       )}
       {!ended && m.bots && <p className="hint">{botLine(m)}</p>}
+      {m.scoreboard && m.scoreboard.length > 0 && (
+        <details className="play-scoreboard-box" open={!!myTeam}>
+          <summary>Scoreboard</summary>
+          <Scoreboard rows={m.scoreboard} rounds={(m.score?.a ?? 0) + (m.score?.b ?? 0)} labelA={label("a")} labelB={label("b")} />
+        </details>
+      )}
 
       {myTeam && !ended && (
         <div className="row-actions">

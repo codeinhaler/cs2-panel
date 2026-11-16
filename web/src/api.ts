@@ -577,6 +577,16 @@ export interface MmTheme {
   colors: Record<MmColorKey, string> | null;
 }
 
+export interface MmScoreRow {
+  steamId: string;
+  name: string;
+  team: "a" | "b";
+  kills: number;
+  deaths: number;
+  assists: number;
+  damage: number;
+}
+
 export interface MmRating {
   value: number | null;
   badge?: string | null;
@@ -695,6 +705,7 @@ export const api = {
   shared: () => request<{ shared: SharedConfig; preview: { id: number; name: string; hostname: string; uses: boolean }[] }>("GET", "/api/shared"),
   saveShared: (c: SharedConfig) => request<{ shared: SharedConfig; liveOn: string[] }>("PUT", "/api/shared", c),
   matchmaking: () => request<MatchmakingInfo>("GET", "/api/matchmaking"),
+  mmScoreboard: (id: number) => request<{ rows: MmScoreRow[] }>("GET", `/api/matchmaking/matches/${id}/scoreboard`),
   removeWorkshopMap: (id: string, mode: string) =>
     request<{ deleted: number; keptBecause: string[] }>("DELETE", `/api/matchmaking/workshop/${encodeURIComponent(id)}?mode=${encodeURIComponent(mode)}`),
   saveMatchmaking: (settings: MatchmakingSettings, leetifyKey?: string | null) =>

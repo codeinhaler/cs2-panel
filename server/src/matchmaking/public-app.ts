@@ -255,6 +255,18 @@ export async function buildPublicApp(d: PublicDeps): Promise<FastifyInstance> {
     mm.setReady(requirePlayer(req), ready);
     return { ok: true };
   });
+  // Recent matches (the last 20, for everyone) or all of the signed-in player's own; and scoreboards.
+  app.get("/api/history", async (req) => {
+    const { mine } = z.object({ mine: z.string().optional() }).parse(req.query ?? {});
+    const viewer = req.mmPlayer ?? null;
+    if (mine && !viewer) throw new HttpError(401, "Sign in to see your matches.");
+    return { matches: mm.playerHistory(viewer, !!mine) };
+  });
+  app.get("/api/history/:id", async (req) => {
+    const { id } = z.object({ id: z.coerce.number().int().positive() }).parse(req.params);
+    return { rows: mm.scoreboard(id) };
+  });
+
   app.post("/api/lobby/team", async (req) => {
     const { team } = z.object({ team: z.enum(["a", "b"]).nullable() }).parse(req.body ?? {});
     mm.pickTeam(requirePlayer(req), team);

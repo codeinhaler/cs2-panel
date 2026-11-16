@@ -1402,6 +1402,12 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     return { settings, site: publicSite.status(), leetifyKeyHint: matchmaking.leetifyKeyHint() };
   });
 
+  app.get("/api/matchmaking/matches/:id/scoreboard", async (req) => {
+    requireUser(req);
+    const { id } = z.object({ id: z.coerce.number().int().positive() }).parse(req.params);
+    return { rows: matchmaking.scoreboard(id) };
+  });
+
   app.delete("/api/matchmaking/workshop/:id", async (req) => {
     const user = requirePerm(req, "server.manage");
     const { id } = z.object({ id: z.string() }).parse(req.params);

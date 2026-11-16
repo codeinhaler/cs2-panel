@@ -191,6 +191,19 @@ const DA: Record<string, string> = {
   Copy: "Kopiér",
   "Join any time · no sign-in": "Kom ind når som helst · intet login",
   "Offline right now": "Offline lige nu",
+  // Scoreboards and recent matches
+  Scoreboard: "Resultattavle",
+  "Hide scoreboard": "Skjul resultattavle",
+  Player: "Spiller",
+  "Recent matches": "Seneste kampe",
+  "My matches": "Mine kampe",
+  "Last 20": "Seneste 20",
+  "You haven't played a match here yet.": "Du har ikke spillet en kamp her endnu.",
+  "No finished matches yet.": "Ingen færdige kampe endnu.",
+  "· Abandoned": "· Opgivet",
+  "No scoreboard for this match (it was played before scoreboards were recorded).":
+    "Ingen resultattavle for denne kamp (den blev spillet, før resultattavler blev gemt).",
+  "Sign in to see your matches.": "Log ind for at se dine kampe.",
   // From the server
   "Captains are banning maps": "Kaptajnerne banner baner",
   "Getting the server ready": "Gør serveren klar",

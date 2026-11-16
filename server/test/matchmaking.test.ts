@@ -82,6 +82,9 @@ describe("parsers", () => {
     expect(parseMatchStatus(out)).toMatchObject({ active: true, matchId: "3", phase: "live", connected: 10, scoreA: 7, scoreB: 5 });
     expect(parseMatchStatus(`CS2PANEL_MATCH {"phase":"warmup","mapLoads":4,"map":"de_nuke"}`)).toMatchObject({ mapLoads: 4, map: "de_nuke" });
     expect(parseMatchStatus(`CS2PANEL_MATCH {"phase":"over","overSeconds":7.5}`)).toMatchObject({ phase: "over", overSeconds: 7.5 });
+    expect(
+      parseMatchStatus(`CS2PANEL_MATCH {"phase":"live","stats":[{"id":"0","name":"Bob","bot":true,"team":"b","k":3,"d":1,"a":2,"dmg":250}]}`).stats,
+    ).toEqual([{ steamId: "BOT", name: "Bob", team: "b", kills: 3, deaths: 1, assists: 2, damage: 250 }]);
     expect(() => parseMatchStatus("Unknown command")).toThrow(/bridge/);
   });
 
@@ -270,6 +273,10 @@ function findFile(root: string, name: string): string[] {
     else if (entry === name) out.push(p);
   }
   return out;
+}
+
+function cookieOfId(cookies: string[], steamId: string): string {
+  return cookies[P.indexOf(steamId)]!;
 }
 
 function findDir(root: string, name: string): string[] {
@@ -625,6 +632,46 @@ describe("matchmaking site", () => {
       } else return m;
     }
   }
+
+  it("keeps a scoreboard: live on the match card, saved when it ends, in recent matches and each player's own history", async () => {
+    const owner = await adminCookie();
+    await enable(owner, [await setupServer(owner)]);
+    const names = ["Alpha", "Bravo", "Charlie", "Delta", "Echo"];
+    const cookies = await Promise.all(P.map((id, i) => playerCookie(id, names[i]!)));
+    for (const c of cookies.slice(0, 2)) await play(c, "POST", "/api/lobby/join", { mode: "wingman" });
+    await play(cookies[0]!, "POST", "/api/teams");
+    const draft = (await play(cookies[0]!, "GET", "/api/state")).body.drafts[0];
+    const { matchId } = (await play(cookies[0]!, "POST", `/api/teams/${draft.id}/start`)).body;
+    const m = await toLive(cookies, P, matchId);
+    const aId = m.teamA.find((p: any) => p.steamId !== "BOT").steamId;
+    const bId = m.teamB.find((p: any) => p.steamId !== "BOT").steamId;
+    const stats = JSON.stringify([
+      { id: aId, name: "A", bot: false, team: "a", k: 20, d: 10, a: 3, dmg: 2600 },
+      { id: "0", name: "Kim", bot: true, team: "a", k: 2, d: 12, a: 1, dmg: 500 },
+      { id: bId, name: "B", bot: false, team: "b", k: 15, d: 14, a: 5, dmg: 2000 },
+    ]);
+    statusReply = `CS2PANEL_MATCH {"active":true,"phase":"live","connected":2,"scoreA":10,"scoreB":6,"stats":${stats}}`;
+    now += 10_000;
+    await app.services.matchmaking.tick();
+    let card = (await play(cookies[0]!, "GET", "/api/state")).body.matches[0];
+    expect(card.scoreboard).toHaveLength(3);
+    expect(card.scoreboard.find((r: any) => r.steamId === "BOT")).toMatchObject({ name: "Kim", kills: 2 });
+
+    statusReply = `CS2PANEL_MATCH {"active":true,"phase":"over","connected":2,"scoreA":13,"scoreB":7,"stats":${stats}}`;
+    now += 10_000;
+    await app.services.matchmaking.tick();
+    // Recent matches for everyone (signed out too), and the saved scoreboard.
+    const anon = (await play(null, "GET", "/api/history")).body;
+    expect(anon.matches[0]).toMatchObject({ id: matchId, mode: "wingman", scoreA: 13, scoreB: 7, mine: null });
+    const board = (await play(null, "GET", `/api/history/${matchId}`)).body;
+    expect(board.rows.map((r: any) => r.steamId).sort()).toEqual([aId, bId, "BOT"].sort());
+    // My matches: only when signed in; someone who didn't play has none.
+    expect((await play(cookieOfId(cookies, aId), "GET", "/api/history?mine=1")).body.matches[0]).toMatchObject({ id: matchId, mine: "a" });
+    expect((await play(cookies[4]!, "GET", "/api/history?mine=1")).body.matches).toEqual([]);
+    expect((await play(null, "GET", "/api/history?mine=1")).status).toBe(401);
+    // And in the panel.
+    expect((await admin(owner, "GET", `/api/matchmaking/matches/${matchId}/scoreboard`)).body.rows).toHaveLength(3);
+  });
 
   it("lets a late player take the bot's place", async () => {
     const owner = await adminCookie();

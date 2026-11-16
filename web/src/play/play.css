@@ -827,3 +827,60 @@
   padding: 0;
   min-width: 24px;
 }
+
+/* Scoreboards and recent matches. */
+.play-scoreboard {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+.play-score-table {
+  min-width: 0;
+}
+.play-score-table caption {
+  text-align: left;
+  font-weight: 700;
+  padding: 4px 8px;
+}
+.play-score-table td:not(:first-child),
+.play-score-table th:not(:first-child) {
+  text-align: right;
+}
+.play-scoreboard-box {
+  margin-top: 12px;
+}
+.play-scoreboard-box summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.play-recent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.play-recent-list li {
+  border-top: 1px solid var(--line-soft);
+  padding: 10px 0;
+}
+.play-recent-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+.play-recent-row > span:first-child {
+  flex: 1 1 220px;
+}
+.play-recent-score {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.play-recent-score.won {
+  color: var(--team-a);
+}
+.play-recent-score.lost {
+  color: var(--ink-soft);
+}

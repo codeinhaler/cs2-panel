@@ -280,6 +280,20 @@ const MIGRATIONS: string[] = [
   /* 15: Discord bot: a player's choice to be moved from any voice channel (when the admin allows it) */ `
   ALTER TABLE discord_users ADD COLUMN move_any INTEGER NOT NULL DEFAULT 1;
   `,
+  /* 16: matchmaking scoreboards (kills, deaths, assists, damage per player per match) */ `
+  CREATE TABLE mm_match_stats (
+    match_id  INTEGER NOT NULL REFERENCES mm_matches(id) ON DELETE CASCADE,
+    steam_id  TEXT NOT NULL,           -- "BOT" for bots
+    name      TEXT NOT NULL,
+    team      TEXT NOT NULL,           -- "a" or "b"
+    kills     INTEGER NOT NULL DEFAULT 0,
+    deaths    INTEGER NOT NULL DEFAULT 0,
+    assists   INTEGER NOT NULL DEFAULT 0,
+    damage    INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX mm_match_stats_match ON mm_match_stats(match_id);
+  CREATE INDEX mm_match_stats_player ON mm_match_stats(steam_id);
+  `,
 ];
 
 export function openDb(file: string): Db {

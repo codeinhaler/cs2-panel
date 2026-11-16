@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { DiscordBotPanel } from "./DiscordBot";
-import { api, type MatchmakingInfo, type MatchmakingSettings, type MmRating } from "../api";
+import { api, type MatchmakingInfo, type MatchmakingSettings, type MmRating, type MmScoreRow } from "../api";
 import { useAction, useApp, usePolling } from "../app-context";
 import { formatDateTime } from "../format";
 import { LookSettings } from "./MatchmakingLook";
@@ -887,7 +887,17 @@ function LiveSection({ info, moderate, refresh }: { info: MatchmakingInfo; moder
 
 function HistorySection({ info }: { info: MatchmakingInfo }) {
   const done = info.history.filter((h) => !["veto", "side", "starting", "live"].includes(h.status));
+  const [open, setOpen] = useState<number | null>(null);
+  const [boards, setBoards] = useState<Record<number, MmScoreRow[]>>({});
   if (done.length === 0) return null;
+  const toggle = (id: number) => {
+    setOpen(open === id ? null : id);
+    if (!boards[id])
+      void api
+        .mmScoreboard(id)
+        .then((r) => setBoards((b) => ({ ...b, [id]: r.rows })))
+        .catch(() => setBoards((b) => ({ ...b, [id]: [] })));
+  };
   const serverName = (id: number | null) => info.servers.find((s) => s.id === id)?.name ?? "—";
   return (
     <div className="panel">
@@ -900,25 +910,73 @@ function HistorySection({ info }: { info: MatchmakingInfo }) {
             <th>Teams</th>
             <th>Server</th>
             <th>Result</th>
+            <th />
           </tr>
         </thead>
         <tbody>
           {done.map((h) => (
-            <tr key={h.id}>
-              <td>{formatDateTime(utc(h.createdAt))}</td>
-              <td>
-                {h.map ? mapLabel(h.map, info.mapNames) : "—"}
-                <div className="hint">{MODE_TEXT[h.mode as keyof typeof MODE_TEXT]?.label ?? h.mode}</div>
-              </td>
-              <td>
-                {h.teamA.map((p) => p.name).join(", ")} <span className="hint">vs</span> {h.teamB.map((p) => p.name).join(", ")}
-              </td>
-              <td>{serverName(h.serverId)}</td>
-              <td>
-                {h.status === "over" && h.scoreA !== null ? `${h.scoreA}–${h.scoreB}` : (PHASE[h.status as keyof typeof PHASE] ?? h.status)}
-                {h.note && h.status !== "over" && <div className="hint">{h.note}</div>}
-              </td>
-            </tr>
+            <Fragment key={h.id}>
+              <tr>
+                <td>{formatDateTime(utc(h.createdAt))}</td>
+                <td>
+                  {h.map ? mapLabel(h.map, info.mapNames) : "—"}
+                  <div className="hint">{MODE_TEXT[h.mode as keyof typeof MODE_TEXT]?.label ?? h.mode}</div>
+                </td>
+                <td>
+                  {h.teamA.map((p) => p.name).join(", ")} <span className="hint">vs</span> {h.teamB.map((p) => p.name).join(", ")}
+                </td>
+                <td>{serverName(h.serverId)}</td>
+                <td>
+                  {h.status === "over" && h.scoreA !== null ? `${h.scoreA}–${h.scoreB}` : (PHASE[h.status as keyof typeof PHASE] ?? h.status)}
+                  {h.note && h.status !== "over" && <div className="hint">{h.note}</div>}
+                </td>
+                <td>
+                  {(h.status === "over" || h.status === "abandoned") && (
+                    <button type="button" className="btn small ghost" onClick={() => toggle(h.id)} aria-expanded={open === h.id}>
+                      {open === h.id ? "Hide" : "Scoreboard"}
+                    </button>
+                  )}
+                </td>
+              </tr>
+              {open === h.id && (
+                <tr>
+                  <td colSpan={6}>
+                    {!boards[h.id] ? (
+                      <span className="hint">Loading…</span>
+                    ) : boards[h.id]!.length === 0 ? (
+                      <span className="hint">No scoreboard for this match (played before scoreboards were recorded, or the bridge is older than 1.11.0).</span>
+                    ) : (
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th>Team</th>
+                            <th>Player</th>
+                            <th>K</th>
+                            <th>D</th>
+                            <th>A</th>
+                            <th>K/D</th>
+                            <th>ADR</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {boards[h.id]!.map((r, i) => (
+                            <tr key={i}>
+                              <td>{r.team === "a" ? "Team 1" : "Team 2"}</td>
+                              <td>{r.steamId === "BOT" ? `BOT ${r.name}` : r.name}</td>
+                              <td>{r.kills}</td>
+                              <td>{r.deaths}</td>
+                              <td>{r.assists}</td>
+                              <td>{(r.kills / Math.max(1, r.deaths)).toFixed(2)}</td>
+                              <td>{Math.round(r.damage / Math.max(1, (h.scoreA ?? 0) + (h.scoreB ?? 0)))}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </td>
+                </tr>
+              )}
+            </Fragment>
           ))}
         </tbody>
       </table>

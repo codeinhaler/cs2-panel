@@ -3,6 +3,30 @@
 export type RatingSource = "admin" | "leetify" | "self" | "none" | "bot";
 export type Mode = "competitive" | "wingman" | "duel" | "fixed5" | "fixed2";
 
+export interface ScoreRow {
+  steamId: string;
+  name: string;
+  team: TeamKey;
+  kills: number;
+  deaths: number;
+  assists: number;
+  damage: number;
+}
+
+export interface HistoryItem {
+  id: number;
+  mode: Mode;
+  modeLabel: string;
+  map: string | null;
+  scoreA: number | null;
+  scoreB: number | null;
+  status: string;
+  endedAt: string | null;
+  teamA: string[];
+  teamB: string[];
+  mine: TeamKey | null;
+}
+
 export interface Rating {
   value: number | null;
   /** "FACEIT 9 · 1,850" when FACEIT is the stronger rating: shown instead of the number. */
@@ -80,6 +104,7 @@ export interface Match extends Teams {
   joinInfo: { address: string; password: string; steamUrl: string; console: string } | null;
   lateJoins: { open: boolean; votes: { a: boolean; b: boolean } };
   bots: { team: TeamKey; on: boolean; votes: { a: boolean; b: boolean }; counts: { a: number; b: number } } | null;
+  scoreboard?: ScoreRow[] | null;
   discord: { channel: string; invite: string | null } | null;
   canJoin: { team: TeamKey | null; reason: string | null } | null;
 }
@@ -175,6 +200,8 @@ export const play = {
   ready: (ready: boolean) => request<{ ok: true }>("POST", "/lobby/ready", { ready }),
   setRating: (rating: number | null) => request<{ ok: true }>("PUT", "/me/rating", { rating }),
   makeTeams: () => request<{ ok: true }>("POST", "/teams", {}),
+  history: (mine: boolean) => request<{ matches: HistoryItem[] }>("GET", `/history${mine ? "?mine=1" : ""}`),
+  scoreboard: (id: number) => request<{ rows: ScoreRow[] }>("GET", `/history/${id}`),
   pickTeam: (team: TeamKey | null) => request<{ ok: true }>("POST", "/lobby/team", { team }),
   startFixed: () => request<{ matchId: number | null }>("POST", "/lobby/start", {}),
   reshuffle: (id: number) => request<{ ok: true }>("POST", `/teams/${id}/reshuffle`, {}),

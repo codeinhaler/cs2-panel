@@ -288,6 +288,8 @@ interface Match {
   lateJoinVotes: { a: boolean; b: boolean };
   /** Each captain's vote on the bot playing (when there is one). Left out only when both say no. */
   botVotes: { a: boolean; b: boolean };
+  /** Live scoreboard from the bridge (1.11.0+). */
+  stats?: ScoreRow[] | null;
 }
 
 /**
@@ -392,6 +394,8 @@ export interface MatchView extends TeamsView {
   join: { port: number; password: string } | null;
   /** The bot filling a short team: which team, whether it plays, and the captains' votes. */
   bots: { team: TeamKey; on: boolean; votes: { a: boolean; b: boolean }; counts: { a: number; b: number } } | null;
+  /** Live scoreboard while the match runs (bridge 1.11.0+). */
+  scoreboard: ScoreRow[] | null;
   /** The viewer's own team's Discord voice channel. */
   discord: { channel: string; invite: string | null } | null;
   /** Mid-match joins: open unless both captains voted no. */
@@ -465,6 +469,33 @@ export interface StateView {
   /** Servers set up for matches (in the pool, with the bridge), busy or not. */
   matchServers: number;
   now: number;
+}
+
+/** One line of a match scoreboard. Bots have steamId "BOT". */
+export interface ScoreRow {
+  steamId: string;
+  name: string;
+  team: TeamKey;
+  kills: number;
+  deaths: number;
+  assists: number;
+  damage: number;
+}
+
+/** A finished match in the history list. */
+export interface HistoryItem {
+  id: number;
+  mode: Mode;
+  modeLabel: string;
+  map: string | null;
+  scoreA: number | null;
+  scoreB: number | null;
+  status: string;
+  endedAt: string | null;
+  teamA: string[];
+  teamB: string[];
+  /** The viewer's team in it, when they played. */
+  mine: TeamKey | null;
 }
 
 export interface FixedView {
@@ -1556,7 +1587,7 @@ export class Matchmaking {
     m.polling = true;
     try {
       const s = this.d.servers.require(m.serverId);
-      let st: { phase?: string; connected?: number; scoreA?: number; scoreB?: number; overSeconds?: number };
+      let st: ReturnType<typeof parseMatchStatus>;
       try {
         st = parseMatchStatus(await this.exec(s, "cs2panel_match_status"));
         m.pollFailures = 0;
@@ -1569,6 +1600,7 @@ export class Matchmaking {
       m.bridgePhase = st.phase ?? null;
       m.connected = st.connected ?? 0;
       if (typeof st.scoreA === "number" && typeof st.scoreB === "number" && st.phase !== "warmup") m.score = { a: st.scoreA, b: st.scoreB };
+      if (st.stats && st.stats.length) m.stats = st.stats;
       if (m.connected > 0) m.lastConnectedAt = t;
 
       if (st.phase === "over") {
@@ -1797,6 +1829,74 @@ export class Matchmaking {
            ended_at = CASE WHEN ? THEN datetime('now') ELSE ended_at END WHERE id = ?`,
       )
       .run(m.phase, m.map, m.score?.a ?? null, m.score?.b ?? null, note, m.endedAt !== null ? 1 : 0, m.id);
+    // The scoreboard is kept once the match is over (or ended some other way).
+    if (m.stats?.length && (m.phase === "over" || m.endedAt !== null)) {
+      const del = this.d.db.prepare("DELETE FROM mm_match_stats WHERE match_id = ?");
+      const ins = this.d.db.prepare(
+        "INSERT INTO mm_match_stats (match_id, steam_id, name, team, kills, deaths, assists, damage) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      );
+      this.d.db.exec("BEGIN");
+      try {
+        del.run(m.id);
+        for (const r of m.stats) ins.run(m.id, r.steamId, r.name, r.team, r.kills, r.deaths, r.assists, r.damage);
+        this.d.db.exec("COMMIT");
+      } catch (e) {
+        this.d.db.exec("ROLLBACK");
+        throw e;
+      }
+    }
+  }
+
+  // ------------------------------------------------------------- history and scoreboards
+
+  /** The last finished matches for everyone, or every match the viewer played in (any time). */
+  playerHistory(viewer: string | null, mine: boolean): HistoryItem[] {
+    const rows = (
+      mine && viewer
+        ? this.d.db
+            .prepare(`SELECT * FROM mm_matches WHERE status IN ('over', 'abandoned') AND (team_a LIKE ? OR team_b LIKE ?) ORDER BY id DESC LIMIT 1000`)
+            .all(`%"steamId":"${viewer}"%`, `%"steamId":"${viewer}"%`)
+        : this.d.db.prepare("SELECT * FROM mm_matches WHERE status = 'over' ORDER BY id DESC LIMIT 20").all()
+    ) as {
+      id: number;
+      mode: string;
+      map: string | null;
+      team_a: string;
+      team_b: string;
+      score_a: number | null;
+      score_b: number | null;
+      status: string;
+      ended_at: string | null;
+    }[];
+    return rows.map((r) => {
+      const a = JSON.parse(r.team_a) as { steamId: string; name: string }[];
+      const b = JSON.parse(r.team_b) as { steamId: string; name: string }[];
+      const mode = (MODES as readonly string[]).includes(r.mode) ? (r.mode as Mode) : "competitive";
+      return {
+        id: r.id,
+        mode,
+        modeLabel: MODE_INFO[mode].label,
+        map: r.map,
+        scoreA: r.score_a,
+        scoreB: r.score_b,
+        status: r.status,
+        endedAt: r.ended_at ? `${r.ended_at.replace(" ", "T")}Z` : null,
+        teamA: a.map((p) => p.name),
+        teamB: b.map((p) => p.name),
+        mine: viewer ? (a.some((p) => p.steamId === viewer) ? "a" : b.some((p) => p.steamId === viewer) ? "b" : null) : null,
+      };
+    });
+  }
+
+  /** A match's scoreboard: saved when it ended, or live while it runs. */
+  scoreboard(matchId: number): ScoreRow[] {
+    const live = this.matches.find((x) => x.id === matchId && x.stats?.length);
+    if (live && isActive(live)) return live.stats!;
+    return this.d.db
+      .prepare(
+        "SELECT steam_id AS steamId, name, team, kills, deaths, assists, damage FROM mm_match_stats WHERE match_id = ? ORDER BY team, kills DESC, deaths",
+      )
+      .all(matchId) as unknown as ScoreRow[];
   }
 
   // ------------------------------------------------------------- match actions by players
@@ -1991,6 +2091,7 @@ export class Matchmaking {
     const channel = !myTeam ? "" : this.discordChannel(m, myTeam, viewer ?? undefined);
     return {
       ...this.teamsView(shown(m.teamA), shown(m.teamB)),
+      scoreboard: m.stats?.length ? m.stats : null,
       // Shown in every match but 1v1: bots can also fill in for players who disconnect.
       bots: m.mode !== "duel" ? { team: m.bot ?? "a", on: showBot, votes: { ...m.botVotes }, counts: { a: botCount(m.teamA), b: botCount(m.teamB) } } : null,
       discord: channel && isActive(m) ? { channel, invite: this.config().discord.invite || null } : null,
@@ -2177,6 +2278,8 @@ export function parseMatchStatus(output: string): {
   humans?: number;
   /** The server's current sv_password (bridge 1.8.0 and newer). */
   password?: string;
+  /** Scoreboard (bridge 1.11.0 and newer). */
+  stats?: ScoreRow[];
 } {
   const line = output.split(/\r?\n/).find((l) => l.includes(MATCH_MARKER));
   if (!line) throw new Error("The bridge didn't answer. Is it up to date?");
@@ -2194,6 +2297,17 @@ export function parseMatchStatus(output: string): {
     map: str(v.map),
     overSeconds: num(v.overSeconds),
     humans: num(v.humans),
+    stats: Array.isArray(v.stats)
+      ? (v.stats as Record<string, unknown>[]).map((r) => ({
+          steamId: r.bot ? BOT_ID : String(r.id ?? ""),
+          name: String(r.name ?? "").slice(0, 64),
+          team: r.team === "b" ? ("b" as const) : ("a" as const),
+          kills: num(r.k) ?? 0,
+          deaths: num(r.d) ?? 0,
+          assists: num(r.a) ?? 0,
+          damage: num(r.dmg) ?? 0,
+        }))
+      : undefined,
     password: str(v.password),
   };
 }

@@ -30,7 +30,7 @@ namespace Cs2PanelBridge;
 public class Cs2PanelBridge : BasePlugin
 {
     public override string ModuleName => "CS2 Panel Bridge";
-    public override string ModuleVersion => "1.10.0";
+    public override string ModuleVersion => "1.11.0";
     public override string ModuleAuthor => "cs2-panel";
     public override string ModuleDescription => "Enforces cs2-panel bans, locks matchmaking matches and reports players to the panel.";
 
@@ -109,6 +109,7 @@ public class Cs2PanelBridge : BasePlugin
         RegisterEventHandler<EventCsWinPanelMatch>(OnMatchOver);
         RegisterEventHandler<EventItemPurchase>(OnItemPurchase);
         RegisterEventHandler<EventPlayerDeath>(OnPlayerDeath);
+        RegisterEventHandler<EventPlayerHurt>(OnPlayerHurt);
         RegisterEventHandler<EventPlayerSpawn>(OnPlayerSpawn);
         RegisterEventHandler<EventPlayerDisconnect>(OnPlayerDisconnect);
         RegisterEventHandler<EventRoundStart>((_, _) => { _roundOver = false; return HookResult.Continue; });
@@ -211,7 +212,8 @@ public class Cs2PanelBridge : BasePlugin
         var status = new MatchStatus(_match != null, _match?.MatchId ?? "", phase, MatchPlayersOnline().Count(), _matchPlayers.Count, scoreA, scoreB, _mapLoads, Server.MapName, _matchOver ? Math.Round(Server.CurrentTime - _matchOverAt, 1) : 0,
             // For the panel's check after a match: is everyone gone, and is the server's own password back?
             Utilities.GetPlayers().Count(p => p is { IsValid: true, IsBot: false, IsHLTV: false } && (int)p.Connected == 0), // 0 = fully connected
-            ConVar.Find("sv_password")?.StringValue ?? "");
+            ConVar.Find("sv_password")?.StringValue ?? "",
+            _match != null && _statsMatch == _match.MatchId ? _stats.Values.ToList() : new List<PlayerStats>());
         command.ReplyToCommand(MatchMarker + JsonSerializer.Serialize(status, Json));
     }
 
@@ -385,7 +387,49 @@ public class Cs2PanelBridge : BasePlugin
     {
         var player = @event.Userid;
         if (KeepWeapons && player is { IsValid: true, IsBot: false }) _died.Add(player.SteamID);
+        // Scoreboard: only once the match is live (warmup doesn't count).
+        if (_match != null && !_matchOver && !IsWarmup())
+        {
+            var victim = StatsFor(player);
+            if (victim != null) victim.Deaths++;
+            var attacker = @event.Attacker;
+            if (attacker is { IsValid: true } && attacker != player && player is { IsValid: true } && attacker.TeamNum != player.TeamNum && StatsFor(attacker) is { } k) k.Kills++;
+            var assister = @event.Assister;
+            if (assister is { IsValid: true } && player is { IsValid: true } && assister.TeamNum != player.TeamNum && StatsFor(assister) is { } a) a.Assists++;
+        }
         return HookResult.Continue;
+    }
+
+    private HookResult OnPlayerHurt(EventPlayerHurt @event, GameEventInfo info)
+    {
+        if (_match == null || _matchOver || IsWarmup()) return HookResult.Continue;
+        var victim = @event.Userid;
+        var attacker = @event.Attacker;
+        if (attacker is { IsValid: true } && victim is { IsValid: true } && attacker != victim && attacker.TeamNum != victim.TeamNum && StatsFor(attacker) is { } s)
+            s.Damage += Math.Clamp(@event.DmgHealth, 0, 100);
+        return HookResult.Continue;
+    }
+
+    /// <summary>Kills, deaths, assists and damage per player in the current match (bots by name).</summary>
+    private readonly Dictionary<string, PlayerStats> _stats = new();
+    private string? _statsMatch;
+
+    private PlayerStats? StatsFor(CCSPlayerController? p)
+    {
+        if (_match == null || p is not { IsValid: true } || p.IsHLTV) return null;
+        if (_statsMatch != _match.MatchId)
+        {
+            _stats.Clear();
+            _statsMatch = _match.MatchId;
+        }
+        var key = p.IsBot ? "bot:" + p.PlayerName : p.SteamID.ToString();
+        if (!_stats.TryGetValue(key, out var s))
+        {
+            var group = !p.IsBot && _matchPlayers.TryGetValue(p.SteamID, out var mp) ? mp.Group : (CsTeam)p.TeamNum == SideOf("a") ? "a" : "b";
+            s = new PlayerStats { Id = p.IsBot ? "BOT" : p.SteamID.ToString(), Name = p.PlayerName, Bot = p.IsBot, Team = group };
+            _stats[key] = s;
+        }
+        return s;
     }
 
     private HookResult OnPlayerSpawn(EventPlayerSpawn @event, GameEventInfo info)
@@ -808,7 +852,20 @@ public record MatchStatus(
     [property: JsonPropertyName("map")] string Map,
     [property: JsonPropertyName("overSeconds")] double OverSeconds,
     [property: JsonPropertyName("humans")] int Humans,
-    [property: JsonPropertyName("password")] string Password);
+    [property: JsonPropertyName("password")] string Password,
+    [property: JsonPropertyName("stats")] List<PlayerStats> Stats);
+
+public class PlayerStats
+{
+    [JsonPropertyName("id")] public string Id { get; set; } = "";
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("bot")] public bool Bot { get; set; }
+    [JsonPropertyName("team")] public string Team { get; set; } = "a";
+    [JsonPropertyName("k")] public int Kills { get; set; }
+    [JsonPropertyName("d")] public int Deaths { get; set; }
+    [JsonPropertyName("a")] public int Assists { get; set; }
+    [JsonPropertyName("dmg")] public int Damage { get; set; }
+}
 
 public class MatchFile
 {
