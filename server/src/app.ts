@@ -145,6 +145,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const pluginSources = new PluginSources(path.join(config.dataDir, "plugin-cache"), fetchFn, Date.now, config.bridgeDir);
   const plugins = new PluginService(db, pluginSources, servers, files, audit, gate, rcon, path.join(config.dataDir, "tmp"), config.mysql);
   updater.afterStart = (started) => plugins.healthLines(started);
+  if (deps.a2sQuery) updater.query = deps.a2sQuery;
   const players = new PlayerService(db, servers, plugins, files, host, rcon, audit);
   const execConfigs = new ExecConfigService(db, configs, audit);
   const shared = new SharedConfigService(settings, servers, configs, files, host, rcon, audit);

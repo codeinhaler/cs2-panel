@@ -176,6 +176,7 @@ beforeEach(async () => {
     fetchFn: fakeFetch,
     logLevel: "silent",
     pluginCheckDelayMs: 0,
+    a2sQuery: async () => ({ name: "t", map: "de_dust2", players: 0, maxPlayers: 10, bots: 0, version: "1" }),
     updateRecovery: { windowMs: 400, pollMs: 10, stableMs: 0 },
     rcon: async (_o, cmd) => {
       rconCalls.push(cmd);

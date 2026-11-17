@@ -16,6 +16,9 @@ let dir: string;
 let app: App;
 let host: FakeHost;
 let rconLog: string[];
+/** Updater tests: game servers that never answer a query, or only after N tries. */
+const silentPorts = new Set<number>();
+const answerAfter = new Map<number, number>();
 
 const profileXml = (id: string, name: string) =>
   `<profile><steamID64>${id}</steamID64><steamID><![CDATA[${name}]]></steamID><avatarMedium>https://a/${id}.jpg</avatarMedium></profile>`;
@@ -52,6 +55,16 @@ async function setup(opts: { baseInstalled?: boolean } = {}) {
     logLevel: "silent",
     pluginCheckDelayMs: 0,
     updateRecovery: { windowMs: 400, pollMs: 10, stableMs: 0 },
+    // The game answers unless a test says otherwise (never, or only after a few tries).
+    a2sQuery: async (port) => {
+      if (silentPorts.has(port)) return null;
+      const wait = answerAfter.get(port) ?? 0;
+      if (wait > 0) {
+        answerAfter.set(port, wait - 1);
+        return null;
+      }
+      return { name: "test", map: "de_dust2", players: 0, maxPlayers: 10, bots: 0, version: "1" };
+    },
     rcon: async (o, cmd) => {
       rconLog.push(`${o.port}:${cmd}`);
       return `ok ${cmd}`;
@@ -521,6 +534,29 @@ describe("game update", () => {
     const finish = app.services.audit.list({ limit: 5 }).find((e: any) => e.action === "game.update.finish");
     expect(finish?.details).toMatchObject({ result: "servers_down", filesUpdated: true });
     host.crashLooping.delete("b");
+  });
+
+  it("reports a server that stays running but whose game never answers; waits for one that answers late", async () => {
+    const c = await login();
+    const pid = await presetId(c, "casual");
+    const a = (await call(c, "POST", "/api/servers", { name: "A", presetId: pid, port: 27015 })).body.server;
+    const b = (await call(c, "POST", "/api/servers", { name: "B", presetId: pid, port: 27025 })).body.server;
+    await call(c, "POST", `/api/servers/${a.id}/start`, {});
+    await call(c, "POST", `/api/servers/${b.id}/start`, {});
+    answerAfter.set(27015, 3); // slow to load, then fine
+    silentPorts.add(27025); // systemd says active, the game is stuck
+    try {
+      await call(c, "POST", "/api/game/update", { warnSeconds: 0 });
+      const done = await waitForJob(c);
+      expect(done.job.state).toBe("servers-down");
+      const text = done.lines.join("\n");
+      expect(text).toContain("A: up (de_dust2)");
+      expect(text).toContain("B: NOT UP: is running, but the game never answered (stuck loading?)");
+      expect(done.job.filesUpdated).toBe(true);
+    } finally {
+      silentPorts.delete(27025);
+      answerAfter.delete(27015);
+    }
   });
 
   it("doesn't update when a server can't be stopped, and starts the ones already stopped again", async () => {

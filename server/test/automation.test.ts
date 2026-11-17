@@ -81,7 +81,7 @@ beforeEach(async () => {
     pluginCheckDelayMs: 0,
     updateRecovery: { windowMs: 400, pollMs: 10, stableMs: 0 },
     automationSleep: async () => undefined,
-    a2sQuery: async () => null,
+    a2sQuery: async () => ({ name: "t", map: "de_dust2", players: 0, maxPlayers: 10, bots: 0, version: "1" }),
     fetchFn: (async (url: string | URL | Request, init?: RequestInit) =>
       (await fakeSteamWorkshop(url, init)) ?? new Response("", { status: 404 })) as typeof fetch,
     rcon: async (_o, cmd) => {

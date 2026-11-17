@@ -1,4 +1,5 @@
 import type { AuditLog } from "../audit.js";
+import { queryInfo, type A2sInfo } from "./a2s.js";
 import { conflict } from "../errors.js";
 import type { Host } from "../host/host.js";
 import type { InstanceFiles } from "../servers/instance-files.js";
@@ -48,6 +49,8 @@ export class GameUpdater {
   recoveryWindowMs = 120_000;
   recoveryPollMs = 5_000;
   recoveryStableMs = 20_000;
+  /** Asks the game itself (Steam server query): a server only counts as back when the game answers. */
+  query: (port: number) => Promise<A2sInfo | null> = (port) => queryInfo(port);
 
   constructor(
     private readonly host: Host,
@@ -229,10 +232,14 @@ export class GameUpdater {
     }
     if (!started.length) return down;
 
-    this.log(`Checking that the servers stay up (up to ${Math.round(this.recoveryWindowMs / 1000)} seconds)…`);
+    this.log(`Checking that the servers stay up and answer (up to ${Math.round(this.recoveryWindowMs / 1000)} seconds)…`);
+    // A server is back when the same systemd run has stayed up a while (no restart in between) AND the
+    // game answers a server query. A crash loop keeps getting new start times; a hung game never answers.
     const deadline = Date.now() + this.recoveryWindowMs;
     const seen = new Map<string, string>();
     const last = new Map<string, string>();
+    const restarts = new Map<string, number>();
+    const stableNoAnswer = new Set<string>();
     const healthy = new Set<string>();
     for (;;) {
       for (const s of started) {
@@ -240,12 +247,25 @@ export class GameUpdater {
         const st = await this.host.serviceStatus(s.slug);
         last.set(s.slug, st.state);
         if (st.state === "active" && st.since) {
+          const prev = seen.get(s.slug);
+          if (prev !== undefined && prev !== st.since) restarts.set(s.slug, (restarts.get(s.slug) ?? 0) + 1);
           const stableFor = Date.now() - Date.parse(st.since);
-          if (seen.get(s.slug) === st.since && stableFor >= this.recoveryStableMs) {
-            healthy.add(s.slug);
-            this.log(`  ${s.name}: up`);
-          } else seen.set(s.slug, st.since);
-        } else seen.delete(s.slug);
+          if (prev === st.since && stableFor >= this.recoveryStableMs) {
+            const info = await this.query(s.port).catch(() => null);
+            // Still the same run after the query? Then the answer came from it.
+            const again = await this.host.serviceStatus(s.slug);
+            if (info && again.state === "active" && again.since === st.since) {
+              healthy.add(s.slug);
+              stableNoAnswer.delete(s.slug);
+              this.log(`  ${s.name}: up (${info.map})`);
+            } else if (!info) stableNoAnswer.add(s.slug);
+          }
+          seen.set(s.slug, st.since);
+        } else {
+          if (seen.has(s.slug)) restarts.set(s.slug, (restarts.get(s.slug) ?? 0) + 1);
+          seen.delete(s.slug);
+          stableNoAnswer.delete(s.slug);
+        }
       }
       if (healthy.size === started.length || Date.now() >= deadline) break;
       await this.sleep(this.recoveryPollMs);
@@ -256,9 +276,13 @@ export class GameUpdater {
       const reason =
         state === "failed"
           ? "crashed, and systemd gave up restarting it"
-          : state === "activating" || state === "active"
-            ? "keeps crashing and restarting"
-            : `is ${state ?? "not running"}`;
+          : stableNoAnswer.has(s.slug)
+            ? "is running, but the game never answered (stuck loading?)"
+            : state === "activating" || (restarts.get(s.slug) ?? 0) > 0
+              ? "keeps crashing and restarting"
+              : state === "active"
+                ? "is running, but the game never answered (stuck loading?)"
+                : `is ${state ?? "not running"}`;
       this.log(`  ${s.name}: NOT UP: ${reason}`);
       down.push({ name: s.name, reason });
     }
