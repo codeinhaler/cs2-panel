@@ -989,6 +989,55 @@ describe("matchmaking site", () => {
     expect(readdirSync(content)).toEqual([]);
   });
 
+  it("a match being created while a Workshop map is removed can't offer that map", async () => {
+    const owner = await adminCookie();
+    const id = await setupServer(owner);
+    const slug = (await admin(owner, "GET", "/api/servers")).body.servers[0].slug;
+    const upper = findDir(dir, "upper").find((d) => d.includes(slug))!;
+    const content = path.join(upper, "game", "bin", "linuxsteamrt64", "steamapps", "workshop", "content", "730");
+    mkdirSync(path.join(content, "111"), { recursive: true });
+    writeFileSync(path.join(content, "111", "map.vpk"), "x");
+    await enable(owner, [id], {
+      modes: {
+        competitive: { enabled: true, maps: ["de_mirage", "de_inferno", "workshop:111"] },
+        wingman: { enabled: true, maps: ["de_vertigo"] },
+        duel: { enabled: false, maps: ["de_vertigo"] },
+      },
+    });
+    const cookies = await Promise.all(P.slice(0, 2).map((pid, i) => playerCookie(pid, `P${i}`)));
+    for (const c of cookies) await play(c, "POST", "/api/lobby/join", { mode: "competitive" });
+    await play(cookies[0]!, "POST", "/api/teams");
+    const draft = (await play(cookies[0]!, "GET", "/api/state")).body.drafts[0];
+
+    // Hold match creation while it looks for a free server.
+    const mm = app.services.matchmaking as unknown as { freeServers: (mode: string) => Promise<unknown[]> };
+    const orig = mm.freeServers.bind(mm);
+    let release!: () => void;
+    let entered!: () => void;
+    const inside = new Promise<void>((r) => (entered = r));
+    const gate = new Promise<void>((r) => (release = r));
+    mm.freeServers = async (mode) => {
+      entered();
+      await gate;
+      return orig(mode);
+    };
+    try {
+      const starting = play(cookies[0]!, "POST", `/api/teams/${draft.id}/start`);
+      await inside;
+      // Nothing uses the map yet (the match isn't registered): removed, files deleted.
+      const r = await admin(owner, "DELETE", "/api/matchmaking/workshop/111?mode=competitive");
+      expect(r.body).toEqual({ deleted: 1, keptBecause: [] });
+      release();
+      const res = await starting;
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      const m = (await play(cookies[0]!, "GET", "/api/state")).body.matches[0];
+      expect(m.remaining).not.toContain("workshop:111");
+      expect(m.remaining.sort()).toEqual(["de_inferno", "de_mirage"]);
+    } finally {
+      mm.freeServers = orig;
+    }
+  });
+
   it("serves the page with the theme, title and uploaded images", async () => {
     const owner = await adminCookie();
     await enable(owner, [], { title: "Fredags <CS>", look: { theme: "purple", colors: { teamB: "#00ff00" } } });

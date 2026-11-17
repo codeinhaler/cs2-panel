@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { AuditLog } from "../audit.js";
 import type { Db } from "../db.js";
 import type { SecretBox } from "../crypto.js";
-import { badRequest, forbidden, notFound } from "../errors.js";
+import { badRequest, conflict, forbidden, notFound } from "../errors.js";
 import type { Host } from "../host/host.js";
 import type { RconExec } from "../game/rcon.js";
 import { gameModeLine } from "../servers/commands.js";
@@ -620,6 +620,9 @@ export class Matchmaking {
    * Takes a Workshop map out of a lobby's pool and deletes its downloaded files from every server,
    * unless something still uses it: another lobby, a casual map cycle or a server's own map.
    */
+  /** Workshop maps whose files are being deleted: no new match or settings save may use them meanwhile. */
+  private removingMaps = new Set<string>();
+
   async removeWorkshopMap(id: string, mode: Mode, actorId: number): Promise<{ deleted: number; keptBecause: string[] }> {
     if (!/^\d{3,20}$/.test(id)) throw badRequest("That's not a Workshop ID.");
     const map = `workshop:${id}`;
@@ -653,20 +656,25 @@ export class Matchmaking {
       if (row?.map_cycle && row.map_cycle.includes(`"${map}"`)) keptBecause.push(`${s.name}'s map cycle`);
     }
     let deleted = 0;
-    if (!keptBecause.length) {
-      for (const s of servers) {
-        for (const base of [this.d.files.upperDir(s.slug), this.d.files.mergedDir(s.slug)]) {
-          const dir = path.join(base, "game", "bin", "linuxsteamrt64", "steamapps", "workshop", "content", "730", id);
-          try {
-            await fs.access(dir);
-            await fs.rm(dir, { recursive: true, force: true });
-            deleted++;
-            break;
-          } catch {
-            /* not downloaded here */
+    if (!keptBecause.length) this.removingMaps.add(map);
+    try {
+      if (!keptBecause.length) {
+        for (const s of servers) {
+          for (const base of [this.d.files.upperDir(s.slug), this.d.files.mergedDir(s.slug)]) {
+            const dir = path.join(base, "game", "bin", "linuxsteamrt64", "steamapps", "workshop", "content", "730", id);
+            try {
+              await fs.access(dir);
+              await fs.rm(dir, { recursive: true, force: true });
+              deleted++;
+              break;
+            } catch {
+              /* not downloaded here */
+            }
           }
         }
       }
+    } finally {
+      this.removingMaps.delete(map);
     }
     this.d.audit.record(actorId, "matchmaking.workshop.remove", null, {
       map: id,
@@ -679,6 +687,11 @@ export class Matchmaking {
 
   async saveConfig(raw: unknown, leetifyKey: string | null | undefined, actorId: number): Promise<MatchmakingSettings> {
     const next = MatchmakingSettingsSchema.parse(raw);
+    // A page saved with a map that's being removed right now (its files are being deleted) would put it back.
+    for (const m of MODES) {
+      const busy = next.modes[m].maps.find((x) => this.removingMaps.has(x));
+      if (busy) throw conflict(`${busy} is being removed from the servers right now. Reload the page and save again.`);
+    }
     const known = new Set(this.d.servers.listRecords().map((s) => s.id));
     next.casual.serverIds = [...new Set(next.casual.serverIds)].filter((id) => known.has(id));
     // Each lobby's servers; a casual server is never used for matches. All of them together are the match servers.
@@ -1335,12 +1348,18 @@ export class Matchmaking {
     );
     const server = candidates.find((x) => stillFree.has(x.id));
     if (!server) throw badRequest("Every matchmaking server is busy. Wait for a match to finish.");
+    // The lobby as it is now, not as it was before the wait above: a map removed meanwhile (and its files
+    // being deleted) must not be offered. From here to registering the match nothing waits, so a removal
+    // either happens before (and isn't in this pool) or after (and sees this match).
+    const now = this.config();
+    if (!now.enabled || !now.modes[mode].enabled) throw badRequest(`The ${MODE_INFO[mode].label} lobby was closed. Try again later.`);
+    const pool = now.modes[mode].maps.filter((m) => !this.removingMaps.has(m));
+    if (!pool.length) throw badRequest(`The ${MODE_INFO[mode].label} lobby has no maps right now. Ask the organiser.`);
     claim();
 
     // The best-rated person on each team is captain; never a bot.
     const captain = (team: Member[]) => team.filter((p) => p.steamId !== BOT_ID).sort((x, y) => y.effective - x.effective)[0]!.steamId;
     const t = this.now();
-    const pool = c.modes[mode].maps.slice();
     const bot = botTeamOf({ teamA, teamB });
 
     const row = this.d.db
