@@ -112,7 +112,7 @@ const SECTIONS: Section[] = [
       },
       {
         term: "Result",
-        text: "Finished: CS2 is updated and every server that was running is back up and answering (the game replies to a server query, not just "running" in systemd). CS2 updated, N servers down: the files are updated but a server didn't come back (hover to see why; usually a plugin such as CounterStrikeSharp needs an update for the new CS2 version: update it on the server's Plugins tab, then start the server). Failed: SteamCMD failed, or a server couldn't be stopped (then nothing was updated and the stopped servers are started again).",
+        text: "Finished: CS2 is updated and every server that was running is back up and answering (the game replies to a server query, not just running in systemd). CS2 updated, N servers down: the files are updated but a server didn't come back (hover to see why; usually a plugin such as CounterStrikeSharp needs an update for the new CS2 version: update it on the server's Plugins tab, then start the server). Failed: SteamCMD failed, or a server couldn't be stopped (then nothing was updated and the stopped servers are started again).",
       },
       {
         term: "After a big CS2 update",
