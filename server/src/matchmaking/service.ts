@@ -622,6 +622,9 @@ export class Matchmaking {
    */
   /** Workshop maps whose files are being deleted: no new match or settings save may use them meanwhile. */
   private removingMaps = new Set<string>();
+  /** Counts removals; per map, the count when it was last removed (so a save that started earlier can tell). */
+  private removalSeq = 0;
+  private removedSeq = new Map<string, number>();
 
   async removeWorkshopMap(id: string, mode: Mode, actorId: number): Promise<{ deleted: number; keptBecause: string[] }> {
     if (!/^\d{3,20}$/.test(id)) throw badRequest("That's not a Workshop ID.");
@@ -631,6 +634,7 @@ export class Matchmaking {
     if (c.modes[mode].enabled && c.modes[mode].maps.length > 0 && c.modes[mode].maps.every((m) => m === map)) {
       throw badRequest(`This is the last map in the ${MODE_INFO[mode].label} lobby. Add another map or close the lobby first.`);
     }
+    this.removedSeq.set(map, ++this.removalSeq);
     // Out of the pool first, synchronously: from here on no new match can pick it, so the checks below
     // can't be overtaken by a match starting with it.
     const stored = this.d.settings.get<MatchmakingSettings | null>("matchmaking", null);
@@ -687,11 +691,16 @@ export class Matchmaking {
 
   async saveConfig(raw: unknown, leetifyKey: string | null | undefined, actorId: number): Promise<MatchmakingSettings> {
     const next = MatchmakingSettingsSchema.parse(raw);
-    // A page saved with a map that's being removed right now (its files are being deleted) would put it back.
-    for (const m of MODES) {
-      const busy = next.modes[m].maps.find((x) => this.removingMaps.has(x));
-      if (busy) throw conflict(`${busy} is being removed from the servers right now. Reload the page and save again.`);
-    }
+    // A page saved with a map that's being removed (its files are being deleted), or that was removed while
+    // this save waited for Steam, would put it back. Checked now (quick answer) and again right before writing.
+    const startedAt = this.removalSeq;
+    const refuseRemoved = () => {
+      for (const m of MODES) {
+        const busy = next.modes[m].maps.find((x) => this.removingMaps.has(x) || (this.removedSeq.get(x) ?? 0) > startedAt);
+        if (busy) throw conflict(`${busy} is being removed from the servers right now. Reload the page and save again.`);
+      }
+    };
+    refuseRemoved();
     const known = new Set(this.d.servers.listRecords().map((s) => s.id));
     next.casual.serverIds = [...new Set(next.casual.serverIds)].filter((id) => known.has(id));
     // Each lobby's servers; a casual server is never used for matches. All of them together are the match servers.
@@ -718,6 +727,8 @@ export class Matchmaking {
       if (workshopBlocks(info.status)) throw badRequest(`Workshop map ${spec!.id}: ${info.message}`);
       if (info.title) this.mapTitles.set(`workshop:${spec!.id}`, info.title);
     }
+    // No waiting between this check and the write.
+    refuseRemoved();
     const before = this.config();
     this.d.settings.set("matchmaking", next);
     if (leetifyKey !== undefined) {

@@ -1038,6 +1038,59 @@ describe("matchmaking site", () => {
     }
   });
 
+  it("a settings save waiting for Steam can't put back a Workshop map that's being removed", async () => {
+    const owner = await adminCookie();
+    const id = await setupServer(owner);
+    const slug = (await admin(owner, "GET", "/api/servers")).body.servers[0].slug;
+    const upper = findDir(dir, "upper").find((d) => d.includes(slug))!;
+    const content = path.join(upper, "game", "bin", "linuxsteamrt64", "steamapps", "workshop", "content", "730");
+    mkdirSync(path.join(content, "111"), { recursive: true });
+    writeFileSync(path.join(content, "111", "map.vpk"), "x");
+    const modes = {
+      competitive: { enabled: true, maps: ["de_mirage", "workshop:111"] },
+      wingman: { enabled: true, maps: ["de_vertigo"] },
+      duel: { enabled: false, maps: ["de_vertigo"] },
+    };
+    await enable(owner, [id], { modes });
+    const settings = (await admin(owner, "GET", "/api/matchmaking")).body.settings;
+
+    // Hold the save while it asks Steam about the Workshop map.
+    const mm = app.services.matchmaking as unknown as {
+      d: { workshop: (id: string) => Promise<unknown> };
+      removeWorkshopMap: (id: string, mode: string, actor: number) => Promise<{ deleted: number; keptBecause: string[] }>;
+    };
+    const orig = mm.d.workshop;
+    let release!: () => void;
+    let entered!: () => void;
+    const inside = new Promise<void>((r) => (entered = r));
+    const gate = new Promise<void>((r) => (release = r));
+    mm.d.workshop = async (wid) => {
+      entered();
+      await gate;
+      return orig(wid);
+    };
+    try {
+      const saving = admin(owner, "PUT", "/api/matchmaking", { settings: { ...settings, title: "Changed" } });
+      await inside;
+      // The removal starts (its files are being deleted) while the save waits.
+      const removing = mm.removeWorkshopMap("111", "competitive", 1);
+      release();
+      const saved = await saving;
+      expect(saved.status).toBe(409);
+      expect(saved.body.error).toMatch(/being removed from the servers right now/);
+      expect(await removing).toEqual({ deleted: 1, keptBecause: [] });
+      const stored = (await admin(owner, "GET", "/api/matchmaking")).body.settings;
+      expect(stored.modes.competitive.maps).toEqual(["de_mirage"]);
+      expect(stored.title).not.toBe("Changed");
+      expect(readdirSync(content)).toEqual([]);
+    } finally {
+      mm.d.workshop = orig;
+    }
+    // A fresh save (after reloading the page) works again.
+    const fresh = (await admin(owner, "GET", "/api/matchmaking")).body.settings;
+    expect((await admin(owner, "PUT", "/api/matchmaking", { settings: { ...fresh, title: "Changed" } })).status).toBe(200);
+  });
+
   it("serves the page with the theme, title and uploaded images", async () => {
     const owner = await adminCookie();
     await enable(owner, [], { title: "Fredags <CS>", look: { theme: "purple", colors: { teamB: "#00ff00" } } });
