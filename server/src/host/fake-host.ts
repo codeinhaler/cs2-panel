@@ -1,5 +1,5 @@
 import type { MachineStats, ServiceStats } from "./stats.js";
-import { mkdirSync, writeFileSync, existsSync, rmSync, renameSync, symlinkSync, lstatSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, rmSync, renameSync, symlinkSync, lstatSync, linkSync } from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import type { Cs2ctlVerb, Host, LogStream, ServiceStatus } from "./host.js";
@@ -8,6 +8,15 @@ import type { Cs2ctlVerb, Host, LogStream, ServiceStatus } from "./host.js";
  * Simulated host for development and tests. Keeps service state in memory,
  * and "installs" a tiny fake CS2 base so the update flow can run end to end.
  */
+/** What the real cs2ctl leaves out of server backups (keep in step with deploy/cs2ctl). */
+export const BACKUP_EXCLUDES = [
+  "--exclude=./game/bin/linuxsteamrt64/steamapps/workshop",
+  "--exclude=./game/csgo/maps/workshop",
+  "--exclude=./game/csgo/logs",
+  "--exclude=*.dmp",
+  "--exclude=./core",
+];
+
 export class FakeHost implements Host {
   readonly running = new Set<string>();
   readonly enabled = new Set<string>();
@@ -176,7 +185,10 @@ export class FakeHost implements Host {
     this.mounted.delete(slug);
   }
 
-  /** Same layout as the real helper: cs2Root/backups/servers/<slug>/<slug>-YYYYmmdd-HHMMSS.tar.gz */
+  /**
+   * Same as the real helper: cs2Root/backups/servers/<slug>/<slug>-YYYYmmdd-HHMMSS.tar.gz (-2, -3… when that
+   * name is taken), packed into its own temporary file first, Workshop downloads left out.
+   */
   async backupServer(slug: string): Promise<string> {
     this.calls.push(`backup ${slug}`);
     const upper = path.join(this.cs2Root, "instances", slug, "upper");
@@ -185,11 +197,23 @@ export class FakeHost implements Host {
     mkdirSync(dir, { recursive: true });
     const d = new Date(this.clock());
     const p2 = (n: number) => String(n).padStart(2, "0");
-    let name = `${slug}-${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}.tar.gz`;
-    // Two backups within one second would clash; real backups never do that.
-    while (existsSync(path.join(dir, name))) name = name.replace(/(\d{6})\.tar\.gz$/, (_, t: string) => `${String(Number(t) + 1).padStart(6, "0")}.tar.gz`);
-    execFileSync("tar", ["--create", "--gzip", "--file", path.join(dir, name), "-C", upper, "--exclude=./game/csgo/maps/workshop", "."]);
-    return name;
+    const stamp = `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
+    const tmp = path.join(dir, `.${slug}-${stamp}.${Math.random().toString(36).slice(2, 8)}.part`);
+    try {
+      execFileSync("tar", ["--create", "--gzip", "--file", tmp, "-C", upper, ...BACKUP_EXCLUDES, "."]);
+      for (let n = 1; n <= 999; n++) {
+        const name = n === 1 ? `${slug}-${stamp}.tar.gz` : `${slug}-${stamp}-${n}.tar.gz`;
+        try {
+          linkSync(tmp, path.join(dir, name)); // fails if the name exists, like ln
+          return name;
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+        }
+      }
+      throw new Error(`no free backup name for ${slug}-${stamp}`);
+    } finally {
+      rmSync(tmp, { force: true });
+    }
   }
 
   async restoreServer(slug: string, file: string): Promise<void> {

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { userInfo } from "node:os";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -47,7 +49,12 @@ async function login(steamId = OWNER) {
   return `cs2p_session=${res.cookies.find((c) => c.name === "cs2p_session")!.value}`;
 }
 async function call(cookie: string, method: string, url: string, body?: unknown) {
-  const res = await app.fastify.inject({ method: method as "GET", url, headers: { cookie, host: "panel.lan" }, ...(body !== undefined ? { payload: body as object } : {}) });
+  const res = await app.fastify.inject({
+    method: method as "GET",
+    url,
+    headers: { cookie, host: "panel.lan" },
+    ...(body !== undefined ? { payload: body as object } : {}),
+  });
   return { status: res.statusCode, body: res.headers["content-type"]?.includes("json") ? (res.json() as Record<string, any>) : {}, raw: res.rawPayload };
 }
 async function newServer(c: string, name = "A", port = 27015) {
@@ -55,7 +62,8 @@ async function newServer(c: string, name = "A", port = 27015) {
   return (await call(c, "POST", "/api/servers", { name, presetId: presets[0].id, port })).body.server as { id: number; slug: string };
 }
 const writeCfg = (c: string, id: number, file: string, content: string) => call(c, "PUT", `/api/servers/${id}/configs/file`, { path: `cfg/${file}`, content });
-const readCfg = async (c: string, id: number, file: string) => (await call(c, "GET", `/api/servers/${id}/configs/file?path=${encodeURIComponent(`cfg/${file}`)}`)).body.content as string | null;
+const readCfg = async (c: string, id: number, file: string) =>
+  (await call(c, "GET", `/api/servers/${id}/configs/file?path=${encodeURIComponent(`cfg/${file}`)}`)).body.content as string | null;
 
 describe("backups", () => {
   it("backs up a server's files and what the panel knows about it, and restores them", async () => {
@@ -63,7 +71,9 @@ describe("backups", () => {
     const s = await newServer(c);
     await writeCfg(c, s.id, "practice.cfg", "sv_gravity 400\n");
     await call(c, "PUT", `/api/servers/${s.id}/exec-configs`, { configs: ["practice.cfg"] });
-    db.prepare("INSERT INTO plugin_installs (server_id, plugin_id, name, version, asset, files) VALUES (?, 'metamod', 'Metamod:Source', '2.0.0-git1350', 'mm.tar.gz', '[]')").run(s.id);
+    db.prepare(
+      "INSERT INTO plugin_installs (server_id, plugin_id, name, version, asset, files) VALUES (?, 'metamod', 'Metamod:Source', '2.0.0-git1350', 'mm.tar.gz', '[]')",
+    ).run(s.id);
     await call(c, "POST", `/api/servers/${s.id}/start`, {});
 
     const made = await call(c, "POST", `/api/servers/${s.id}/backups`, {});
@@ -138,7 +148,12 @@ describe("backups", () => {
     await tick(1, 4, 30);
     await tick(1, 4, 31); // once per night
     let list = (await call(c, "GET", "/api/backups")).body.backups as { trigger: string; kind: string; id: string }[];
-    expect(list.filter((b) => b.trigger === "nightly").map((b) => b.kind).sort()).toEqual(["panel", "server"]);
+    expect(
+      list
+        .filter((b) => b.trigger === "nightly")
+        .map((b) => b.kind)
+        .sort(),
+    ).toEqual(["panel", "server"]);
     await tick(2, 4, 30);
     await tick(3, 4, 30);
     list = (await call(c, "GET", "/api/backups")).body.backups;
@@ -147,5 +162,110 @@ describe("backups", () => {
     expect(list.map((b) => b.id)).toContain(manual.id); // manual ones stay
     await tick(4, 12, 0); // missed by 7.5 hours: skipped
     expect((await call(c, "GET", "/api/backups")).body.backups).toHaveLength(list.length);
+  });
+
+  it("two backups of the same server at once get their own names, both complete, with matching details", async () => {
+    const c = await login();
+    const s = await newServer(c);
+    await writeCfg(c, s.id, "practice.cfg", "sv_gravity 400\n");
+    const first = (await call(c, "POST", `/api/servers/${s.id}/backups`, {})).body.backup;
+    // Same second (the fake clock doesn't move): neither may overwrite the other or the first.
+    const [a, b] = await Promise.all([call(c, "POST", `/api/servers/${s.id}/backups`, {}), call(c, "POST", `/api/servers/${s.id}/backups`, {})]);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    const files = [first.file, a.body.backup.file, b.body.backup.file];
+    expect(new Set(files).size).toBe(3);
+    const folder = path.join(dir, "cs2/backups/servers", s.slug);
+    for (const f of files) execFileSync("tar", ["--list", "--gzip", "--file", path.join(folder, f)]);
+    expect(readdirSync(folder).filter((f) => f.endsWith(".part"))).toEqual([]);
+    const list = (await call(c, "GET", "/api/backups")).body.backups as { file: string; serverId: number; trigger: string }[];
+    for (const f of files) expect(list.find((x) => x.file === f)).toMatchObject({ serverId: s.id, trigger: "manual" });
+    // A "-2" backup restores like any other.
+    const second = list.find((x) => /-\d{6}-\d\.tar\.gz$/.test(x.file))! as unknown as { id: string };
+    expect((await call(c, "POST", "/api/backups/restore", { id: second.id })).status).toBe(200);
+  });
+});
+
+/**
+ * The real deploy/cs2ctl backup, run as the current user in a temporary folder (root paths and the root
+ * check swapped out, `date` pinned so runs land in the same second).
+ */
+describe("cs2ctl backup (the real script)", () => {
+  let root: string;
+  let script: string;
+  let bin: string;
+  beforeEach(() => {
+    root = mkdtempSync(path.join(tmpdir(), "cs2ctl-backup-"));
+    const me = userInfo().username;
+    script = path.join(root, "cs2ctl");
+    const src = readFileSync(path.join(__dirname, "../../deploy/cs2ctl"), "utf8")
+      .replace('CS2_ROOT="/srv/cs2"', `CS2_ROOT="${root}/cs2"`)
+      .replace('ENV_DIR="/etc/cs2-panel/instances"', `ENV_DIR="${root}/env"`)
+      .replace('PANEL_USER="cs2panel"', `PANEL_USER="${me}"`)
+      .replace('[[ $EUID -eq 0 ]] || die "must run as root (via sudo)"', "")
+      // The current user may have no group of the same name (CI runners).
+      .replaceAll('-g "$PANEL_USER" ', "")
+      .replaceAll('"$PANEL_USER:$PANEL_USER"', '"$PANEL_USER"');
+    writeFileSync(script, src);
+    chmodSync(script, 0o755);
+    bin = path.join(root, "bin");
+    mkdirSync(bin);
+    writeFileSync(path.join(bin, "date"), "#!/bin/sh\necho 20261119-120000\n");
+    chmodSync(path.join(bin, "date"), 0o755);
+    const upper = path.join(root, "cs2/instances/a/upper");
+    const put = (rel: string, text = "x") => {
+      mkdirSync(path.dirname(path.join(upper, rel)), { recursive: true });
+      writeFileSync(path.join(upper, rel), text);
+    };
+    // Disposable Workshop downloads (both places CS2 has used) ...
+    put("game/bin/linuxsteamrt64/steamapps/workshop/content/730/3070244931/map.vpk");
+    put("game/bin/linuxsteamrt64/steamapps/workshop/appworkshop_730.acf");
+    put("game/csgo/maps/workshop/123/old.vpk");
+    // ... and what must be kept: configs, plugins and their data, a map put there by hand.
+    put("game/csgo/cfg/server.cfg", "hostname test");
+    put("game/csgo/addons/counterstrikesharp/plugins/Cs2PanelBridge/Cs2PanelBridge.dll");
+    put("game/csgo/addons/counterstrikesharp/configs/plugins/Foo/Foo.json", "{}");
+    put("game/csgo/maps/aim_custom.vpk");
+    mkdirSync(path.join(root, "env"));
+    writeFileSync(path.join(root, "env/a.env"), "");
+  });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  const run = () =>
+    new Promise<string>((resolve, reject) => {
+      const p = spawn("bash", [script, "backup", "a"], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+      let out = "";
+      let err = "";
+      p.stdout.on("data", (d) => (out += d));
+      p.stderr.on("data", (d) => (err += d));
+      p.on("close", (code) => (code === 0 ? resolve(out.trim()) : reject(new Error(err))));
+    });
+
+  it("leaves out Workshop downloads and keeps configs, plugins, plugin data and hand-installed maps", async () => {
+    const name = await run();
+    const listed = execFileSync("tar", ["--list", "--gzip", "--file", path.join(root, "cs2/backups/servers/a", name)], { encoding: "utf8" });
+    expect(listed).not.toContain("steamapps/workshop");
+    expect(listed).not.toContain("maps/workshop");
+    for (const kept of [
+      "./game/csgo/cfg/server.cfg",
+      "./game/csgo/addons/counterstrikesharp/plugins/Cs2PanelBridge/Cs2PanelBridge.dll",
+      "./game/csgo/addons/counterstrikesharp/configs/plugins/Foo/Foo.json",
+      "./game/csgo/maps/aim_custom.vpk",
+    ])
+      expect(listed).toContain(kept);
+  });
+
+  it("backups in the same second get their own names and never overwrite one another", async () => {
+    const folder = path.join(root, "cs2/backups/servers/a");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(path.join(folder, "a-20261119-120000.tar.gz"), "an existing backup");
+    const names = await Promise.all([run(), run(), run()]);
+    expect(names.sort()).toEqual(["a-20261119-120000-2.tar.gz", "a-20261119-120000-3.tar.gz", "a-20261119-120000-4.tar.gz"]);
+    expect(readFileSync(path.join(folder, "a-20261119-120000.tar.gz"), "utf8")).toBe("an existing backup");
+    for (const n of names) {
+      const listed = execFileSync("tar", ["--list", "--gzip", "--file", path.join(folder, n)], { encoding: "utf8" });
+      expect(listed).toContain("./game/csgo/cfg/server.cfg");
+    }
+    expect(readdirSync(folder).filter((f) => f.endsWith(".part"))).toEqual([]);
   });
 });

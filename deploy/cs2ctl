@@ -150,15 +150,30 @@ case "$verb" in
     [[ -d "$INSTANCES_DIR/$slug/upper" ]] || die "no files for $slug"
     install -d -m 0755 "$BACKUP_DIR/servers"
     install -d -o "$PANEL_USER" -g "$PANEL_USER" -m 0750 "$BACKUP_DIR/servers/$slug"
-    name="$slug-$(date +%Y%m%d-%H%M%S).tar.gz"
-    tmp="$BACKUP_DIR/servers/$slug/.$name.part"
+    dir="$BACKUP_DIR/servers/$slug"
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    # Each run packs into its own temporary file, removed if anything fails.
+    tmp="$(mktemp --suffix=.part "$dir/.$slug-$stamp.XXXXXX")"
+    trap 'rm -f "$tmp"' EXIT
     # The server's own layer only (everything that differs from the shared install).
-    # Workshop downloads come back by themselves; logs and crash dumps aren't worth keeping.
+    # Workshop downloads come back by themselves: CS2 keeps them under steamapps/workshop (older
+    # builds used csgo/maps/workshop). Logs and crash dumps aren't worth keeping.
     tar --create --gzip --numeric-owner --file "$tmp" -C "$INSTANCES_DIR/$slug/upper" \
-      --exclude=./game/csgo/maps/workshop --exclude=./game/csgo/logs --exclude='*.dmp' --exclude=./core .
+      --exclude=./game/bin/linuxsteamrt64/steamapps/workshop --exclude=./game/csgo/maps/workshop \
+      --exclude=./game/csgo/logs --exclude='*.dmp' --exclude=./core .
     chown "$PANEL_USER:$PANEL_USER" "$tmp"
     chmod 0640 "$tmp"
-    mv "$tmp" "$BACKUP_DIR/servers/$slug/$name"
+    # Publish under a name nobody has: a hard link is created atomically and fails if the name exists,
+    # so two backups in the same second become <stamp>.tar.gz and <stamp>-2.tar.gz, never overwrite.
+    name="$slug-$stamp.tar.gz"
+    n=1
+    until ln "$tmp" "$dir/$name" 2>/dev/null; do
+      n=$((n + 1))
+      [[ $n -le 999 ]] || die "no free backup name for $slug-$stamp"
+      name="$slug-$stamp-$n.tar.gz"
+    done
+    rm -f "$tmp"
+    trap - EXIT
     echo "$name"
     ;;
 
@@ -166,7 +181,7 @@ case "$verb" in
     validate_slug "${1:-}"
     slug="$1"
     file="${2:-}"
-    [[ "$file" =~ ^[a-z0-9][a-z0-9-]{0,31}-[0-9]{8}-[0-9]{6}\.tar\.gz$ ]] || die "invalid backup file name"
+    [[ "$file" =~ ^[a-z0-9][a-z0-9-]{0,31}-[0-9]{8}-[0-9]{6}(-[0-9]{1,3})?\.tar\.gz$ ]] || die "invalid backup file name"
     src="$BACKUP_DIR/servers/$slug/$file"
     [[ -f "$src" ]] || die "backup $file not found"
     mountpoint -q "$INSTANCES_DIR/$slug/merged" && die "overlay for $slug is mounted; stop the server first"

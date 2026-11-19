@@ -37,7 +37,8 @@ export interface BackupSettings {
 }
 
 const DEFAULT_SETTINGS: BackupSettings = { enabled: true, time: "04:30", keep: 7 };
-const SERVER_FILE_RE = /^[a-z0-9][a-z0-9-]{0,31}-\d{8}-\d{6}\.tar\.gz$/;
+/** <slug>-YYYYmmdd-HHMMSS.tar.gz, or with -2, -3… when several were made in the same second. */
+const SERVER_FILE_RE = /^[a-z0-9][a-z0-9-]{0,31}-\d{8}-\d{6}(-\d{1,3})?\.tar\.gz$/;
 const PANEL_FILE_RE = /^panel-\d{8}-\d{6}\.db$/;
 const ID_RE = /^(?:server\/([a-z0-9][a-z0-9-]{0,31})\/([^/]+)|panel\/([^/]+))$/;
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;

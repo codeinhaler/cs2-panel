@@ -246,7 +246,10 @@ const SECTIONS: Section[] = [
     where: "CS2 Panel → Backups",
     intro: "Server files and the panel's database.",
     items: [
-      { term: "Make a backup", text: "By hand, for one server or the panel database." },
+      {
+        term: "Make a backup",
+        text: "By hand, for one server or the panel database. Server backups leave out Workshop downloads (they come back by themselves), logs and crash dumps. Two backups in the same second get their own names (…-2.tar.gz).",
+      },
       { term: "Nightly backups", text: "Every night at a set time, keeping the last N." },
       { term: "All backups", text: "Download, restore or delete. Restoring a server replaces its own files (not the shared CS2 base)." },
       {
