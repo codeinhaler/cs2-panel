@@ -33,6 +33,8 @@ export interface WorkshopInfo {
   itemCount: number | null;
   /** Why the status is what it is, ready to show. */
   message: string;
+  /** The item's preview image on Steam. */
+  previewUrl?: string | null;
 }
 
 interface Details {
@@ -45,6 +47,7 @@ interface Details {
   visibility?: number;
   banned?: number | boolean;
   ban_reason?: string;
+  preview_url?: string;
 }
 
 export class WorkshopLookup {
@@ -99,12 +102,22 @@ export class WorkshopLookup {
 
     const title = typeof d.title === "string" && d.title ? d.title : null;
     const size = Number(d.file_size);
-    const info = { ...base, title, sizeBytes: Number.isFinite(size) && size > 0 ? size : null, itemCount: children ? children.length : null };
+    const info = {
+      ...base,
+      title,
+      sizeBytes: Number.isFinite(size) && size > 0 ? size : null,
+      itemCount: children ? children.length : null,
+      previewUrl: typeof d.preview_url === "string" && d.preview_url.startsWith("https://") ? d.preview_url : null,
+    };
     const name = title ? `"${title}"` : `Workshop item ${id}`;
 
     if (d.result !== 1) return { ...info, status: "missing", message: `Steam has no Workshop item ${id}. It may have been deleted, or the ID is wrong.` };
     if (d.banned === true || d.banned === 1) {
-      return { ...info, status: "removed", message: `${name} has been removed from the Steam Workshop${d.ban_reason ? ` (${d.ban_reason})` : ""}, so servers can't download it.` };
+      return {
+        ...info,
+        status: "removed",
+        message: `${name} has been removed from the Steam Workshop${d.ban_reason ? ` (${d.ban_reason})` : ""}, so servers can't download it.`,
+      };
     }
     if (d.consumer_app_id !== undefined && d.consumer_app_id !== CS2_APP_ID) {
       return { ...info, status: "wrong-game", message: `${name} isn't a Counter-Strike 2 Workshop item.` };
@@ -112,7 +125,8 @@ export class WorkshopLookup {
     if (d.visibility !== undefined && d.visibility !== 0) {
       return { ...info, status: "private", message: `${name} isn't public on the Workshop, so servers can't download it.` };
     }
-    if (kind === "collection" && !children) return { ...info, status: "wrong-kind", message: `${name} is a single item, not a collection. Pick "Workshop map" instead.` };
+    if (kind === "collection" && !children)
+      return { ...info, status: "wrong-kind", message: `${name} is a single item, not a collection. Pick "Workshop map" instead.` };
     if (kind === "map" && children) return { ...info, status: "wrong-kind", message: `${name} is a collection. Pick "Workshop collection" instead.` };
     if (kind === "collection" && children!.length === 0) return { ...info, status: "wrong-kind", message: `${name} is an empty collection.` };
     return { ...info, status: "ok", message: name };

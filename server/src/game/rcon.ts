@@ -73,10 +73,7 @@ export const rconExec: RconExec = (opts, command) =>
       if (err) reject(err);
       else resolve(output);
     };
-    const timer = setTimeout(
-      () => (authed ? finish() : finish(new Error("RCON timed out. Is the server running?"))),
-      timeoutMs,
-    );
+    const timer = setTimeout(() => (authed ? finish() : finish(new Error("RCON timed out. Is the server running?"))), timeoutMs);
 
     sock.on("error", (e: NodeJS.ErrnoException) =>
       finish(new Error(e.code === "ECONNREFUSED" ? "RCON connection refused. Is the server running?" : e.message)),

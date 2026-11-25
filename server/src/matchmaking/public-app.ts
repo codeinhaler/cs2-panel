@@ -338,6 +338,13 @@ export async function buildPublicApp(d: PublicDeps): Promise<FastifyInstance> {
 
   // ------------------------------------------------------------- the page
 
+  app.get("/map-image/:key", async (req, reply) => {
+    const { key } = z.object({ key: z.string().max(80) }).parse(req.params);
+    const img = await mm.mapImage(key);
+    if (!img) return reply.status(404).send({ error: "Not found." });
+    return reply.type(img.type).header("Cache-Control", "public, max-age=86400").send(img.data);
+  });
+
   app.get("/branding/:kind", async (req, reply) => {
     const { kind } = z.object({ kind: z.enum(["icon", "banner"]) }).parse(req.params);
     const img = await mm.readImage(kind);

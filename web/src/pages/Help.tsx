@@ -175,6 +175,10 @@ const SECTIONS: Section[] = [
         text: "Players pick Team 1 or Team 2. Full teams: anyone can start. Not full: both captains (best rating per team, ★) vote to start.",
       },
       {
+        term: "Captains",
+        text: "Only the two captains can cancel a match or start it without waiting for everyone (either captain). Admins can always cancel from the Overview tab.",
+      },
+      {
         term: "Scoreboards",
         text: "K, D, A, K/D and ADR per player, live on the match card and saved when the match ends. The site shows the last 20 matches to everyone, and each signed-in player can see all of their own matches.",
       },
@@ -218,6 +222,10 @@ const SECTIONS: Section[] = [
     where: "Matchmaking → Site tab",
     intro: "How the public site looks and how it's reached.",
     items: [
+      {
+        term: "Map images",
+        text: "Thumbnails on the map veto, match cards and recent matches, plus the T and CT icons. Built-in maps' pictures come from the game files (read again after every CS2 update, or with Read images from the game files again), Workshop maps' from Steam. Upload your own for any map or side; remove the upload to go back to the automatic one. Without a picture the site shows a tile with the map's name, and coloured T/CT badges.",
+      },
       { term: "Layout", text: "Classic (lobby cards) or Status board (a Ready to play? checklist next to a table of all lobbies)." },
       {
         term: "Language",

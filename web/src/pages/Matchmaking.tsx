@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { DiscordBotPanel } from "./DiscordBot";
-import { api, type MatchmakingInfo, type MatchmakingSettings, type MmRating, type MmScoreRow } from "../api";
+import { api, type MatchmakingInfo, type MatchmakingSettings, type MapImagesInfo, type MmRating, type MmScoreRow } from "../api";
 import { useAction, useApp, usePolling } from "../app-context";
 import { formatDateTime } from "../format";
 import { LookSettings } from "./MatchmakingLook";
@@ -438,6 +438,7 @@ export function MatchmakingPage() {
         )}
 
         {tab === "site" && <LookSettings info={data} look={form.look} manage={manage} onChange={(look) => set("look", look)} onImages={() => void refresh()} />}
+        {tab === "site" && <MapImagesPanel maps={[...new Set(MODES.flatMap((m) => form.modes[m].maps))]} names={data.mapNames} manage={manage} />}
 
         {/* One Save for all settings tabs; it stays in view at the bottom while there are changes. */}
         {manage && tab !== "overview" && (
@@ -491,6 +492,117 @@ export function MatchmakingPage() {
           ) : (
             <p className="hint">{data.leetifyKeyHint ? `A key is set (${data.leetifyKeyHint}).` : "No key set."}</p>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Thumbnails on the site: from the game files or Steam, or your own upload (which wins). */
+function MapImagesPanel({ maps, names, manage }: { maps: string[]; names: Record<string, string>; manage: boolean }) {
+  const { toast } = useApp();
+  const [info, setInfo] = useState<MapImagesInfo | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    void api
+      .mapImages()
+      .then(setInfo)
+      .catch(() => setInfo({ images: {}, urls: {} }));
+  }, []);
+  const keyOf = (m: string) => (m.startsWith("workshop:") ? `workshop-${m.slice(9)}` : m);
+  const rows: { key: string; label: string }[] = [
+    ...maps.map((m) => ({ key: keyOf(m), label: mapLabel(m, names) })),
+    { key: "side-t", label: "Terrorists icon" },
+    { key: "side-ct", label: "Counter-Terrorists icon" },
+  ];
+  const run = async (f: () => Promise<MapImagesInfo>, done?: string) => {
+    setBusy(true);
+    try {
+      setInfo(await f());
+      if (done) toast(done);
+    } catch (e) {
+      toast((e as Error).message, "warn");
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!info) return null;
+  return (
+    <div className="panel">
+      <h2 style={{ marginBottom: 4 }}>Map images</h2>
+      <p className="hint" style={{ marginTop: 0 }}>
+        Thumbnails on the map veto, match cards and recent matches, and the T/CT icons. Built-in maps come from the game files (read again after every CS2
+        update), Workshop maps from Steam. Upload your own to replace any of them. Without an image the site shows a tile with the map's name.
+      </p>
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Map</th>
+            <th>Image</th>
+            <th>From</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => {
+            const img = info.images[r.key];
+            return (
+              <tr key={r.key}>
+                <td>{r.label}</td>
+                <td>
+                  {img ? (
+                    <img src={`/api/matchmaking/map-images/${r.key}?v=${img.v}`} alt="" style={{ height: 36, borderRadius: 4 }} />
+                  ) : (
+                    <span className="hint">none</span>
+                  )}
+                </td>
+                <td className="hint">{!img ? "" : img.source === "custom" ? "Uploaded" : r.key.startsWith("workshop-") ? "Steam Workshop" : "Game files"}</td>
+                <td>
+                  {manage && (
+                    <div className="row-actions">
+                      <label className="btn small">
+                        Upload
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          hidden
+                          disabled={busy}
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            e.target.value = "";
+                            if (f) void run(() => api.uploadMapImage(r.key, f), "Image saved.");
+                          }}
+                        />
+                      </label>
+                      {img?.source === "custom" && (
+                        <button type="button" className="btn small ghost" disabled={busy} onClick={() => void run(() => api.removeMapImage(r.key))}>
+                          Remove upload
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {manage && (
+        <div className="row-actions" style={{ marginTop: 12 }}>
+          <button
+            type="button"
+            className="btn small"
+            disabled={busy}
+            onClick={() =>
+              void run(async () => {
+                const r = await api.refreshMapImages();
+                toast(`Found ${r.found.maps} map images${r.found.sides ? ` and ${r.found.sides} team icons` : ""} in the game files.`);
+                return r;
+              })
+            }
+          >
+            Read images from the game files again
+          </button>
         </div>
       )}
     </div>

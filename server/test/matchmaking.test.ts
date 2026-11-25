@@ -173,12 +173,20 @@ async function setup() {
       const id = new URLSearchParams(String(init?.body ?? "")).get("publishedfileids[0]");
       const d =
         id === "111"
-          ? { result: 1, title: "Aim Botz", consumer_app_id: 730, visibility: 0, file_size: "1000" }
+          ? {
+              result: 1,
+              title: "Aim Botz",
+              consumer_app_id: 730,
+              visibility: 0,
+              file_size: "1000",
+              preview_url: "https://images.steamusercontent.test/aimbotz.png",
+            }
           : id === "222"
             ? { result: 1, title: "Old map", consumer_app_id: 730, visibility: 0, banned: 1 }
             : { result: 9 };
       return Response.json({ response: { publishedfiledetails: [d] } });
     }
+    if (u.hostname === "images.steamusercontent.test") return new Response(PNG, { headers: { "content-type": "image/png" } });
     return new Response("<profile></profile>");
   }) as typeof fetch;
   host = new FakeHost(config.cs2Root, config.instanceEnvDir);
@@ -273,6 +281,57 @@ function findFile(root: string, name: string): string[] {
     else if (entry === name) out.push(p);
   }
   return out;
+}
+
+/** A tiny valid PNG. */
+const PNG = Buffer.from(
+  "89504e470d0a1a0a0000000d4948445200000001000000010806000000" + "1f15c4890000000d49444154789c6360000002000154a24f5f0000000049454e44ae426082",
+  "hex",
+);
+
+/** Writes a VPK v2 the way CS2 ships it: the tree in pak01_dir.vpk, data in pak01_000.vpk (or in the dir file). */
+function writeVpk(dirFile: string, files: { path: string; name: string; ext: string; data: Buffer; inDir?: boolean }[]) {
+  const tree: Buffer[] = [];
+  const archive: Buffer[] = [];
+  const inline: Buffer[] = [];
+  let archiveOff = 0;
+  let inlineOff = 0;
+  const z = (t: string) => Buffer.from(`${t}\0`, "utf8");
+  for (const ext of [...new Set(files.map((f) => f.ext))]) {
+    tree.push(z(ext));
+    for (const dir of [...new Set(files.filter((f) => f.ext === ext).map((f) => f.path))]) {
+      tree.push(z(dir));
+      for (const f of files.filter((x) => x.ext === ext && x.path === dir)) {
+        tree.push(z(f.name));
+        const e = Buffer.alloc(18);
+        e.writeUInt32LE(0, 0);
+        e.writeUInt16LE(0, 4);
+        e.writeUInt16LE(f.inDir ? 0x7fff : 0, 6);
+        e.writeUInt32LE(f.inDir ? inlineOff : archiveOff, 8);
+        e.writeUInt32LE(f.data.length, 12);
+        e.writeUInt16LE(0xffff, 16);
+        tree.push(e);
+        if (f.inDir) {
+          inline.push(f.data);
+          inlineOff += f.data.length;
+        } else {
+          archive.push(f.data);
+          archiveOff += f.data.length;
+        }
+      }
+      tree.push(z(""));
+    }
+    tree.push(z(""));
+  }
+  tree.push(z(""));
+  const treeBuf = Buffer.concat(tree);
+  const header = Buffer.alloc(28);
+  header.writeUInt32LE(0x55aa1234, 0);
+  header.writeUInt32LE(2, 4);
+  header.writeUInt32LE(treeBuf.length, 8);
+  mkdirSync(path.dirname(dirFile), { recursive: true });
+  writeFileSync(dirFile, Buffer.concat([header, treeBuf, ...inline]));
+  writeFileSync(dirFile.replace(/_dir\.vpk$/, "_000.vpk"), Buffer.concat(archive));
 }
 
 function cookieOfId(cookies: string[], steamId: string): string {
@@ -1089,6 +1148,78 @@ describe("matchmaking site", () => {
     // A fresh save (after reloading the page) works again.
     const fresh = (await admin(owner, "GET", "/api/matchmaking")).body.settings;
     expect((await admin(owner, "PUT", "/api/matchmaking", { settings: { ...fresh, title: "Changed" } })).status).toBe(200);
+  });
+
+  it("only the captains can cancel a match or start it without waiting", async () => {
+    const owner = await adminCookie();
+    await enable(owner, [await setupServer(owner)]);
+    const cookies = await Promise.all(P.slice(0, 4).map((id, i) => playerCookie(id, `P${i}`)));
+    for (const c of cookies) await play(c, "POST", "/api/lobby/join", { mode: "competitive" });
+    await play(cookies[0]!, "POST", "/api/teams");
+    const draft = (await play(cookies[0]!, "GET", "/api/state")).body.drafts[0];
+    const { matchId } = (await play(cookies[0]!, "POST", `/api/teams/${draft.id}/start`)).body;
+    const m = await toLive(cookies, P, matchId);
+    const captains = [m.captainA, m.captainB];
+    const player = [...m.teamA, ...m.teamB].find((p: any) => p.steamId !== "BOT" && !captains.includes(p.steamId)).steamId;
+    const c = (id: string) => cookies[P.indexOf(id)]!;
+    for (const url of [`/api/matches/${matchId}/start-now`, `/api/matches/${matchId}/cancel`]) {
+      const r = await play(c(player), "POST", url);
+      expect(r.status).toBe(403);
+      expect(r.body.error).toBe("Only the captains can do that.");
+    }
+    expect((await play(c(m.captainB), "POST", `/api/matches/${matchId}/cancel`)).status).toBe(200);
+  });
+
+  it("map thumbnails: from the game files, Steam Workshop previews, and uploads that win", async () => {
+    const owner = await adminCookie();
+    // Compiled panorama textures keep the original PNG inside; the 360p one is preferred.
+    const vtex = (marker: string) => Buffer.concat([Buffer.from(`VTEX header ${marker} `), PNG, Buffer.from(" trailer")]);
+    writeVpk(path.join(dir, "cs2/base/game/csgo/pak01_dir.vpk"), [
+      { path: "panorama/images/map_icons/screenshots/1080p", name: "de_dust2", ext: "vtex_c", data: Buffer.from("no picture here") },
+      { path: "panorama/images/map_icons/screenshots/360p", name: "de_dust2", ext: "vtex_c", data: vtex("dust2") },
+      { path: "panorama/images/map_icons/screenshots/360p", name: "de_mirage", ext: "vtex_c", data: vtex("mirage"), inDir: true },
+      { path: "panorama/images/icons/ui", name: "ct_logo", ext: "vtex_c", data: vtex("ct") },
+      { path: "materials/models", name: "de_dust2", ext: "vtex_c", data: vtex("not a preview") },
+    ]);
+    const r = await admin(owner, "POST", "/api/matchmaking/map-images/refresh", {});
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body.found).toEqual({ maps: 2, sides: 1 });
+    expect(Object.keys(r.body.images).sort()).toEqual(["de_dust2", "de_mirage", "side-ct"]);
+
+    // Workshop: Steam's preview image, kept by the panel.
+    await enable(owner, [await setupServer(owner)], {
+      modes: {
+        competitive: { enabled: true, maps: ["de_dust2", "workshop:111"] },
+        wingman: { enabled: true, maps: ["de_vertigo"] },
+        duel: { enabled: false, maps: ["de_vertigo"] },
+      },
+    });
+    await settle(async () => !!(await admin(owner, "GET", "/api/matchmaking/map-images")).body.images["workshop-111"]);
+
+    const c = await playerCookie(P[0]!, "Alpha");
+    const st = (await play(c, "GET", "/api/state")).body;
+    expect(Object.keys(st.mapImages).sort()).toEqual(["de_dust2", "de_mirage", "side-ct", "workshop-111"]);
+    const img = await site.inject({ method: "GET", url: st.mapImages.de_dust2, headers: { host: "play.example:8090" } });
+    expect(img.statusCode).toBe(200);
+    expect(img.headers["content-type"]).toBe("image/png");
+    expect(Buffer.compare(img.rawPayload, PNG)).toBe(0);
+
+    // An upload replaces the game's picture; removing it brings that back.
+    const jpg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(20), Buffer.from([0xff, 0xd9])]);
+    const up = await app.fastify.inject({
+      method: "PUT",
+      url: "/api/matchmaking/map-images/de_dust2",
+      headers: { cookie: owner, host: "panel.lan", "content-type": "image/jpeg" },
+      payload: jpg,
+    });
+    expect(up.statusCode, up.body).toBe(200);
+    expect(up.json().images.de_dust2.source).toBe("custom");
+    expect((await site.inject({ method: "GET", url: "/map-image/de_dust2", headers: { host: "play.example:8090" } })).headers["content-type"]).toBe(
+      "image/jpeg",
+    );
+    expect((await admin(owner, "DELETE", "/api/matchmaking/map-images/de_dust2")).body.images.de_dust2.source).toBe("auto");
+    expect((await admin(owner, "DELETE", "/api/matchmaking/map-images/..%2Fpanel")).status).toBe(400);
+    expect((await site.inject({ method: "GET", url: "/map-image/..%2Fsecret", headers: { host: "play.example:8090" } })).statusCode).toBe(404);
   });
 
   it("serves the page with the theme, title and uploaded images", async () => {

@@ -49,6 +49,8 @@ export class GameUpdater {
   recoveryWindowMs = 120_000;
   recoveryPollMs = 5_000;
   recoveryStableMs = 20_000;
+  /** After SteamCMD updated the files: e.g. re-read map images from the game. Returns a line for the log. */
+  afterFilesUpdated: (() => Promise<string>) | null = null;
   /** Asks the game itself (Steam server query): a server only counts as back when the game answers. */
   query: (port: number) => Promise<A2sInfo | null> = (port) => queryInfo(port);
 
@@ -164,6 +166,12 @@ export class GameUpdater {
       await this.host.steamUpdate(opts.validate, (l) => this.log(`  ${l}`));
       const after = (await this.files.baseVersion()).patchVersion;
       this.log(after === before ? `CS2 is up to date (${after}).` : `CS2 updated: ${before ?? "none"} → ${after}`);
+      if (this.afterFilesUpdated)
+        try {
+          this.log(await this.afterFilesUpdated());
+        } catch (e) {
+          this.log(`  map images: ${(e as Error).message}`);
+        }
     } catch (e) {
       updateError = e as Error;
       this.log(`SteamCMD failed: ${updateError.message}`);

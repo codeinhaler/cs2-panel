@@ -52,6 +52,7 @@ import { MmPlayerStore } from "./matchmaking/players.js";
 import { MODES, Matchmaking } from "./matchmaking/service.js";
 import { PublicSite, buildPublicApp } from "./matchmaking/public-app.js";
 import { LAYOUTS, SiteImages, THEMES, type ImageKind } from "./matchmaking/look.js";
+import { MapImages, imageKey } from "./matchmaking/map-images.js";
 import { CertStore } from "./tls/acme.js";
 import { TlsService } from "./tls/service.js";
 
@@ -145,6 +146,10 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const pluginSources = new PluginSources(path.join(config.dataDir, "plugin-cache"), fetchFn, Date.now, config.bridgeDir);
   const plugins = new PluginService(db, pluginSources, servers, files, audit, gate, rcon, path.join(config.dataDir, "tmp"), config.mysql);
   updater.afterStart = (started) => plugins.healthLines(started);
+  updater.afterFilesUpdated = async () => {
+    const r = await mapImages.extractFromGame();
+    return `Map images from the game files: ${r.maps} maps${r.sides ? `, ${r.sides} team icons` : ""}.`;
+  };
   if (deps.a2sQuery) updater.query = deps.a2sQuery;
   const players = new PlayerService(db, servers, plugins, files, host, rcon, audit);
   const execConfigs = new ExecConfigService(db, configs, audit);
@@ -213,6 +218,15 @@ export async function buildApp(deps: AppDeps): Promise<App> {
 
   const mmPlayers = new MmPlayerStore(db);
   const isBanned = (steamId: string) => !!bans.activeBan(steamId);
+  // Map thumbnails: uploads, Steam Workshop previews, and built-in maps' images out of the game files
+  // (read again after each CS2 update; the first time on start if there are none yet).
+  const mapImages = new MapImages(path.join(config.dataDir, "map-images"), path.join(config.cs2Root, "base"));
+  void mapImages
+    .load()
+    .then(async () => {
+      if (!Object.values(mapImages.list()).some((x) => x.source === "auto")) await mapImages.extractFromGame();
+    })
+    .catch(() => undefined);
   const matchmaking = new Matchmaking({
     db,
     settings,
@@ -229,6 +243,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     audit,
     fetchFn,
     images: new SiteImages(path.join(config.dataDir, "matchmaking")),
+    mapImages,
     workshop: (id) => workshop.lookup(id, "map"),
     ...(deps.matchmakingClock ?? {}),
   });
@@ -1401,6 +1416,44 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     const { kind } = imageKind.parse(req.params);
     await matchmaking.removeImage(kind as ImageKind, user.id);
     return { images: matchmaking.imageUrls() };
+  });
+
+  // Map thumbnails: what there is, upload/remove your own, read again from the game files.
+  app.get("/api/matchmaking/map-images", async (req) => {
+    requirePerm(req, "view");
+    return { images: mapImages.list(), urls: matchmaking.mapImageUrls() };
+  });
+  app.put("/api/matchmaking/map-images/:key", { bodyLimit: 4 * 1024 * 1024 }, async (req) => {
+    const user = requirePerm(req, "server.manage");
+    const key = imageKey(z.object({ key: z.string() }).parse(req.params).key);
+    if (!key) throw badRequest("Unknown map.");
+    if (!Buffer.isBuffer(req.body)) throw badRequest("Upload a PNG, JPG or WebP image.");
+    await mapImages.saveCustom(key, req.body);
+    audit.record(user.id, "matchmaking.map-image", null, { map: key });
+    return { images: mapImages.list(), urls: matchmaking.mapImageUrls() };
+  });
+  app.delete("/api/matchmaking/map-images/:key", async (req) => {
+    requirePerm(req, "server.manage");
+    const key = imageKey(z.object({ key: z.string() }).parse(req.params).key);
+    if (!key) throw badRequest("Unknown map.");
+    await mapImages.removeCustom(key);
+    return { images: mapImages.list(), urls: matchmaking.mapImageUrls() };
+  });
+  app.post("/api/matchmaking/map-images/refresh", async (req) => {
+    requirePerm(req, "server.manage");
+    let found: { maps: number; sides: number };
+    try {
+      found = await mapImages.extractFromGame();
+    } catch (e) {
+      throw badRequest(`Couldn't read the game files: ${(e as Error).message}`);
+    }
+    return { found, images: mapImages.list(), urls: matchmaking.mapImageUrls() };
+  });
+  app.get("/api/matchmaking/map-images/:key", async (req, reply) => {
+    requirePerm(req, "view");
+    const img = await mapImages.read(z.object({ key: z.string() }).parse(req.params).key);
+    if (!img) throw notFound("No image.");
+    return reply.type(img.type).header("Cache-Control", "no-cache").send(img.data);
   });
 
   app.put("/api/matchmaking", async (req) => {

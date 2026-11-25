@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   API,
   BOT_ID,
@@ -89,119 +89,121 @@ export function Play() {
   const myDraft = me?.mode ? state.drafts.find((d) => d.mode === me.mode) : undefined;
 
   return (
-    <div className="play">
-      <header className="play-head">
-        <div className="play-brand">
-          {state.look.icon ? (
-            <img className="play-logo" src={state.look.icon} alt="" />
-          ) : (
-            <span className="play-mark" aria-hidden="true">
-              <span />
-              <span />
-            </span>
-          )}
-          <h1>{state.title}</h1>
-        </div>
-        <label className="play-lang" data-no-translate>
-          <span className="sr-only">Language</span>
-          <select
-            value={shownLang}
-            aria-label="Language / Sprog"
-            onChange={(e) => {
-              const l = e.target.value as Lang;
-              setLang(l, true);
-              setLangState(l);
-            }}
-          >
-            {LANGS.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        {me ? (
-          <div className="play-me">
-            {me.avatarUrl ? <img src={me.avatarUrl} alt="" /> : <span className="play-avatar" aria-hidden="true" />}
-            <span className="play-me-name">{me.name}</span>
-            <button className="btn small ghost" onClick={() => act(async () => (await play.logout(), window.location.reload()))}>
-              Sign out
+    <ImagesContext.Provider value={state.mapImages ?? {}}>
+      <div className="play">
+        <header className="play-head">
+          <div className="play-brand">
+            {state.look.icon ? (
+              <img className="play-logo" src={state.look.icon} alt="" />
+            ) : (
+              <span className="play-mark" aria-hidden="true">
+                <span />
+                <span />
+              </span>
+            )}
+            <h1>{state.title}</h1>
+          </div>
+          <label className="play-lang" data-no-translate>
+            <span className="sr-only">Language</span>
+            <select
+              value={shownLang}
+              aria-label="Language / Sprog"
+              onChange={(e) => {
+                const l = e.target.value as Lang;
+                setLang(l, true);
+                setLangState(l);
+              }}
+            >
+              {LANGS.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {me ? (
+            <div className="play-me">
+              {me.avatarUrl ? <img src={me.avatarUrl} alt="" /> : <span className="play-avatar" aria-hidden="true" />}
+              <span className="play-me-name">{me.name}</span>
+              <button className="btn small ghost" onClick={() => act(async () => (await play.logout(), window.location.reload()))}>
+                Sign out
+              </button>
+            </div>
+          ) : null}
+        </header>
+
+        {state.look.banner && <img className="play-banner" src={state.look.banner} alt="" />}
+
+        {offline && <div className="notice warn">Lost the connection. Retrying…</div>}
+        {error && (
+          <div className="notice error" role="alert">
+            {error}
+            <button className="btn small ghost" style={{ marginLeft: 12 }} onClick={() => setError(null)}>
+              Dismiss
             </button>
           </div>
-        ) : null}
-      </header>
+        )}
+        {!state.enabled && <div className="notice info">Matchmaking is closed right now. Check back when the event starts.</div>}
 
-      {state.look.banner && <img className="play-banner" src={state.look.banner} alt="" />}
-
-      {offline && <div className="notice warn">Lost the connection. Retrying…</div>}
-      {error && (
-        <div className="notice error" role="alert">
-          {error}
-          <button className="btn small ghost" style={{ marginLeft: 12 }} onClick={() => setError(null)}>
-            Dismiss
-          </button>
-        </div>
-      )}
-      {!state.enabled && <div className="notice info">Matchmaking is closed right now. Check back when the event starts.</div>}
-
-      {state.look.layout === "board" ? (
-        <BoardHome state={state} myMatch={myMatch} myDraft={myDraft} otherMatches={otherMatches} skew={skew.current} busy={busy} act={act} />
-      ) : (
-        <>
-          {!me ? (
-            <>
-              {state.casual.servers.length > 0 && <CasualCard state={state} />}
-              <section className="panel play-signin">
-                <h2>Play with even teams</h2>
-                {state.casual.servers.length > 0 && (
-                  <p className="play-signin-note">
-                    <b>{state.casual.name}</b> needs no sign-in: just press Join above. For{" "}
-                    {state.lobbies
-                      .map((l) => l.label)
-                      .join(", ")
-                      .replace(/, ([^,]*)$/, " and $1") || "Competitive"}{" "}
-                    matches, sign in through Steam.
+        {state.look.layout === "board" ? (
+          <BoardHome state={state} myMatch={myMatch} myDraft={myDraft} otherMatches={otherMatches} skew={skew.current} busy={busy} act={act} />
+        ) : (
+          <>
+            {!me ? (
+              <>
+                {state.casual.servers.length > 0 && <CasualCard state={state} />}
+                <section className="panel play-signin">
+                  <h2>Play with even teams</h2>
+                  {state.casual.servers.length > 0 && (
+                    <p className="play-signin-note">
+                      <b>{state.casual.name}</b> needs no sign-in: just press Join above. For{" "}
+                      {state.lobbies
+                        .map((l) => l.label)
+                        .join(", ")
+                        .replace(/, ([^,]*)$/, " and $1") || "Competitive"}{" "}
+                      matches, sign in through Steam.
+                    </p>
+                  )}
+                  <p>
+                    Sign in with Steam and pick a lobby: {state.lobbies.map((l) => `${l.label}`).join(", ") || "Competitive"}. Teams are made from everyone's
+                    Premier rating so both sides are about equal, and a bot fills in when the numbers are odd. The captains then ban maps until one is left, and
+                    you get a button to join the server.
                   </p>
-                )}
-                <p>
-                  Sign in with Steam and pick a lobby: {state.lobbies.map((l) => `${l.label}`).join(", ") || "Competitive"}. Teams are made from everyone's
-                  Premier rating so both sides are about equal, and a bot fills in when the numbers are odd. The captains then ban maps until one is left, and
-                  you get a button to join the server.
-                </p>
-                <a className="btn primary play-steam" href={`${API}/auth/steam`}>
-                  Sign in through Steam
-                </a>
-                <p className="hint">Steam only tells this site your SteamID, name and avatar. Your password stays with Steam.</p>
-              </section>
-            </>
-          ) : (
-            <>
-              {myMatch && <MatchCard match={myMatch} meId={me.steamId} skew={skew.current} busy={busy} act={act} mine />}
-              {myDraft && <DraftCard draft={myDraft} state={state} busy={busy} act={act} />}
-              {state.enabled &&
-                (me.inLobby ? (
-                  <LobbyCard state={state} busy={busy} act={act} />
-                ) : (
-                  <LobbyPicker state={state} busy={busy} act={act} casualOpen={casualOpen} onCasual={() => setCasualOpen((v) => !v)} />
-                ))}
-              {!me.inLobby && !myMatch && casualOpen && state.casual.servers.length > 0 && <CasualCard state={state} />}
-              <RatingCard state={state} busy={busy} act={act} />
-              <DiscordCard />
-            </>
-          )}
+                  <a className="btn primary play-steam" href={`${API}/auth/steam`}>
+                    Sign in through Steam
+                  </a>
+                  <p className="hint">Steam only tells this site your SteamID, name and avatar. Your password stays with Steam.</p>
+                </section>
+              </>
+            ) : (
+              <>
+                {myMatch && <MatchCard match={myMatch} meId={me.steamId} skew={skew.current} busy={busy} act={act} mine />}
+                {myDraft && <DraftCard draft={myDraft} state={state} busy={busy} act={act} />}
+                {state.enabled &&
+                  (me.inLobby ? (
+                    <LobbyCard state={state} busy={busy} act={act} />
+                  ) : (
+                    <LobbyPicker state={state} busy={busy} act={act} casualOpen={casualOpen} onCasual={() => setCasualOpen((v) => !v)} />
+                  ))}
+                {!me.inLobby && !myMatch && casualOpen && state.casual.servers.length > 0 && <CasualCard state={state} />}
+                <RatingCard state={state} busy={busy} act={act} />
+                <DiscordCard />
+              </>
+            )}
 
-          {otherMatches.length > 0 && (
-            <section className="play-section">
-              <h2 className="play-section-title">Matches</h2>
-              {otherMatches.map((m) => (
-                <MatchCard key={m.id} match={m} meId={me?.steamId ?? null} skew={skew.current} busy={busy} act={act} />
-              ))}
-            </section>
-          )}
-          {!me?.inLobby && <RecentMatches signedIn={!!me} />}
-        </>
-      )}
-    </div>
+            {otherMatches.length > 0 && (
+              <section className="play-section">
+                <h2 className="play-section-title">Matches</h2>
+                {otherMatches.map((m) => (
+                  <MatchCard key={m.id} match={m} meId={me?.steamId ?? null} skew={skew.current} busy={busy} act={act} />
+                ))}
+              </section>
+            )}
+            {!me?.inLobby && <RecentMatches signedIn={!!me} />}
+          </>
+        )}
+      </div>
+    </ImagesContext.Provider>
   );
 }
 
@@ -781,8 +783,39 @@ function LobbyRow({ p, me, captain }: { p: LobbyPlayer; me: boolean; captain?: b
   );
 }
 
+// ------------------------------------------------------------- map thumbnails and side icons
+
+/** Thumbnail URLs by image key, from the server. */
+const ImagesContext = createContext<Record<string, string>>({});
+const imageKeyOf = (map: string) => (map.startsWith("workshop:") ? `workshop-${map.slice(9)}` : map);
+
+/** A map's picture, or a plain tile with its name when there's none. */
+function MapThumb({ map, size = "small" }: { map: string; size?: "small" | "tile" }) {
+  const url = useContext(ImagesContext)[imageKeyOf(map)];
+  return url ? (
+    <img className={`map-thumb ${size}`} src={url} alt="" loading="lazy" />
+  ) : (
+    <span className={`map-thumb ${size} none`} aria-hidden="true">
+      {mapName(map).slice(0, 2)}
+    </span>
+  );
+}
+
+/** The T or CT icon (the game's, an uploaded one, or a coloured badge). */
+function SideIcon({ side }: { side: Side | null }) {
+  const url = useContext(ImagesContext)[`side-${side}`];
+  if (!side) return null;
+  return url ? (
+    <img className="side-icon" src={url} alt={side === "t" ? "T" : "CT"} />
+  ) : (
+    <span className={`side-icon badge ${side}`} title={side === "t" ? "Terrorists" : "Counter-Terrorists"}>
+      {side === "t" ? "T" : "CT"}
+    </span>
+  );
+}
+
 /** K / D / A / ADR per player, one table per team. Bots show as "BOT". */
-function Scoreboard({ rows, rounds, labelA, labelB }: { rows: ScoreRow[]; rounds: number; labelA: string; labelB: string }) {
+function Scoreboard({ rows, rounds, labelA, labelB }: { rows: ScoreRow[]; rounds: number; labelA: ReactNode; labelB: ReactNode }) {
   const per = Math.max(1, rounds);
   return (
     <div className="play-scoreboard">
@@ -866,6 +899,7 @@ function RecentMatches({ signedIn }: { signedIn: boolean }) {
           {items.map((h) => (
             <li key={h.id}>
               <div className="play-recent-row">
+                {h.map && <MapThumb map={h.map} />}
                 <span>
                   <b>{h.modeLabel}</b> · {h.map ? mapName(h.map) : "?"}
                   {h.status === "abandoned" && <span className="hint"> · Abandoned</span>}
@@ -1026,7 +1060,8 @@ function MatchCard({ match: m, meId, skew, busy, act, mine }: { match: Match; me
   return (
     <section className={`panel play-match ${mine ? "mine" : ""} phase-${m.phase}`}>
       <div className="panel-head">
-        <h2>
+        <h2 className="play-match-title">
+          {m.map && <MapThumb map={m.map} />}
           {m.map ? mapName(m.map) : "Map veto"}
           <span className="hint">
             {" "}
@@ -1039,11 +1074,15 @@ function MatchCard({ match: m, meId, skew, busy, act, mine }: { match: Match; me
 
       {m.score && (
         <div className="play-score" aria-label="Score">
-          <span>{labels[0]}</span>
+          <span>
+            <SideIcon side={sideOf("a")} /> {labels[0]}
+          </span>
           <b>
             {m.score.a} : {m.score.b}
           </b>
-          <span>{labels[1]}</span>
+          <span>
+            {labels[1]} <SideIcon side={sideOf("b")} />
+          </span>
         </div>
       )}
 
@@ -1059,6 +1098,7 @@ function MatchCard({ match: m, meId, skew, busy, act, mine }: { match: Match; me
               const canBan = !ban && iAmCaptainOf(m.turn) && !busy;
               return (
                 <button key={map} className={`play-map ${ban ? "banned" : ""}`} disabled={!canBan} onClick={() => act(() => play.ban(m.id, map))}>
+                  <MapThumb map={map} size="tile" />
                   <span className="play-map-name">{mapName(map)}</span>
                   {ban ? (
                     <small>
@@ -1091,10 +1131,10 @@ function MatchCard({ match: m, meId, skew, busy, act, mine }: { match: Match; me
           {iAmCaptainOf(m.sidePicker) && (
             <div className="play-sides">
               <button className="btn play-side ct" disabled={busy} onClick={() => act(() => play.side(m.id, "ct"))}>
-                Counter-Terrorists
+                <SideIcon side="ct" /> Counter-Terrorists
               </button>
               <button className="btn play-side t" disabled={busy} onClick={() => act(() => play.side(m.id, "t"))}>
-                Terrorists
+                <SideIcon side="t" /> Terrorists
               </button>
             </div>
           )}
@@ -1119,7 +1159,7 @@ function MatchCard({ match: m, meId, skew, busy, act, mine }: { match: Match; me
               <CopyLine label="Or paste in the CS2 console" text={m.joinInfo.console} />
             </div>
           )}
-          {myTeam && m.warmup && (
+          {iAmCaptainOf(myTeam) && m.warmup && (
             <div className="row-actions">
               <button
                 className="btn small"
@@ -1211,11 +1251,24 @@ function MatchCard({ match: m, meId, skew, busy, act, mine }: { match: Match; me
       {m.scoreboard && m.scoreboard.length > 0 && (
         <details className="play-scoreboard-box" open={!!myTeam}>
           <summary>Scoreboard</summary>
-          <Scoreboard rows={m.scoreboard} rounds={(m.score?.a ?? 0) + (m.score?.b ?? 0)} labelA={label("a")} labelB={label("b")} />
+          <Scoreboard
+            rows={m.scoreboard}
+            rounds={(m.score?.a ?? 0) + (m.score?.b ?? 0)}
+            labelA={
+              <>
+                <SideIcon side={sideOf("a")} /> {label("a")}
+              </>
+            }
+            labelB={
+              <>
+                <SideIcon side={sideOf("b")} /> {label("b")}
+              </>
+            }
+          />
         </details>
       )}
 
-      {myTeam && !ended && (
+      {iAmCaptainOf(myTeam) && !ended && (
         <div className="row-actions">
           <button
             className="btn small ghost danger"

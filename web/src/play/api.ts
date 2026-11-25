@@ -135,6 +135,8 @@ export interface State {
     matchServers: number;
   }[];
   /** The viewer's Fixed teams lobby. */
+  /** Thumbnails by image key ("de_dust2", "workshop-123", "side-t", "side-ct"). */
+  mapImages?: Record<string, string>;
   fixed: { mode: Mode; captainA: string | null; captainB: string | null; votes: { a: boolean; b: boolean }; full: boolean; reason: string | null } | null;
   lobby: LobbyPlayer[];
   drafts: Draft[];

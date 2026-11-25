@@ -890,3 +890,74 @@
   font-style: italic;
   color: var(--ink-soft);
 }
+
+/* Map thumbnails and T/CT icons. */
+.map-thumb {
+  display: inline-block;
+  object-fit: cover;
+  border-radius: 6px;
+  background: var(--line-soft);
+  flex: none;
+}
+.map-thumb.small {
+  width: 56px;
+  height: 32px;
+  vertical-align: middle;
+}
+.map-thumb.tile {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  height: auto;
+  margin-bottom: 6px;
+}
+.map-thumb.none {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.map-thumb.tile.none {
+  display: flex;
+  font-size: 20px;
+}
+.play-map.banned .map-thumb {
+  filter: grayscale(1);
+  opacity: 0.45;
+}
+.play-match-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.play-recent-row .map-thumb {
+  margin-right: 4px;
+}
+.side-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  vertical-align: middle;
+  object-fit: contain;
+}
+.side-icon.badge {
+  width: auto;
+  min-width: 22px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 800;
+  color: #111;
+}
+.side-icon.badge.t {
+  background: #e3a33a;
+}
+.side-icon.badge.ct {
+  background: #5d9cec;
+}

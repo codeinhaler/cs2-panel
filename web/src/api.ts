@@ -583,6 +583,11 @@ export interface MmTheme {
   colors: Record<MmColorKey, string> | null;
 }
 
+export interface MapImagesInfo {
+  images: Record<string, { source: "custom" | "auto"; v: number }>;
+  urls: Record<string, string>;
+}
+
 export interface MmScoreRow {
   steamId: string;
   name: string;
@@ -731,6 +736,19 @@ export const api = {
     if (!res.ok) throw new Error(data.error ?? `Upload failed (${res.status})`);
     return data as { images: MatchmakingInfo["images"] };
   },
+  mapImages: () => request<MapImagesInfo>("GET", "/api/matchmaking/map-images"),
+  uploadMapImage: async (key: string, file: File) => {
+    const res = await fetch(`/api/matchmaking/map-images/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      headers: { "Content-Type": file.type || "application/octet-stream" },
+      body: file,
+    });
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    if (!res.ok) throw new Error(data.error ?? `Upload failed (${res.status})`);
+    return data as MapImagesInfo;
+  },
+  removeMapImage: (key: string) => request<MapImagesInfo>("DELETE", `/api/matchmaking/map-images/${encodeURIComponent(key)}`),
+  refreshMapImages: () => request<MapImagesInfo & { found: { maps: number; sides: number } }>("POST", "/api/matchmaking/map-images/refresh", {}),
   mmRemoveImage: (kind: "icon" | "banner") => request<{ images: MatchmakingInfo["images"] }>("DELETE", `/api/matchmaking/images/${kind}`),
   mmCancel: (id: number) => request<{ ok: true }>("POST", `/api/matchmaking/matches/${id}/cancel`, {}),
   backups: () => request<{ backups: BackupInfo[]; settings: BackupSettings; totalBytes: number }>("GET", "/api/backups"),

@@ -245,6 +245,7 @@ const DA: Record<string, string> = {
   "Only players in this match can do that.": "Kun spillere i denne kamp kan gøre det.",
   "Only players on these teams can do that.": "Kun spillere på disse hold kan gøre det.",
   "Only the captains vote on this.": "Kun kaptajnerne stemmer om dette.",
+  "Only the captains can do that.": "Kun kaptajnerne kan gøre det.",
   "The other captain picks the side.": "Den anden kaptajn vælger side.",
   "The teams aren't full: only the two captains can start (both have to vote).": "Holdene er ikke fulde: kun de to kaptajner kan starte (begge skal stemme).",
   "You're banned from these servers.": "Du er udelukket fra disse servere.",

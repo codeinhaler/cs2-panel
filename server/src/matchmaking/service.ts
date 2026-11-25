@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import type { MapImages } from "./map-images.js";
 import path from "node:path";
 import { randomInt } from "node:crypto";
 import { z } from "zod";
@@ -454,6 +455,8 @@ export interface StateView {
   }[];
   /** The viewer's Fixed teams lobby: captains, start votes and whether it can start. */
   fixed: FixedView | null;
+  /** Thumbnails by image key: "de_dust2", "workshop-123", "side-t", "side-ct". Missing: show a placeholder. */
+  mapImages: Record<string, string>;
   lobby: LobbyView[];
   drafts: DraftView[];
   matches: MatchView[];
@@ -526,6 +529,8 @@ export interface MatchmakingDeps {
   isBanned: (steamId: string) => boolean;
   audit: AuditLog;
   images: SiteImages;
+  /** Map thumbnails and T/CT icons (optional in tests). */
+  mapImages?: MapImages;
   /** What Steam says about a Workshop map. */
   workshop: (id: string) => Promise<WorkshopInfo>;
   fetchFn: typeof fetch;
@@ -726,6 +731,7 @@ export class Matchmaking {
       const info = await this.d.workshop(spec!.id);
       if (workshopBlocks(info.status)) throw badRequest(`Workshop map ${spec!.id}: ${info.message}`);
       if (info.title) this.mapTitles.set(`workshop:${spec!.id}`, info.title);
+      if (info.previewUrl) void this.d.mapImages?.saveWorkshopPreview(spec!.id, info.previewUrl, this.d.fetchFn).catch(() => undefined);
     }
     // No waiting between this check and the write.
     refuseRemoved();
@@ -1125,7 +1131,18 @@ export class Matchmaking {
       if (spec?.kind !== "workshop" || this.mapTitles.has(map)) continue;
       const info = await this.d.workshop(spec.id).catch(() => null);
       if (info?.title) this.mapTitles.set(map, info.title);
+      if (info?.previewUrl) await this.d.mapImages?.saveWorkshopPreview(spec.id, info.previewUrl, this.d.fetchFn).catch(() => undefined);
     }
+  }
+
+  mapImage(key: string): Promise<{ data: Buffer; type: string } | null> {
+    return this.d.mapImages?.read(key) ?? Promise.resolve(null);
+  }
+
+  /** Thumbnail URLs by image key ("de_dust2", "workshop-123", "side-t"), for the site. */
+  mapImageUrls(): Record<string, string> {
+    const list = this.d.mapImages?.list() ?? {};
+    return Object.fromEntries(Object.entries(list).map(([k, v]) => [k, `/map-image/${k}?v=${v.v}`]));
   }
 
   /** Names for Workshop maps, by "workshop:ID". */
@@ -1949,9 +1966,15 @@ export class Matchmaking {
     if (![...m.teamA, ...m.teamB].some((p) => p.steamId === by)) throw forbidden("Only players in this match can do that.");
   }
 
+  /** Cancelling and starting early are for the two captains (either one). */
+  private requireCaptain(m: Match, by: string): void {
+    this.requireMember(m, by);
+    if (by !== m.captainA && by !== m.captainB) throw forbidden("Only the captains can do that.");
+  }
+
   async cancelMatch(by: string | null, matchId: number, actorId: number | null = null): Promise<void> {
     const m = this.requireMatch(matchId);
-    if (by !== null) this.requireMember(m, by);
+    if (by !== null) this.requireCaptain(m, by);
     if (!isActive(m)) throw badRequest("That match has already ended.");
     const who = by ? this.displayName(this.player(by)) : "an admin";
     await this.finish(m, "cancelled", `Cancelled by ${who}`);
@@ -1961,7 +1984,7 @@ export class Matchmaking {
   /** Ends warmup without waiting for everyone (someone didn't show up). */
   async startNow(by: string, matchId: number): Promise<void> {
     const m = this.requireMatch(matchId);
-    this.requireMember(m, by);
+    this.requireCaptain(m, by);
     if (m.phase !== "live") throw badRequest("The server isn't ready yet.");
     if (m.bridgePhase === "live") throw badRequest("The match has already started.");
     const s = this.d.servers.require(m.serverId);
@@ -2232,6 +2255,7 @@ export class Matchmaking {
       me,
       lobbies,
       fixed: me?.mode && MODE_INFO[me.mode].fixed ? this.fixedView(me.mode) : null,
+      mapImages: this.mapImageUrls(),
       lobby,
       drafts,
       // Ongoing matches for everyone (so people can join them); an ended match only for its own players.
