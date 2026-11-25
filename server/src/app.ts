@@ -38,6 +38,7 @@ import { sysReader, type SysReader } from "./cpu/topology.js";
 import { SharedConfigService, withoutSharedBlock } from "./servers/shared-config.js";
 import { WorkshopLookup, workshopBlocks } from "./game/workshop.js";
 import { parseMapSpec } from "./servers/map-spec.js";
+import { INGAME_PERMS, InGameAdmins } from "./ingame/admins.js";
 import { CommandSchema, commandPermission, gameModeLine, rconFor } from "./servers/commands.js";
 import { Settings } from "./settings.js";
 import { Automation } from "./automation/index.js";
@@ -106,6 +107,7 @@ export interface App {
     publicSite: PublicSite;
     tls: TlsService;
     discordBot: DiscordBot;
+    ingame: InGameAdmins;
   };
 }
 
@@ -279,6 +281,48 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     isMatchActive: (id) => matchmaking.isMatchActive(id),
   });
   matchmaking.voice = discordBot;
+  // In-game admins: the bridge's !panel menu (people by SteamID with a role, and the maps it offers).
+  const ingame = new InGameAdmins({
+    db,
+    servers: () => servers.listRecords(),
+    hasBridge: (id) => bans.hasBridge(id),
+    files,
+    host,
+    rcon,
+    audit,
+    installedMaps: () => mapMenus.installedMaps(),
+    serverWorkshop: (s) => {
+      const ids: string[] = [];
+      const add = (value: string) => {
+        const spec = parseMapSpec(value);
+        if (spec?.kind === "workshop") ids.push(spec.id);
+        else if (spec?.kind === "collection" && spec.startId) ids.push(spec.startId);
+      };
+      add(s.map);
+      for (const m of mapCycles.get(s.id).maps) add(m);
+      const mm = matchmaking.config();
+      for (const mode of Object.values(mm.modes)) if (mode.serverIds?.includes(s.id)) for (const m of mode.maps) add(m);
+      return ids;
+    },
+    workshopTitle: async (id) => {
+      const info = await workshop.lookup(id, "map");
+      return info.status === "ok" ? info.title : null;
+    },
+  });
+  servers.beforeStart.push((s) =>
+    ingame.writeFor(s).then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  plugins.afterApply.push((s, ids) =>
+    ids.includes(BRIDGE_ID)
+      ? ingame.writeFor(s).then(
+          () => undefined,
+          () => undefined,
+        )
+      : Promise.resolve(),
+  );
   const publicSite = new PublicSite(
     (https) =>
       buildPublicApp({
@@ -1182,6 +1226,78 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     return { ok: true };
   });
 
+  // ------------------------------------------------------------- in-game admins (the bridge's !panel menu)
+
+  app.get("/api/ingame", async (req) => {
+    requirePerm(req, "view");
+    return {
+      perms: INGAME_PERMS,
+      roles: ingame.roles(),
+      admins: ingame.list(),
+      maps: ingame.extraMaps(),
+      coverage: bans.coverage(),
+    };
+  });
+
+  const roleBody = z.object({ name: z.string().max(40), perms: z.array(z.string()).max(20) });
+  app.post("/api/ingame/roles", async (req) => {
+    const user = requirePerm(req, "gameadmins.manage");
+    const body = roleBody.parse(req.body);
+    return { role: ingame.saveRole(null, body.name, body.perms, user.id) };
+  });
+  app.put("/api/ingame/roles/:id", async (req) => {
+    const user = requirePerm(req, "gameadmins.manage");
+    const { id } = idParam.parse(req.params);
+    const body = roleBody.parse(req.body);
+    return { role: ingame.saveRole(id, body.name, body.perms, user.id) };
+  });
+  app.delete("/api/ingame/roles/:id", async (req) => {
+    const user = requirePerm(req, "gameadmins.manage");
+    const { id } = idParam.parse(req.params);
+    ingame.deleteRole(id, user.id);
+    return { ok: true };
+  });
+
+  const adminBody = z.object({
+    steam: z.string().min(1).max(200),
+    name: z.string().max(64).default(""),
+    roleId: z.number().int().positive(),
+    serverId: z.number().int().positive().nullable(),
+    expiresAt: z.string().max(40).nullable().default(null),
+  });
+  const saveIngameAdmin = async (id: number | null, raw: unknown, actorId: number) => {
+    const body = adminBody.parse(raw);
+    return ingame.save(id, { ...body, steamId: await steamIdFrom(body.steam) }, actorId);
+  };
+  app.post("/api/ingame/admins", async (req) => {
+    const user = requirePerm(req, "gameadmins.manage");
+    return { admin: await saveIngameAdmin(null, req.body, user.id) };
+  });
+  app.put("/api/ingame/admins/:id", async (req) => {
+    const user = requirePerm(req, "gameadmins.manage");
+    const { id } = idParam.parse(req.params);
+    return { admin: await saveIngameAdmin(id, req.body, user.id) };
+  });
+  app.delete("/api/ingame/admins/:id", async (req) => {
+    const user = requirePerm(req, "gameadmins.manage");
+    const { id } = idParam.parse(req.params);
+    ingame.remove(id, user.id);
+    return { ok: true };
+  });
+
+  app.post("/api/ingame/maps", async (req) => {
+    const user = requirePerm(req, "gameadmins.manage");
+    const { id } = z.object({ id: z.string().trim() }).parse(req.body);
+    await ingame.addMap(id, user.id);
+    return { maps: ingame.extraMaps() };
+  });
+  app.delete("/api/ingame/maps/:id", async (req) => {
+    const user = requirePerm(req, "gameadmins.manage");
+    const { id } = z.object({ id: z.string().regex(/^\d{1,20}$/) }).parse(req.params);
+    ingame.removeMap(id, user.id);
+    return { maps: ingame.extraMaps() };
+  });
+
   // ------------------------------------------------------------- game update
 
   app.get("/api/game", async (req) => {
@@ -1611,6 +1727,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       publicSite,
       tls,
       discordBot,
+      ingame,
     },
   };
 }

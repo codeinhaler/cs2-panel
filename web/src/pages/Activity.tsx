@@ -202,6 +202,32 @@ function describe(e: AuditEntry): string {
         : d.result === "servers_down"
           ? `CS2 updated, but these servers didn't come back up: ${str("down")}`
           : `CS2 update failed: ${str("error")}`;
+    case "ingame.role.add":
+      return `added the in-game role ${str("role")}`;
+    case "ingame.role.edit":
+      return `changed the in-game role ${str("role")}`;
+    case "ingame.role.delete":
+      return `deleted the in-game role ${str("role")}`;
+    case "ingame.admin.add":
+      return `made ${str("name") || str("steamId")} an in-game ${str("role")}`;
+    case "ingame.admin.edit":
+      return `changed ${str("name") || str("steamId")}'s in-game role (${str("role")})`;
+    case "ingame.admin.remove":
+      return `took ${str("name") || str("steamId")}'s in-game role (${str("role")}) away`;
+    case "ingame.map.add":
+      return `added ${str("title") || `Workshop map ${str("workshop")}`} to the in-game map menu`;
+    case "ingame.map.remove":
+      return `took Workshop map ${str("workshop")} off the in-game map menu`;
+    case "ingame.action": {
+      const what: Record<string, string> = {
+        map: `changed the map to ${str("detail")}`,
+        restart: "restarted the game",
+        kick: `kicked ${str("detail")}`,
+        cvar: `set ${str("detail")}`,
+        rcon: `ran the command ${str("detail")}`,
+      };
+      return `(in game: ${str("name") || str("steamId")}) ${what[str("action")] ?? str("action")}${d.duringMatch ? ", during a match" : ""}`;
+    }
     default:
       return e.action;
   }

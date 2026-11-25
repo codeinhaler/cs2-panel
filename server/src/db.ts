@@ -297,6 +297,34 @@ const MIGRATIONS: string[] = [
   /* 17: test-mode matches (bots fill everything; kept out of the site's match lists) */ `
   ALTER TABLE mm_matches ADD COLUMN test INTEGER NOT NULL DEFAULT 0;
   `,
+  /* 18: in-game admins (the bridge's !panel menu): roles with permissions, people by SteamID, extra Workshop maps */ `
+  CREATE TABLE ingame_roles (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE,
+    perms      TEXT NOT NULL,           -- JSON list, e.g. ["map","kick"]
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  INSERT INTO ingame_roles (name, perms) VALUES
+    ('Map changer', '["map"]'),
+    ('Moderator', '["map","restart","kick"]'),
+    ('Admin', '["map","restart","kick","cvar","rcon","interrupt"]');
+  CREATE TABLE ingame_admins (
+    id         INTEGER PRIMARY KEY,
+    steam_id   TEXT NOT NULL,
+    name       TEXT NOT NULL DEFAULT '',
+    role_id    INTEGER NOT NULL REFERENCES ingame_roles(id),
+    server_id  INTEGER REFERENCES servers(id) ON DELETE CASCADE,   -- NULL: every server
+    expires_at TEXT,                                               -- NULL: no end
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX ingame_admins_steam ON ingame_admins(steam_id);
+  CREATE TABLE ingame_maps (
+    workshop_id TEXT PRIMARY KEY,
+    title       TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  `,
 ];
 
 export function openDb(file: string): Db {

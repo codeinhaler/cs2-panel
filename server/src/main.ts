@@ -30,11 +30,13 @@ setInterval(() => {
 }, 10 * 60_000).unref();
 services.tls.start();
 services.matchmaking.start();
+services.ingame.start();
 
 const shutdown = async () => {
   services.players.stopPolling();
   services.automation.stop();
   services.matchmaking.stop();
+  services.ingame.stop();
   services.tls.stop();
   await services.publicSite.close();
   await fastify.close();

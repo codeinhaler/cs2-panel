@@ -26,11 +26,15 @@ namespace Cs2PanelBridge;
 /// `cs2panel_match_reload`. While a match is on, only those players may join,
 /// each is put on their team, warmup lasts until everyone is in, and
 /// `cs2panel_match_status` reports how far the match is.
+///
+/// In-game admins (AdminMenu.cs): the panel writes who may use the `!panel` menu and the maps it
+/// offers to configs/plugins/Cs2PanelBridge/admins.json; what they do is reported back with
+/// `cs2panel_actions`.
 /// </summary>
-public class Cs2PanelBridge : BasePlugin
+public partial class Cs2PanelBridge : BasePlugin
 {
     public override string ModuleName => "CS2 Panel Bridge";
-    public override string ModuleVersion => "1.11.0";
+    public override string ModuleVersion => "1.12.0";
     public override string ModuleAuthor => "cs2-panel";
     public override string ModuleDescription => "Enforces cs2-panel bans, locks matchmaking matches and reports players to the panel.";
 
@@ -80,6 +84,7 @@ public class Cs2PanelBridge : BasePlugin
         LoadBans();
         LoadMatch();
         LoadCycle();
+        LoadAdmins();
         // Bots that fill in for players who disconnect (and leave again when they're back).
         AddTimer(5.0f, () =>
         {

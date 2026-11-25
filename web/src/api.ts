@@ -666,6 +666,45 @@ export interface MatchmakingInfo {
   }[];
 }
 
+export interface InGamePermInfo {
+  id: string;
+  label: string;
+  hint: string;
+}
+export interface InGameRole {
+  id: number;
+  name: string;
+  perms: string[];
+  people: number;
+}
+export interface InGameAdmin {
+  id: number;
+  steamId: string;
+  name: string;
+  roleId: number;
+  roleName: string;
+  serverId: number | null;
+  serverName: string | null;
+  expiresAt: string | null;
+  expired: boolean;
+  createdBy: string | null;
+  createdAt: string;
+}
+export interface InGameInfo {
+  perms: InGamePermInfo[];
+  roles: InGameRole[];
+  admins: InGameAdmin[];
+  maps: { id: string; title: string | null }[];
+  coverage: { enforced: { id: number; name: string }[]; missing: { id: number; name: string }[] };
+}
+export interface InGameAdminInput {
+  steam: string;
+  name: string;
+  roleId: number;
+  serverId: number | null;
+  expiresAt: string | null;
+}
+
 async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
     method,
@@ -785,6 +824,15 @@ export const api = {
   checkPort: (port: number, serverId?: number) => request<{ problem: string | null }>("GET", `/api/ports/check?${q({ port, serverId })}`),
 
   servers: () => request<{ servers: Server[] }>("GET", "/api/servers"),
+  ingame: () => request<InGameInfo>("GET", "/api/ingame"),
+  saveIngameRole: (id: number | null, role: { name: string; perms: string[] }) =>
+    request<{ role: InGameRole }>(id === null ? "POST" : "PUT", id === null ? "/api/ingame/roles" : `/api/ingame/roles/${id}`, role),
+  deleteIngameRole: (id: number) => request<{ ok: true }>("DELETE", `/api/ingame/roles/${id}`),
+  saveIngameAdmin: (id: number | null, a: InGameAdminInput) =>
+    request<{ admin: InGameAdmin }>(id === null ? "POST" : "PUT", id === null ? "/api/ingame/admins" : `/api/ingame/admins/${id}`, a),
+  deleteIngameAdmin: (id: number) => request<{ ok: true }>("DELETE", `/api/ingame/admins/${id}`),
+  addIngameMap: (id: string) => request<{ maps: InGameInfo["maps"] }>("POST", "/api/ingame/maps", { id }),
+  removeIngameMap: (id: string) => request<{ maps: InGameInfo["maps"] }>("DELETE", `/api/ingame/maps/${id}`),
   server: (id: number) => request<ServerDetail>("GET", `/api/servers/${id}`),
   createServer: (input: Record<string, unknown>) => request<{ server: Server }>("POST", "/api/servers", input),
   updateServer: (id: number, input: Record<string, unknown>) => request<{ server: Server; restartRequired: boolean }>("PATCH", `/api/servers/${id}`, input),

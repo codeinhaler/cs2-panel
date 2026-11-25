@@ -143,6 +143,28 @@ const SECTIONS: Section[] = [
     items: [{ term: "Servers", text: "Untick a server to leave it out. Changes apply live to running servers." }],
   },
   {
+    id: "ingame",
+    title: "In-game admins",
+    where: "Game servers → In-game admins",
+    intro:
+      "People who may use the admin menu in the game, without a panel login: they type !panel in chat on a server with the CS2 Panel Bridge and pick with !1 to !9. Replaces CS2-SimpleAdmin's menu for changing maps, restarting and kicking. Changes reach the servers within a minute.",
+    items: [
+      {
+        term: "People",
+        text: "A Steam profile (link or SteamID64), a name, a role, one server or every server, and an optional end date. Someone with a role on every server and another on one server gets both on that server.",
+      },
+      {
+        term: "Roles",
+        text: "What a role may do: Change the map, Restart the game, Kick players, Change server settings (!panel cvar <name> <value>), Run any console command (!panel rcon <command>), and May interrupt running matches. Without that last one, changing the map, restarting, kicking and settings are hidden on a server while a matchmaking match runs there; with it, the menu warns first. Ships with Map changer, Moderator and Admin; add your own. A role that people have can't be deleted.",
+      },
+      {
+        term: "Maps in the menu",
+        text: "Change map lists the server's maps by name, so nobody needs file names: the built-in CS2 maps, and the Workshop maps the server already uses (its start map, its map cycle and the matchmaking lobbies it serves), by their Steam title. Add more Workshop maps here to offer them on every server. Pick a map, then confirm; everyone sees who changed it.",
+      },
+      { term: "Activity", text: "Everything done with the menu shows in Activity, marked (in game: name), with during a match when it was." },
+    ],
+  },
+  {
     id: "mm",
     title: "Matchmaking",
     where: "Matchmaking",

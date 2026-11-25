@@ -1,3 +1,4 @@
+import { InGameAdminsPage } from "./pages/InGameAdmins";
 import { useEffect, useState } from "react";
 import { BrowserRouter, NavLink, Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { api, type Me } from "./api";
@@ -54,6 +55,7 @@ export function App() {
             <Route path="notifications" element={<NotificationsPage />} />
             <Route path="backups" element={<BackupsPage />} />
             <Route path="shared" element={<SharedPage />} />
+            <Route path="ingame" element={<InGameAdminsPage />} />
             <Route path="matchmaking" element={<MatchmakingPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="help" element={<HelpPage />} />
@@ -91,7 +93,7 @@ function Shell() {
         <NavLink to="/" end className="nav-link">
           Monitor
         </NavLink>
-        <NavGroup id="game" label="Game servers" paths={["/servers", "/game", "/presets", "/shared"]}>
+        <NavGroup id="game" label="Game servers" paths={["/servers", "/game", "/presets", "/shared", "/ingame"]}>
           <NavLink to="/servers" className="nav-link">
             Servers
           </NavLink>
@@ -103,6 +105,9 @@ function Shell() {
           </NavLink>
           <NavLink to="/shared" className="nav-link">
             Shared settings
+          </NavLink>
+          <NavLink to="/ingame" className="nav-link">
+            In-game admins
           </NavLink>
         </NavGroup>
         <NavLink to="/matchmaking" className="nav-link">

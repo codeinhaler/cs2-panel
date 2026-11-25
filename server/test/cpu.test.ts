@@ -486,7 +486,7 @@ describe("CPU Management in the panel", () => {
     old.exec(
       "ALTER TABLE servers DROP COLUMN cpu_set; ALTER TABLE servers DROP COLUMN cpu_mode;" +
         // And without the later tables (migration 14 on), as a database from then was.
-        "DROP TABLE discord_links; DROP TABLE discord_users; DROP TABLE discord_sessions; DROP TABLE discord_moves; DROP TABLE discord_channels; DROP TABLE mm_match_stats; ALTER TABLE mm_matches DROP COLUMN test;" +
+        "DROP TABLE discord_links; DROP TABLE discord_users; DROP TABLE discord_sessions; DROP TABLE discord_moves; DROP TABLE discord_channels; DROP TABLE mm_match_stats; ALTER TABLE mm_matches DROP COLUMN test; DROP TABLE ingame_admins; DROP TABLE ingame_roles; DROP TABLE ingame_maps;" +
         "PRAGMA user_version = 12;",
     );
     old.close();
