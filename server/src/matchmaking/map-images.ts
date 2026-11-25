@@ -142,14 +142,21 @@ export class MapImages {
     for (const e of vpk.entries) {
       if (!e.path.startsWith("panorama/images")) continue;
       if (!["vtex_c", "png", "jpg"].includes(e.ext)) continue;
-      // Map previews: panorama/images/map_icons/screenshots/<size>/de_dust2.vtex_c
-      if (e.path.includes("map_icons") && e.path.includes("screenshots") && /^(de|cs|ar|dm|gd|aim|fy|awp|surf)_[a-z0-9_]+$/.test(e.name)) {
-        const had = maps.get(e.name);
-        if (!had || rank(e.path) < rank(had.path)) maps.set(e.name, e);
+      // Compiled pictures keep their source type in the name: de_dust2.png → de_dust2_png.vtex_c.
+      const name = sourceName(e.name);
+      // Map previews: panorama/images/map_icons/screenshots/<size>/de_dust2_png.vtex_c
+      if (e.path.includes("map_icons") && e.path.includes("screenshots") && /^(de|cs|ar|dm|gd|aim|fy|awp|surf)_[a-z0-9_]+$/.test(name)) {
+        const had = maps.get(name);
+        if (!had || rank(e.path) < rank(had.path)) maps.set(name, e);
       }
       // Team icons, if the game has them as pictures (often they're vector graphics, which we can't use).
-      const side = /^(?:icon[-_]?)?(t|ct)(?:[-_](?:logo|icon))?$/.exec(e.name) ?? /^(?:team[-_]|logo[-_])(t|ct)$/.exec(e.name);
+      const side = /^(?:icon[-_]?)?(t|ct)(?:[-_](?:logo|icon))?$/.exec(name) ?? /^(?:team[-_]|logo[-_])(t|ct)$/.exec(name);
       if (side && !sides.has(side[1]!)) sides.set(side[1]!, e);
+    }
+    // Clean up after older panels, which saved them under the compiled name (de_dust2_png).
+    const autoDir = path.join(this.dir, "auto");
+    for (const f of await fs.readdir(autoDir).catch(() => [] as string[])) {
+      if (/_(png|jpe?g|psd|tga)\.(png|jpg|webp)$/.test(f)) await fs.rm(path.join(autoDir, f), { force: true });
     }
     let foundMaps = 0;
     let foundSides = 0;
@@ -169,6 +176,11 @@ export class MapImages {
     await this.load();
     return { maps: foundMaps, sides: foundSides };
   }
+}
+
+/** "de_dust2_png" → "de_dust2" (the name of the picture the game compiled it from). */
+export function sourceName(name: string): string {
+  return name.replace(/_(png|jpe?g|psd|tga)$/, "");
 }
 
 /**

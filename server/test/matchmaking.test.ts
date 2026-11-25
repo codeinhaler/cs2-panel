@@ -1254,12 +1254,15 @@ describe("matchmaking site", () => {
     // Compiled panorama textures keep the original PNG inside; the 360p one is preferred.
     const vtex = (marker: string) => Buffer.concat([Buffer.from(`VTEX header ${marker} `), PNG, Buffer.from(" trailer")]);
     writeVpk(path.join(dir, "cs2/base/game/csgo/pak01_dir.vpk"), [
-      { path: "panorama/images/map_icons/screenshots/1080p", name: "de_dust2", ext: "vtex_c", data: Buffer.from("no picture here") },
-      { path: "panorama/images/map_icons/screenshots/360p", name: "de_dust2", ext: "vtex_c", data: vtex("dust2") },
+      { path: "panorama/images/map_icons/screenshots/1080p", name: "de_dust2_png", ext: "vtex_c", data: Buffer.from("no picture here") },
+      { path: "panorama/images/map_icons/screenshots/360p", name: "de_dust2_png", ext: "vtex_c", data: vtex("dust2") },
       { path: "panorama/images/map_icons/screenshots/360p", name: "de_mirage", ext: "vtex_c", data: vtex("mirage"), inDir: true },
       { path: "panorama/images/icons/ui", name: "ct_logo", ext: "vtex_c", data: vtex("ct") },
       { path: "materials/models", name: "de_dust2", ext: "vtex_c", data: vtex("not a preview") },
     ]);
+    // Left by an older panel under the compiled name: cleaned up.
+    mkdirSync(path.join(dir, "map-images", "auto"), { recursive: true });
+    writeFileSync(path.join(dir, "map-images", "auto", "de_dust2_png.png"), PNG);
     const r = await admin(owner, "POST", "/api/matchmaking/map-images/refresh", {});
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     expect(r.body.found).toEqual({ maps: 2, sides: 1 });

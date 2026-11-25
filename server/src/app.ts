@@ -231,7 +231,9 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   void mapImages
     .load()
     .then(async () => {
-      if (!Object.values(mapImages.list()).some((x) => x.source === "auto")) await mapImages.extractFromGame();
+      const auto = Object.entries(mapImages.list()).filter(([, x]) => x.source === "auto");
+      // None yet, or saved under the compiled names by an older panel (de_dust2_png): read them again.
+      if (!auto.length || auto.some(([k]) => /_(png|jpe?g|psd|tga)$/.test(k))) await mapImages.extractFromGame();
     })
     .catch(() => undefined);
   const matchmaking = new Matchmaking({
