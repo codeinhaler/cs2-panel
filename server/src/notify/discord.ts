@@ -50,6 +50,7 @@ export function describeEvent(
 ): { group: EventGroup; embed: Omit<Embed, "timestamp"> } | null {
   const d = e.details;
   const str = (k: string) => (d[k] === undefined || d[k] === null ? "" : String(d[k]));
+  const list = (k: string) => (Array.isArray(d[k]) ? (d[k] as unknown[]).map(String).join(", ") : str(k));
   const who = names.user ?? "Someone";
   const server = names.server;
   const footer = server ? { text: server } : undefined;
@@ -72,6 +73,15 @@ export function describeEvent(
       return {
         group: "updates",
         embed: { title: "A CS2 update is out", description: `Build ${str("latest")} (installed: ${str("installed")}).`, color: BLUE },
+      };
+    case "game.update.held":
+      return {
+        group: "updates",
+        embed: {
+          title: "A CS2 update is waiting for you",
+          description: `Build ${str("latest")} wasn't installed automatically, because servers use CounterStrikeSharp or Metamod (${list("servers")}). Check that they work with the new build, then start the update in the panel.`,
+          color: BLUE,
+        },
       };
     case "game.update.start":
       return {

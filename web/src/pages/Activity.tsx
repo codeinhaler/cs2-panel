@@ -190,6 +190,8 @@ function describe(e: AuditEntry): string {
       return d.validate ? "started a CS2 update with file verification" : "started a CS2 update";
     case "game.update.available":
       return `found a CS2 update: build ${str("latest")} (installed: ${str("installed")})`;
+    case "game.update.held":
+      return `held back CS2 build ${str("latest")}, because servers use CounterStrikeSharp or Metamod`;
     case "game.update.settings": {
       const p: Record<string, string> = { off: "off", notify: "only notify", "when-empty": "update when empty", now: "update right away" };
       return `set automatic CS2 updates to "${p[str("policy")] ?? str("policy")}"`;

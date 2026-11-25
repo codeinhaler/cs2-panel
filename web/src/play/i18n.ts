@@ -220,6 +220,10 @@ const DA: Record<string, string> = {
   "Too late to join: the match is nearly over.": "For sent at komme med: kampen er næsten slut.",
   "You're in another match.": "Du er i en anden kamp.",
   "Each team needs at least one player.": "Hvert hold skal have mindst én spiller.",
+  "Test mode: the captain can start alone, and bots play the other team.": "Testtilstand: kaptajnen kan starte alene, og bots spiller det andet hold.",
+  "Test mode is on.": "Testtilstand er slået til.",
+  "One player can make teams: bots fill every other spot, and bot captains ban and pick within 2 seconds. Test matches don't show up under recent matches.":
+    "Én spiller kan lave hold: bots fylder alle andre pladser, og bot-kaptajner banner og vælger inden for 2 sekunder. Testkampe vises ikke under seneste kampe.",
   "At least 2 ready players are needed to make teams.": "Der skal mindst 2 klar spillere til at lave hold.",
   "Every matchmaking server is busy. Wait for a match to finish.": "Alle matchmaking-servere er optaget. Vent på, at en kamp bliver færdig.",
   "Finish your match before changing lobby.": "Gør din kamp færdig, før du skifter lobby.",

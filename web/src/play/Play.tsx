@@ -144,6 +144,12 @@ export function Play() {
           </div>
         )}
         {!state.enabled && <div className="notice info">Matchmaking is closed right now. Check back when the event starts.</div>}
+        {state.enabled && state.testMode && (
+          <div className="notice warn">
+            <b>Test mode is on.</b> One player can make teams: bots fill every other spot, and bot captains ban and pick within 2 seconds. Test matches don't
+            show up under recent matches.
+          </div>
+        )}
 
         {state.look.layout === "board" ? (
           <BoardHome state={state} myMatch={myMatch} myDraft={myDraft} otherMatches={otherMatches} skew={skew.current} busy={busy} act={act} />
@@ -572,14 +578,15 @@ function LobbyCard({ state, busy, act }: { state: State; busy: boolean; act: Act
   const max = size * 2;
   // This lobby's servers only: a busy Wingman server doesn't stop a Competitive match.
   const free = lobby?.freeServers ?? state.freeServers;
-  const canMake = myStatus === "ready" && available.length >= 2 && !draft && free > 0;
+  const needed = state.testMode ? 1 : 2;
+  const canMake = myStatus === "ready" && available.length >= needed && !draft && free > 0;
   const n = Math.min(available.length, max);
   const reason =
     myStatus === "in-match"
       ? null
       : !me.ready
         ? "Mark yourself ready to make teams."
-        : available.length < 2
+        : available.length < needed
           ? "Waiting for more ready players."
           : (lobby?.matchServers ?? state.matchServers) === 0
             ? `No server is set up for ${lobby?.label ?? "matches"} yet. Ask the organiser.`
@@ -743,7 +750,7 @@ function FixedLobbyCard({ state, busy, act }: { state: State; busy: boolean; act
       )}
       <div className="play-make">
         <button className="btn primary play-big" disabled={busy || !canStart} onClick={() => act(play.startFixed)}>
-          {f?.full ? "Start: ban maps" : "Vote to start"}
+          {f?.full || f?.reason?.startsWith("Test mode") ? "Start: ban maps" : "Vote to start"}
         </button>
         {hint && <span className="hint">{hint}</span>}
       </div>

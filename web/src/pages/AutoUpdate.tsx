@@ -107,6 +107,18 @@ export function AutoUpdatePanel({ auto, onChange }: { auto: AutoUpdateStatus; on
               )}
             </div>
           )}
+          {(form.policy === "now" || form.policy === "when-empty") && (
+            <label className="choice" style={{ marginTop: 12, maxWidth: 640 }}>
+              <input type="checkbox" checked={form.holdForPlugins} onChange={(e) => set("holdForPlugins", e.target.checked)} />
+              <span>
+                Wait for me when servers use CounterStrikeSharp or Metamod
+                <small className="hint" style={{ display: "block" }}>
+                  A new CS2 build often breaks these plugins until their makers release a fix, and then the servers crash on start. With this on, the panel only
+                  tells you about the update (here and on Discord). Update the plugins when a fix is out, then press Update now.
+                </small>
+              </span>
+            </label>
+          )}
           <div className="row-actions" style={{ marginTop: 16 }}>
             <button className="btn primary" onClick={() => void save()} disabled={busy || !dirty}>
               Save
@@ -130,7 +142,14 @@ function UpdateStatusLine({ auto }: { auto: AutoUpdateStatus }) {
   if (auto.error) {
     return (
       <div className="notice error">
-        Couldn't ask Steam for the latest build{auto.checkedAt && <> (<span title={fullTime(auto.checkedAt)}>{timeAgo(auto.checkedAt)}</span>)</>}: {auto.error}
+        Couldn't ask Steam for the latest build
+        {auto.checkedAt && (
+          <>
+            {" "}
+            (<span title={fullTime(auto.checkedAt)}>{timeAgo(auto.checkedAt)}</span>)
+          </>
+        )}
+        : {auto.error}
       </div>
     );
   }
@@ -150,11 +169,32 @@ function UpdateStatusLine({ auto }: { auto: AutoUpdateStatus }) {
       </p>
     );
   }
+  if (auto.heldFor.length > 0) {
+    return (
+      <div className="notice warn">
+        <strong>A CS2 update is waiting for you</strong>: Steam build {auto.latestBuild}
+        {auto.latestUpdatedAt && (
+          <>
+            {" "}
+            (released <span title={fullTime(auto.latestUpdatedAt)}>{timeAgo(auto.latestUpdatedAt)}</span>)
+          </>
+        )}
+        , you have {auto.installedBuild}. It isn't installed automatically, because {auto.heldFor.join(", ")} {auto.heldFor.length === 1 ? "uses" : "use"}{" "}
+        CounterStrikeSharp or Metamod. Check that they have a version for the new build (update them on the Plugins page), then press Update now below.{" "}
+        {checked}
+      </div>
+    );
+  }
   return (
     <div className="notice info">
       <strong>A CS2 update is available</strong>: Steam build {auto.latestBuild}
-      {auto.latestUpdatedAt && <> (released <span title={fullTime(auto.latestUpdatedAt)}>{timeAgo(auto.latestUpdatedAt)}</span>)</>}, you have{" "}
-      {auto.installedBuild}.{" "}
+      {auto.latestUpdatedAt && (
+        <>
+          {" "}
+          (released <span title={fullTime(auto.latestUpdatedAt)}>{timeAgo(auto.latestUpdatedAt)}</span>)
+        </>
+      )}
+      , you have {auto.installedBuild}.{" "}
       {auto.settings.policy === "when-empty" && auto.deadline && (
         <>
           It installs as soon as nobody is playing, at the latest <span title={fullTime(auto.deadline)}>{fullTime(auto.deadline)}</span>.{" "}

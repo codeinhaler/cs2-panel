@@ -22,9 +22,17 @@ export interface UpdateSettings {
   checkMinutes: number;
   maxWaitMinutes: number;
   warnSeconds: number;
+  /**
+   * Don't install on its own while a server runs CounterStrikeSharp or Metamod: a new CS2 build often breaks
+   * them until their makers release a fix, and then every server crashes. The admin starts it with Update now.
+   */
+  holdForPlugins: boolean;
 }
 
-export const DEFAULT_UPDATE_SETTINGS: UpdateSettings = { policy: "notify", checkMinutes: 10, maxWaitMinutes: 60, warnSeconds: 60 };
+export const DEFAULT_UPDATE_SETTINGS: UpdateSettings = { policy: "notify", checkMinutes: 10, maxWaitMinutes: 60, warnSeconds: 60, holdForPlugins: true };
+
+/** Plugins that hook into the game's code, and so tend to break when CS2 updates. */
+export const FRAGILE_PLUGINS = ["metamod", "counterstrikesharp"];
 
 interface CheckState {
   checkedAt: string | null;
@@ -36,6 +44,8 @@ interface CheckState {
   /** Build we last tried to install automatically, and when (so a failing update isn't retried every minute). */
   lastAttemptBuild: string | null;
   lastAttemptAt: string | null;
+  /** The build that's waiting because of holdForPlugins (so it's reported once, not every minute). */
+  heldBuild: string | null;
 }
 
 export interface UpdateStatus extends CheckState {
@@ -45,6 +55,8 @@ export interface UpdateStatus extends CheckState {
   checking: boolean;
   /** For when-empty: the time the update happens even if players are still on. */
   deadline: string | null;
+  /** Servers with CounterStrikeSharp or Metamod that keep an automatic update from installing (empty if none). */
+  heldFor: string[];
 }
 
 const EMPTY_STATE: CheckState = {
@@ -55,6 +67,7 @@ const EMPTY_STATE: CheckState = {
   pendingSince: null,
   lastAttemptBuild: null,
   lastAttemptAt: null,
+  heldBuild: null,
 };
 const RETRY_FAILED_MINUTES = 30;
 
@@ -72,6 +85,8 @@ export class UpdateWatcher {
     private readonly servers: ServerStore,
     private readonly humans: HumanCounter,
     private readonly audit: AuditLog,
+    /** Names of the servers that run CounterStrikeSharp or Metamod. */
+    private readonly pluginServers: () => string[] = () => [],
   ) {
     this.state = { ...EMPTY_STATE, ...settings.get<Partial<CheckState>>("update.state", {}) };
   }
@@ -80,13 +95,14 @@ export class UpdateWatcher {
     return { ...DEFAULT_UPDATE_SETTINGS, ...this.settings.get<Partial<UpdateSettings>>("update.settings", {}) };
   }
 
-  setConfig(next: UpdateSettings, actorId: number): UpdateSettings {
+  setConfig(next: Omit<UpdateSettings, "holdForPlugins"> & { holdForPlugins?: boolean }, actorId: number): UpdateSettings {
     if (!["off", "notify", "when-empty", "now"].includes(next.policy)) throw badRequest("Unknown update policy.");
     const clean: UpdateSettings = {
       policy: next.policy,
       checkMinutes: clamp(next.checkMinutes, 5, 1440),
       maxWaitMinutes: clamp(next.maxWaitMinutes, 5, 1440),
       warnSeconds: clamp(next.warnSeconds, 0, 600),
+      holdForPlugins: next.holdForPlugins ?? this.config().holdForPlugins,
     };
     this.settings.set("update.settings", clean);
     this.audit.record(actorId, "game.update.settings", null, { ...clean });
@@ -101,7 +117,8 @@ export class UpdateWatcher {
       updateAvailable && settings.policy === "when-empty" && this.state.pendingSince
         ? new Date(Date.parse(this.state.pendingSince) + settings.maxWaitMinutes * 60_000).toISOString()
         : null;
-    return { ...this.state, settings, installedBuild, updateAvailable, checking: this.checking !== null, deadline };
+    const heldFor = updateAvailable && settings.holdForPlugins && settings.policy !== "notify" && settings.policy !== "off" ? this.pluginServers() : [];
+    return { ...this.state, settings, installedBuild, updateAvailable, checking: this.checking !== null, deadline: heldFor.length ? null : deadline, heldFor };
   }
 
   /** Asks Steam for the newest build. Concurrent calls share one check. */
@@ -159,6 +176,17 @@ export class UpdateWatcher {
       now.getTime() - Date.parse(this.state.lastAttemptAt) < RETRY_FAILED_MINUTES * 60_000
     ) {
       return;
+    }
+    if (cfg.holdForPlugins) {
+      const held = this.pluginServers();
+      if (held.length) {
+        if (this.state.heldBuild !== this.state.latestBuild) {
+          this.state.heldBuild = this.state.latestBuild;
+          this.save();
+          this.audit.record(null, "game.update.held", null, { latest: this.state.latestBuild, installed, servers: held });
+        }
+        return;
+      }
     }
     if (this.gate.busy) return; // something else is going on; try next minute
 

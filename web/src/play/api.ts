@@ -112,6 +112,7 @@ export interface Match extends Teams {
 export interface State {
   title: string;
   enabled: boolean;
+  testMode: boolean;
   me: {
     steamId: string;
     name: string;

@@ -111,6 +111,10 @@ const SECTIONS: Section[] = [
         text: "Off, Only tell me (notify), Install when no players are online (with a longest wait, after which it updates anyway), or Install right away. It checks Steam for a new build on a schedule.",
       },
       {
+        term: "Wait for me when servers use CounterStrikeSharp or Metamod",
+        text: "On by default. A new CS2 build often breaks these plugins until their makers release a fix, and then every server crashes on start. While any server has one of them installed, an automatic update isn't installed: the page shows A CS2 update is waiting for you (listing those servers), and Activity and Discord tell you once per build. Update the plugins when a fix is out, then press Update now. Turn it off to let automatic updates install anyway.",
+      },
+      {
         term: "Result",
         text: "Finished: CS2 is updated and every server that was running is back up and answering (the game replies to a server query, not just running in systemd). CS2 updated, N servers down: the files are updated but a server didn't come back (hover to see why; usually a plugin such as CounterStrikeSharp needs an update for the new CS2 version: update it on the server's Plugins tab, then start the server). Failed: SteamCMD failed, or a server couldn't be stopped (then nothing was updated and the stopped servers are started again).",
       },
@@ -225,6 +229,10 @@ const SECTIONS: Section[] = [
       {
         term: "Map images",
         text: "Thumbnails on the map veto, match cards and recent matches, plus the T and CT icons. Built-in maps' pictures come from the game files (read again after every CS2 update, or with Read images from the game files again), Workshop maps' from Steam. Upload your own for any map or side; remove the upload to go back to the automatic one. Without a picture the site shows a tile with the map's name, and coloured T/CT badges.",
+      },
+      {
+        term: "Test mode",
+        text: "For trying a lobby alone. One ready player can make teams (or a Fixed teams captain can start with the other team empty), and bots fill every other spot, also in 1v1. A team of only bots gets a bot captain that bans and picks its side within 2 seconds; your own turns keep the normal time. Test matches are left out of the site's recent matches and players' own history, and are marked Test in the panel's match list. The site and the Matchmaking page show a banner while it's on: turn it off before players come.",
       },
       { term: "Layout", text: "Classic (lobby cards) or Status board (a Ready to play? checklist next to a table of all lobbies)." },
       {

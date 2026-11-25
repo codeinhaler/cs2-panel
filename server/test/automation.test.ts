@@ -172,6 +172,38 @@ describe("automatic CS2 updates", () => {
     expect(start.details.trigger).toBe("new CS2 build 20001300");
   });
 
+  it("holds an automatic update while a server runs CounterStrikeSharp or Metamod, and tells about it once", async () => {
+    const c = await login();
+    const s = await runningServer(c);
+    (app.services.servers as any).store.db
+      .prepare(
+        "INSERT INTO plugin_installs (server_id, plugin_id, name, version, asset, files) VALUES (?, 'counterstrikesharp', 'CounterStrikeSharp', 'v1.0.380', 'x.zip', '[]')",
+      )
+      .run(s.id);
+    await call(c, "PUT", "/api/game/auto", { policy: "now", checkMinutes: 10, maxWaitMinutes: 60, warnSeconds: 0 });
+    host.latestBuildId = "20001300";
+    await app.services.automation.tick(t(12));
+    await app.services.automation.tick(t(12, 1));
+    expect(host.calls).not.toContain("steam-update");
+    const a = await auto(c);
+    expect(a).toMatchObject({ updateAvailable: true, heldFor: ["A"], deadline: null });
+    const held = (await audit(c)).filter((e) => e.action === "game.update.held");
+    expect(held).toHaveLength(1);
+    expect(held[0]!.details).toMatchObject({ latest: "20001300", servers: ["A"] });
+
+    // Update now still works by hand.
+    expect((await call(c, "POST", "/api/game/update", { validate: false, warnSeconds: 0 })).status).toBe(200);
+    await updateDone();
+    expect(await auto(c)).toMatchObject({ installedBuild: "20001300", updateAvailable: false, heldFor: [] });
+
+    // With the hold off, it installs on its own as before.
+    await call(c, "PUT", "/api/game/auto", { policy: "now", checkMinutes: 10, maxWaitMinutes: 60, warnSeconds: 0, holdForPlugins: false });
+    host.latestBuildId = "20001400";
+    await app.services.automation.tick(t(12, 20));
+    await updateDone();
+    expect(app.services.updater.job.trigger).toBe("new CS2 build 20001400");
+  });
+
   it("when-empty: waits for players to leave, or the longest wait", async () => {
     const c = await login();
     await runningServer(c);
@@ -234,7 +266,12 @@ describe("automatic CS2 updates", () => {
     const m = await login(MOD);
     expect((await call(m, "PUT", "/api/game/auto", { policy: "now", checkMinutes: 10, maxWaitMinutes: 60, warnSeconds: 0 })).status).toBe(403);
     const r = await call(c, "PUT", "/api/game/auto", { policy: "now", checkMinutes: 1, maxWaitMinutes: 99999, warnSeconds: 60 });
-    expect(r.body.auto.settings).toEqual({ policy: "now", checkMinutes: 5, maxWaitMinutes: 1440, warnSeconds: 60 });
+    expect(r.body.auto.settings).toEqual({ policy: "now", checkMinutes: 5, maxWaitMinutes: 1440, warnSeconds: 60, holdForPlugins: true });
+    const off = await call(c, "PUT", "/api/game/auto", { policy: "now", checkMinutes: 10, maxWaitMinutes: 60, warnSeconds: 60, holdForPlugins: false });
+    expect(off.body.auto.settings.holdForPlugins).toBe(false);
+    // Left out, it keeps what was saved.
+    const kept = await call(c, "PUT", "/api/game/auto", { policy: "now", checkMinutes: 10, maxWaitMinutes: 60, warnSeconds: 60 });
+    expect(kept.body.auto.settings.holdForPlugins).toBe(false);
   });
 });
 

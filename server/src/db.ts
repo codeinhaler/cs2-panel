@@ -294,6 +294,9 @@ const MIGRATIONS: string[] = [
   CREATE INDEX mm_match_stats_match ON mm_match_stats(match_id);
   CREATE INDEX mm_match_stats_player ON mm_match_stats(steam_id);
   `,
+  /* 17: test-mode matches (bots fill everything; kept out of the site's match lists) */ `
+  ALTER TABLE mm_matches ADD COLUMN test INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 export function openDb(file: string): Db {

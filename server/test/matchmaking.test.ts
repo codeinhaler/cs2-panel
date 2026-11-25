@@ -1150,6 +1150,85 @@ describe("matchmaking site", () => {
     expect((await admin(owner, "PUT", "/api/matchmaking", { settings: { ...fresh, title: "Changed" } })).status).toBe(200);
   });
 
+  it("test mode: one player makes teams, bots play the rest, a bot captain bans within 2 seconds, and the match stays out of the lists", async () => {
+    const owner = await adminCookie();
+    const serverId = await setupServer(owner);
+    await enable(owner, [serverId], { vetoSeconds: 30 });
+    const a = await playerCookie(P[0]!, "Alpha");
+    await play(a, "POST", "/api/lobby/join");
+    // Normally one player can't.
+    expect((await play(a, "POST", "/api/teams")).body.error).toMatch(/At least 2/);
+
+    await enable(owner, [serverId], { vetoSeconds: 30, testMode: true });
+    expect((await play(a, "GET", "/api/state")).body.testMode).toBe(true);
+    expect((await play(a, "POST", "/api/teams")).status).toBe(200);
+    const draft = (await play(a, "GET", "/api/state")).body.drafts[0];
+    const { matchId } = (await play(a, "POST", `/api/teams/${draft.id}/start`)).body;
+    let m = (await play(a, "GET", "/api/state")).body.matches[0];
+    expect(m.id).toBe(matchId);
+    const mine = m.teamA.some((p: any) => p.steamId === P[0]) ? "a" : "b";
+    const bots = mine === "a" ? "b" : "a";
+    expect(m[mine === "a" ? "teamA" : "teamB"]).toHaveLength(5);
+    expect(m[bots === "a" ? "teamA" : "teamB"].every((p: any) => p.steamId === "BOT")).toBe(true);
+    expect(m[bots === "a" ? "captainA" : "captainB"]).toBe("BOT");
+    expect(m.bots).toMatchObject({ on: true, counts: { [mine]: 4, [bots]: 5 } });
+
+    // The bot's turn takes 2 seconds; the player's own turn the normal 30.
+    if (m.turn === mine) {
+      expect(m.deadline - now).toBe(30_000);
+      expect((await play(a, "POST", `/api/matches/${matchId}/ban`, { map: m.remaining[0] })).status).toBe(200);
+      m = (await play(a, "GET", "/api/state")).body.matches[0];
+    }
+    expect(m.turn).toBe(bots);
+    expect(m.deadline - now).toBe(2000);
+    now += 2000;
+    await app.services.matchmaking.tick();
+    m = (await play(a, "GET", "/api/state")).body.matches[0];
+    expect(m.bans.at(-1)).toMatchObject({ by: bots, auto: true });
+
+    // Kept out of the site's lists, marked in the panel.
+    (app.services.servers as any).store.db.prepare("UPDATE mm_matches SET status = 'over' WHERE id = ?").run(matchId);
+    expect((await play(null, "GET", "/api/history")).body.matches).toEqual([]);
+    expect((await play(a, "GET", "/api/history?mine=1")).body.matches).toEqual([]);
+    expect((await admin(owner, "GET", "/api/matchmaking")).body.history[0]).toMatchObject({ id: matchId, test: true });
+  });
+
+  it("test mode: 1v1 against a bot, and a Fixed teams captain can start alone", async () => {
+    const owner = await adminCookie();
+    const serverId = await setupServer(owner);
+    await enable(owner, [serverId], { testMode: true });
+    const a = await playerCookie(P[0]!, "Alpha");
+    await play(a, "POST", "/api/lobby/join", { mode: "duel" });
+    expect((await play(a, "POST", "/api/teams")).status).toBe(200);
+    const draft = (await play(a, "GET", "/api/state")).body.drafts[0];
+    expect([...draft.teamA, ...draft.teamB].map((p: any) => p.steamId).sort()).toEqual([P[0], "BOT"].sort());
+    const { matchId } = (await play(a, "POST", `/api/teams/${draft.id}/start`)).body;
+    const m = (await play(a, "GET", "/api/state")).body.matches[0];
+    expect(m.bots).toMatchObject({ on: true });
+    expect((await play(a, "POST", `/api/matches/${matchId}/cancel`)).status).toBe(200);
+    await settle();
+
+    await enable(owner, [serverId], {
+      testMode: true,
+      modes: {
+        competitive: { enabled: false, maps: ["de_mirage"] },
+        wingman: { enabled: false, maps: ["de_vertigo"] },
+        duel: { enabled: false, maps: ["de_vertigo"] },
+        fixed5: { enabled: true, maps: ["de_mirage", "de_inferno", "de_nuke"] },
+        fixed2: { enabled: false, maps: ["de_vertigo"] },
+      },
+    });
+    const b = await playerCookie(P[1]!, "Bravo");
+    await play(b, "POST", "/api/lobby/join", { mode: "fixed5" });
+    expect((await play(b, "GET", "/api/state")).body.fixed.reason).toMatch(/Test mode/);
+    const res = await play(b, "POST", "/api/lobby/start");
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.matchId).toBeGreaterThan(0);
+    const fm = (await play(b, "GET", "/api/state")).body.matches[0];
+    expect(fm.captainB).toBe("BOT");
+    expect(fm.bots.counts).toEqual({ a: 4, b: 5 });
+  });
+
   it("only the captains can cancel a match or start it without waiting", async () => {
     const owner = await adminCookie();
     await enable(owner, [await setupServer(owner)]);

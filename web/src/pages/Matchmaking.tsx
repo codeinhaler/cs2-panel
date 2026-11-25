@@ -169,6 +169,11 @@ export function MatchmakingPage() {
           <p>A page where players sign in with Steam, get put in even teams by their Premier rating, ban maps and join a server.</p>
         </div>
       </div>
+      {data.settings.testMode && (
+        <div className="notice warn" style={{ marginBottom: 16 }}>
+          <b>Test mode is on.</b> One ready player can make teams and bots fill the rest. Turn it off on the Site tab before players come.
+        </div>
+      )}
 
       <nav className="tabs" aria-label="Matchmaking sections">
         {TABS.map((t) => (
@@ -235,6 +240,18 @@ export function MatchmakingPage() {
                   disabled={!manage}
                 />
                 <small>A captain who runs out of time bans a random map. Also the time to pick a side.</small>
+              </label>
+              <label className="check wide">
+                <input type="checkbox" checked={!!form.testMode} onChange={(e) => set("testMode", e.target.checked)} disabled={!manage} />
+                <span>
+                  <b>Test mode</b>
+                  <br />
+                  <span className="hint">
+                    For trying a lobby alone: one ready player can make teams (or start a Fixed teams match), and bots fill every other spot, also in 1v1. A
+                    team of only bots gets a bot captain, which bans and picks its side within 2 seconds. Test matches are left out of the site's match lists.
+                    The site shows a banner while it's on.
+                  </span>
+                </span>
               </label>
             </div>
           </div>
@@ -1044,6 +1061,14 @@ function HistorySection({ info }: { info: MatchmakingInfo }) {
                 </td>
                 <td>
                   {h.teamA.map((p) => p.name).join(", ")} <span className="hint">vs</span> {h.teamB.map((p) => p.name).join(", ")}
+                  {h.test && (
+                    <>
+                      {" "}
+                      <span className="state-pill" data-state="inactive">
+                        Test
+                      </span>
+                    </>
+                  )}
                 </td>
                 <td>{serverName(h.serverId)}</td>
                 <td>

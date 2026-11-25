@@ -42,7 +42,7 @@ import { CommandSchema, commandPermission, gameModeLine, rconFor } from "./serve
 import { Settings } from "./settings.js";
 import { Automation } from "./automation/index.js";
 import { humanCounter } from "./automation/humans.js";
-import { UpdateWatcher, type UpdatePolicy } from "./automation/updates.js";
+import { FRAGILE_PLUGINS, UpdateWatcher, type UpdatePolicy } from "./automation/updates.js";
 import { RestartScheduler } from "./automation/restarts.js";
 import { Monitor, MACHINE, RANGES, type Range } from "./monitor/monitor.js";
 import { queryInfo, type A2sInfo } from "./game/a2s.js";
@@ -191,7 +191,12 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     path.join(config.dataDir, "backups"),
   );
   const automation = new Automation(
-    new UpdateWatcher(settings, files, host, updater, gate, serverStore, humans, audit),
+    new UpdateWatcher(settings, files, host, updater, gate, serverStore, humans, audit, () =>
+      serverStore
+        .list()
+        .filter((s) => plugins.installedIds(s.id).some((id) => FRAGILE_PLUGINS.includes(id)))
+        .map((s) => s.name),
+    ),
     new RestartScheduler(db, settings, servers, host, gate, updater, humans, rcon, audit, deps.automationSleep),
     monitor,
     backups,
@@ -1203,6 +1208,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         checkMinutes: z.number().int(),
         maxWaitMinutes: z.number().int(),
         warnSeconds: z.number().int(),
+        holdForPlugins: z.boolean().optional(),
       })
       .parse(req.body);
     automation.updates.setConfig(body, user.id);

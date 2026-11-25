@@ -487,6 +487,7 @@ export interface UpdateSettings {
   checkMinutes: number;
   maxWaitMinutes: number;
   warnSeconds: number;
+  holdForPlugins: boolean;
 }
 
 export interface AutoUpdateStatus {
@@ -500,6 +501,7 @@ export interface AutoUpdateStatus {
   updateAvailable: boolean;
   checking: boolean;
   deadline: string | null;
+  heldFor: string[];
 }
 
 export interface GameState {
@@ -556,6 +558,7 @@ export interface MatchmakingSettings {
   casual: { name: string; serverIds: number[] };
   gameAddress: string;
   vetoSeconds: number;
+  testMode: boolean;
   /** Discord: one voice-channel link per team on each match server (keyed by server ID), plus an invite link. */
   discord: {
     invite: string;
@@ -659,6 +662,7 @@ export interface MatchmakingInfo {
     note: string | null;
     createdAt: string;
     endedAt: string | null;
+    test?: boolean;
   }[];
 }
 
